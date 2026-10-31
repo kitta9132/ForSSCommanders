@@ -1,0 +1,68 @@
+{
+  "schema": 1,
+  "apiVersion": "1.0",
+  "battleId": "synthetic-example-only",
+  "active": true,
+  "ts": 123.4,
+  "self": {
+    "teamId": 0,
+    "position": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "isObserver": false
+  },
+  "ships": [],
+  "torpedoes": [
+    {
+      "uiId": 123,
+      "ownerId": 456,
+      "ownerTeamId": 0,
+      "ownerType": "Ship",
+      "shotId": 789,
+      "type": "normal",
+      "position": [
+        12.0,
+        -3.0,
+        25.0
+      ],
+      "relation": 1,
+      "owner": null,
+      "isOwn": null
+    }
+  ],
+  "torpedoStatus": {
+    "available": true,
+    "status": "available",
+    "source": "battle.getAllTorpedoes"
+  },
+  "torpedoArmament": {
+    "available": true,
+    "modulesStatus": "available",
+    "modules": [],
+    "selectedAmmoStatus": "unknown",
+    "selectedAmmoId": null,
+    "ammoParamsStatus": "unknown",
+    "ammoParams": null
+  },
+  "damage": {
+    "inflicted": {},
+    "received": {},
+    "teamTotal": {}
+  },
+  "ballistics": {
+    "available": false
+  },
+  "diag": {
+    "totalShips": 0,
+    "allies": 0,
+    "alliesVisible": 0,
+    "enemies": 0,
+    "enemiesVisible": 0,
+    "ghosts": 0,
+    "mapCalib": null,
+    "mapSamples": 0,
+    "uiHealth": 0
+  }
+}

@@ -1,0 +1,22 @@
+# Runtime telemetry and personal battle recordings
+**/recordings/
+**/state.json
+**/meta.json
+**/state - *.json
+**/config.ini
+**/_wowsmod_backups/
+*.jsonl
+*.log
+*.wowsreplay
+# Distribution archives and generated source/index bundles
+*.zip
+**/ALL_SOURCE.txt
+**/FILES.md
+**/SHA256SUMS.txt
+# Python/editor artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+.vscode/
+.idea/

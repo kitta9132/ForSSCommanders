@@ -1,0 +1,22 @@
+{
+  "schema": 1,
+  "apiVersion": "1.0",
+  "battleId": "synthetic-example-only",
+  "active": false,
+  "ts": 180.0,
+  "ships": [],
+  "self": null,
+  "torpedoes": [],
+  "torpedoStatus": {
+    "available": false,
+    "status": "unknown"
+  },
+  "torpedoArmament": {
+    "available": false
+  },
+  "damage": {
+    "inflicted": {},
+    "received": {},
+    "teamTotal": {}
+  }
+}
