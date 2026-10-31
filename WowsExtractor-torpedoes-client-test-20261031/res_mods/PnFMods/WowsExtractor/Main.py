@@ -6,7 +6,7 @@
 
 API_VERSION = 'API_v1.0'
 MOD_NAME = 'WowsExtractor'
-MOD_VERSION = '0.3.1-map-motion'
+MOD_VERSION = '0.3.2-observations'
 
 # ---------------------------------------------------------------------------
 # WowsExtractor -- in-game data collector for the "8111 for WoWS" project.
@@ -74,14 +74,10 @@ except:
 
 try:
     from .damage_tracker import (
-        DamageTracker, roster_ids_from_avatar, guess_ghost_victim,
-        extract_vehicle_id, dark_last_seen_entries, preferred_ghost_shot,
-        ghost_impact_position, consume_ghost_impact)
+        DamageTracker, roster_ids_from_avatar)
 except:
     from damage_tracker import (
-        DamageTracker, roster_ids_from_avatar, guess_ghost_victim,
-        extract_vehicle_id, dark_last_seen_entries, preferred_ghost_shot,
-        ghost_impact_position, consume_ghost_impact)
+        DamageTracker, roster_ids_from_avatar)
 
 # One nonce per game/mod load prevents fallback IDs repeating after a restart.
 SESSION_NONCE = create_session_nonce()
@@ -127,7 +123,6 @@ except:
     CC = None
 
 STATE_INTERVAL = 0.1          # default seconds between state.json writes (~10 Hz); see config.ini
-LAST_SEEN_TTL = 60.0          # default: keep reporting a dark ship's last-known spot this long; see config.ini
 META_RETRY_INTERVAL = 0.5     # battleInfo/map can be late in very small battles
 META_RETRY_SECONDS = 12.0
 SCHEMA_VERSION = 1
@@ -694,7 +689,6 @@ class Collector(object):
         self._battleId = None
         self._selfTeam = _UNSET       # memoized once per snapshot build
         self._stateInterval = STATE_INTERVAL
-        self._lastSeenTtl = LAST_SEEN_TTL
         self._lastMetaWrite = 0.0
         self._metaRetryUntil = 0.0
         self._metaReady = False
@@ -704,16 +698,6 @@ class Collector(object):
         self._torpedoes = TorpedoTelemetry(battle, constants)
         self._torpedoMotion = TorpedoMotion()
         self._mapCalibration = MapCalibration()
-        # key -> {identity{...}, pos, yaw, health, ts}; last spot of each ship we
-        # have seen, so enemies that lit up then went dark keep a "ghost" marker.
-        self._lastSeen = {}
-        # v/u/p aliases of ships that had a live position on the last tick.
-        # last-seen also keeps spotted ships; ghost matching must skip these.
-        self._visibleShipKeys = set()
-        # Ships observed dead this battle. Prevents a sunk enemy that drops out of
-        # getAllShips() from being resurrected as a last-seen ("灭点") ghost.
-        self._deadKeys = set()
-        self._lastShellImpact = None
         # cached map->world affine (per battle/map); derived at runtime from ships
         # that expose BOTH getPosition() (world) and the mapPosition component.
         self._mapTransform = None
@@ -747,7 +731,6 @@ class Collector(object):
         cfg = _load_mod_config()
         # clamp the interval so a typo (0 / negative) can't hammer the disk
         self._stateInterval = max(_cfg_float(cfg, 'state_interval', STATE_INTERVAL), 0.02)
-        self._lastSeenTtl = _cfg_float(cfg, 'last_seen_ttl', LAST_SEEN_TTL)
 
     # -- paths --------------------------------------------------------------
     def _resolve_paths(self):
@@ -769,10 +752,6 @@ class Collector(object):
         self._mapCalibration.clear()
         self._torpedoMotion.clear()
         self._damage.clear()
-        self._lastSeen = {}
-        self._visibleShipKeys = set()
-        self._deadKeys = set()
-        self._lastShellImpact = None
         self._mapTransform = None
         self._lastMetaWrite = 0.0
         self._metaRetryUntil = 0.0
@@ -836,10 +815,6 @@ class Collector(object):
         self._torpedoMotion.clear()
         self._stop_tick()
         self._ballistics.stop()
-        self._lastSeen = {}
-        self._visibleShipKeys = set()
-        self._deadKeys = set()
-        self._lastShellImpact = None
         self._mapTransform = None
         # write one final snapshot marking the battle inactive (through the same
         # single writer, so it can't race a still-queued "active" frame)
@@ -925,58 +900,12 @@ class Collector(object):
                 self._damage.remember(rec[0], rec[1], rec[2])
 
     def _on_damages(self, victimId, damages):
-        impact = consume_ghost_impact(
-            self._lastShellImpact, damages, now=_now())
-        # A damage packet gets one chance to consume the shell context. Keeping
-        # it beyond this callback can attach the next salvo to the wrong hull.
-        self._lastShellImpact = None
-        fallback = None
-        if extract_vehicle_id(victimId) is None:
-            fallback = self._ghost_victim_fallback(impact)
-        _try(lambda: self._damage.on_damages(
-            victimId, damages, fallback_victim=fallback))
+        _try(lambda: self._damage.on_damages(victimId, damages))
 
     def _on_shell_info(self, victimId, shooterId, ammoId=None, matId=None,
                        shotId=None, booleans=None, damage=0, shotPosition=None,
                        *args):
-        # Per-shell confirmation of our (and nearby) hits. Fills in a main
-        # battery salvo when onReceiveDamagesOnShip keeps only the
-        # simultaneous secondary packet for a different target.
-        # When the victim is 灭点, victimId is often 0 -- match the impact
-        # against last-seen ghosts so the salvo still counts.
-        impact = preferred_ghost_shot(
-            shotPosition, self._lastShellImpact,
-            shooter_id=shooterId, shot_id=shotId, now=_now())
-        self._lastShellImpact = impact
-        impact_position = ghost_impact_position(impact)
-        fallback = None
-        if extract_vehicle_id(victimId) is None:
-            fallback = self._ghost_victim_fallback(impact_position)
-        _try(lambda: self._damage.on_shell(
-            victimId, shooterId, damage, fallback_victim=fallback))
-
-    def _ghost_victim_fallback(self, shot_position=None):
-        """Vehicle id of a last-seen (灭点) enemy, or None.
-
-        Used when ModsAPI omits the victim on a hit against an unspotted
-        ship. Remember the ghost's ids so DamageTracker can resolve them.
-        Only currently-dark last-seen rows are eligible; spotted ships stay
-        in _lastSeen for TTL but must not steal the match.
-        """
-        try:
-            all_seen = self._lastSeen
-            seen_rows = list(all_seen.values())
-            visible = self._visibleShipKeys
-        except Exception:
-            return None
-        for seen in seen_rows:
-            ident = (seen or {}).get('identity') or {}
-            vid = ident.get('vehicleId')
-            pid = ident.get('playerId')
-            if vid is not None and pid is not None:
-                self._damage.remember(vid, pid, ident.get('teamId'))
-        dark = dark_last_seen_entries(all_seen, visible)
-        return guess_ghost_victim(dark, shot_position)
+        _try(lambda: self._damage.on_shell(victimId, shooterId, damage))
 
     # -- state output -------------------------------------------------------
     def _write_state(self, snap):
@@ -1312,91 +1241,6 @@ class Collector(object):
         apply_ui_health(data, ui_hp)
         return data if data else None
 
-    def _ship_key(self, entry):
-        """Stable per-battle key for last-seen tracking (prefixed to avoid
-        collisions between different id namespaces)."""
-        keys = self._ship_keys(entry)
-        return keys[0] if keys else None
-
-    def _ship_keys(self, entry):
-        """All id aliases for a ship row / identity dict."""
-        keys = []
-        if not entry:
-            return keys
-        for k in ('vehicleId', 'uiId', 'playerId'):
-            v = entry.get(k)
-            if v is not None:
-                keys.append(k[0] + str(v))
-        return keys
-
-    def _entry_is_dead(self, entry):
-        """True when the ship should never keep a last-seen ghost.
-
-        Use == so integer 0 from some client builds counts as dead; `is False`
-        would miss that and remember the wreck as a 灭点.
-        """
-        if not entry:
-            return False
-        alive = entry.get('alive')
-        if alive == False or alive == 0:
-            return True
-        health = entry.get('health')
-        try:
-            if health is not None and float(health) <= 0:
-                return True
-        except:
-            pass
-        return False
-
-    def _forget_ship(self, entry):
-        """Drop last-seen memory for every id alias of this ship and mark dead."""
-        keys = set(self._ship_keys(entry))
-        for key in list(self._lastSeen.keys()):
-            ident = self._lastSeen[key].get('identity') or {}
-            ident_keys = self._ship_keys(ident)
-            if key in keys or keys.intersection(ident_keys):
-                keys.update(ident_keys)
-                keys.add(key)
-        for key in keys:
-            self._deadKeys.add(key)
-            if key in self._lastSeen:
-                del self._lastSeen[key]
-
-    def _remember(self, key, entry, pos, now):
-        self._lastSeen[key] = {
-            'identity': {
-                'uiId': entry.get('uiId'),
-                'vehicleId': entry.get('vehicleId'),
-                'playerId': entry.get('playerId'),
-                'teamId': entry.get('teamId'),
-                'relation': entry.get('relation'),
-                'name': entry.get('name'),
-                'shipType': entry.get('shipType'),
-            },
-            'pos': pos,
-            'positionSource': entry.get('positionSource'),
-            'nx': entry.get('nx'),
-            'ny': entry.get('ny'),
-            'yaw': entry.get('yaw'),
-            'health': entry.get('health'),
-            'ts': now,
-        }
-
-    def _apply_ghost(self, target, seen, now):
-        """Attach lastPosition/staleSeconds fields onto target from a cache entry."""
-        if seen.get('pos') is not None:
-            target['lastPosition'] = seen['pos']
-            target['lastPositionSource'] = seen.get('positionSource')
-        if seen.get('nx') is not None and seen.get('ny') is not None:
-            target['lastNx'] = seen['nx']
-            target['lastNy'] = seen['ny']
-        if seen.get('yaw') is not None:
-            target['lastYaw'] = seen['yaw']
-        if seen.get('health') is not None:
-            target['lastHealth'] = seen['health']
-        target['lastSeenTs'] = seen['ts']
-        target['staleSeconds'] = now - seen['ts']
-
     def _position_from_obj(self, obj):
         """Extract world position from a ship-like object or mapping."""
         if obj is None:
@@ -1490,12 +1334,13 @@ class Collector(object):
         convert to world coordinates via a per-battle calibration (see
         _fit_map_transform)."""
         out = {}
+        self._mapVisibility = {}
         if CC is None:
             return out
         mpKey = _get(CC, 'mapPosition')
         avKey = _get(CC, 'avatar')
         visKey = _get(CC, 'visibility')
-        if mpKey is None or avKey is None:
+        if avKey is None:
             return out
         for entity in _try(lambda: dataHub.getEntityCollections('avatar'), []) or []:
             a = _try(lambda e=entity: e[avKey])
@@ -1506,13 +1351,16 @@ class Collector(object):
                 pid = _get(a, 'id')
             if pid is None:
                 continue
+            raw_visibility = {}
             if visKey is not None:
                 vis = _try(lambda e=entity: e[visKey])
-                # Last-visible markers can keep a stale mapPosition; live state
-                # should only use positions the game currently marks on-map.
-                if vis is not None and _get(vis, 'mapVisible') == False:
-                    continue
-            comp = _try(lambda e=entity: e[mpKey])
+                if vis is not None:
+                    for name in ('mapVisible', 'isVisible', 'isShipVisible'):
+                        value = _get(vis, name)
+                        if isinstance(value, (bool, int, float)):
+                            raw_visibility[name] = value
+            self._mapVisibility[pid] = raw_visibility
+            comp = _try(lambda e=entity: e[mpKey]) if mpKey is not None else None
             if comp is None:
                 continue
             xy = _point_xy(_get(comp, 'position'))
@@ -1596,7 +1444,7 @@ class Collector(object):
             infos.append((ship, vehId, player, pid, worldPos))
             if worldPos and pid is not None:
                 mp = mapIndex.get(pid)
-                if mp is not None:
+                if mp is not None and self._mapVisibility.get(pid, {}).get('mapVisible') != False:
                     calib.append((mp[0], mp[1], worldPos[0], worldPos[2]))
         # Accumulate spatially distinct samples across frames, including self.
         # The adapter validates geometry/holdout errors before accepting a fit.
@@ -1605,8 +1453,6 @@ class Collector(object):
 
         # -- pass 2: build per-ship entries --------------------------------------
         out = []
-        seen_keys = set()
-        visible_keys = set()
         nAlly = 0
         nAllyVis = 0
         nEnemy = 0
@@ -1620,6 +1466,25 @@ class Collector(object):
             entry['teamId'] = teamId
             entry['relation'] = self._relation(teamId)
             entry['alive'] = _try(lambda: ship.isAlive())
+            ui_visibility = self._mapVisibility.get(pid, {})
+            api_visibility = {}
+            for name in ('isVisible', 'isShipVisible'):
+                value = _get(ship, name)
+                if isinstance(value, (bool, int, float)):
+                    api_visibility[name] = value
+            raw_map_visible = ui_visibility.get('mapVisible')
+            # This is a UI flag, not an inferred spotting/server state.
+            map_visible = (bool(raw_map_visible) if raw_map_visible in (True, False)
+                           and raw_map_visible is not None else None)
+            entry['visibility'] = {
+                'source': 'dataHub.visibility',
+                'status': 'available' if ui_visibility else 'unknown',
+                'raw': ui_visibility,
+                'shipApi': api_visibility,
+                'semantics': 'unverified',
+            }
+            entry['visible'] = map_visible
+            entry['visibleSource'] = 'dataHub.visibility.mapVisible' if map_visible is not None else None
             if player is not None:
                 entry['playerId'] = pid
                 if entry.get('teamId') is None:
@@ -1629,6 +1494,8 @@ class Collector(object):
             pos = worldPos
             entry['positionSource'] = 'shipOrPlayerApi' if worldPos else None
             mp = mapIndex.get(pid) if pid is not None else None
+            if mp is not None:
+                entry['mapPositionRaw'] = [mp[0], mp[1]]
             norm = _map_norm_xy(mp[0], mp[1]) if mp is not None else None
             if norm is not None:
                 # mapPosition is already minimap-normalized; this keeps 1v1
@@ -1646,18 +1513,14 @@ class Collector(object):
                     entry['positionSource'] = 'calibratedMapPosition'
             if pos:
                 entry['position'] = pos
-                entry['visible'] = True
-            elif norm is not None:
-                entry['visible'] = True
-            else:
-                entry['visible'] = False
+            entry['positionAvailable'] = bool(pos or norm is not None)
             for k in ('yaw', 'health', 'maxHealth', 'name'):
                 v = _get(ship, k)
                 if v is not None:
                     entry[k] = v
             # 3D ship.health is empty on some builds; fill from dataHub avatar
             # health (the component TTaroTeamPanel's side bars already use).
-            apply_ui_health(entry, ui_hp, for_unspotted=not entry.get('visible'))
+            apply_ui_health(entry, ui_hp, for_unspotted=entry.get('visible') is False)
             # spotted-only enemies have no ship.yaw; fall back to mapPosition yaw
             if entry.get('yaw') is None and mp is not None and mp[2] is not None:
                 entry['yaw'] = mp[2]
@@ -1671,90 +1534,15 @@ class Collector(object):
             rel = entry.get('relation')
             if rel == 2:
                 nEnemy += 1
-                if pos or norm is not None:
+                if entry.get('visible') is True:
                     nEnemyVis += 1
             elif rel == 1:
                 nAlly += 1
-                if pos or norm is not None:
+                if entry.get('visible') is True:
                     nAllyVis += 1
 
-            keys = self._ship_keys(entry)
-            for key in keys:
-                seen_keys.add(key)
-            key = keys[0] if keys else None
-            if self._entry_is_dead(entry):
-                # sunk ship: drop any ghost memory, no last-seen marker
-                entry['alive'] = False
-                self._forget_ship(entry)
-            elif any(k in self._deadKeys for k in keys):
-                # previously observed dead under another alias; never revive
-                entry['alive'] = False
-                self._forget_ship(entry)
-            elif pos or norm is not None:
-                for vis_key in keys:
-                    visible_keys.add(vis_key)
-                if key is not None:
-                    self._remember(key, entry, pos, now)
-            elif key is not None:
-                # alive but no position this frame -> went dark; reuse last spot
-                seen = self._lastSeen.get(key)
-                if seen is None:
-                    for alt in keys[1:]:
-                        seen = self._lastSeen.get(alt)
-                        if seen is not None:
-                            break
-                if seen is not None:
-                    health = seen.get('health')
-                    try:
-                        dead_hp = health is not None and float(health) <= 0
-                    except:
-                        dead_hp = False
-                    if dead_hp:
-                        entry['alive'] = False
-                        self._forget_ship(entry)
-                    elif (now - seen['ts']) <= self._lastSeenTtl:
-                        self._apply_ghost(entry, seen, now)
-                    else:
-                        self._forget_ship(seen.get('identity') or entry)
             out.append(entry)
 
-        # ships no longer returned by getAllShips() at all: emit ghost-only rows
-        nGhost = 0
-        for key in list(self._lastSeen.keys()):
-            if key in seen_keys or key in self._deadKeys:
-                if key in self._deadKeys and key in self._lastSeen:
-                    del self._lastSeen[key]
-                continue
-            seen = self._lastSeen[key]
-            ident = seen.get('identity') or {}
-            if any(k in self._deadKeys for k in self._ship_keys(ident)):
-                self._forget_ship(ident)
-                continue
-            health = seen.get('health')
-            try:
-                dead_hp = health is not None and float(health) <= 0
-            except:
-                dead_hp = False
-            if dead_hp:
-                self._forget_ship(ident)
-                continue
-            if (now - seen['ts']) > self._lastSeenTtl:
-                del self._lastSeen[key]
-                continue
-            ghost = dict(ident)
-            ghost['alive'] = True
-            ghost['visible'] = False
-            self._apply_ghost(ghost, seen, now)
-            apply_ui_health(ghost, ui_hp, for_unspotted=True)
-            if self._entry_is_dead(ghost):
-                # UI/team panel learned they sank while dark. Emit one dead
-                # row so consumers see True→False, then drop the 灭点 marker.
-                ghost['alive'] = False
-                ghost['visible'] = False
-                self._forget_ship(ghost)
-            out.append(ghost)
-            nGhost += 1
-        self._visibleShipKeys = visible_keys
         nHp = 0
         for row in out:
             if row.get('maxHealth') is not None:
@@ -1765,7 +1553,6 @@ class Collector(object):
             'alliesVisible': nAllyVis,
             'enemies': nEnemy,
             'enemiesVisible': nEnemyVis,
-            'ghosts': nGhost,
             'mapCalib': calibration.get('status'),
             'mapSamples': len(calib),
             'mapCalibration': calibration,

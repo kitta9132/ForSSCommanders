@@ -23,17 +23,12 @@ seen on the minimap, still alive). `onReceiveDamagesOnShip` often never
 fires because the Vehicle entity is not loaded, and `onReceiveShellInfo`
 arrives with victimId 0 / -1. Dropping that packet is how dark-target
 salvos vanish from the running total even though the in-game ribbon
-moved. Count the shell against the shooter anyway, and attribute the
-victim from a last-seen ghost when we can.
+moved. Count the shell against the shooter without inventing a victim.
 """
 
 # ModsAPI sentinel: victim/shooter id when the ship is not currently
 # loaded (灭点, scenario structures, etc.). Not a real vehicle id.
 UNKNOWN_VICTIM = 0
-BIGWORLD_METERS_PER_UNIT = 30.0
-GHOST_MATCH_MAX_DIST_METERS = 2500.0
-GHOST_MATCH_MAX_DIST = GHOST_MATCH_MAX_DIST_METERS / BIGWORLD_METERS_PER_UNIT
-GHOST_IMPACT_MAX_AGE = 1.0
 
 
 def _get_field(obj, *names):
@@ -163,191 +158,6 @@ def merge_ship_and_shell(ship, shell):
     if ship >= shell:
         return ship
     return ship + shell
-
-
-def _xz(pos):
-    """Horizontal (x, z) from a Vector3, [x,y,z] list, or None."""
-    if pos is None:
-        return None
-    try:
-        x = float(pos[0])
-        z = float(pos[2]) if len(pos) > 2 else float(pos[1])
-        return (x, z)
-    except Exception:
-        pass
-    try:
-        return (float(pos.x), float(pos.z))
-    except Exception:
-        return None
-
-
-def ship_alias_keys(ident):
-    """Collector last-seen keys for a ship identity (vehicle / ui / player)."""
-    keys = []
-    if not isinstance(ident, dict):
-        return keys
-    for name in ('vehicleId', 'uiId', 'playerId'):
-        value = ident.get(name)
-        if value is not None:
-            keys.append(name[0] + str(value))
-    return keys
-
-
-def dark_last_seen_entries(last_seen, visible_keys=None):
-    """Last-seen records for ships that are not currently spotted.
-
-    ``last_seen`` is the collector map ``key -> {identity, pos, ...}``.
-    ``visible_keys`` are the same v/u/p aliases stamped this frame for
-    ships that still have a live position. Spotted enemies stay in
-    last-seen for TTL reasons and must not be guessed as 灭点 victims.
-    """
-    visible = visible_keys or set()
-    out = []
-    try:
-        items = last_seen.items()
-    except Exception:
-        return out
-    for key, seen in items:
-        ident = (seen or {}).get('identity') or {}
-        aliases = [key]
-        aliases.extend(ship_alias_keys(ident))
-        spotted = False
-        for alias in aliases:
-            if alias in visible:
-                spotted = True
-                break
-        if spotted:
-            continue
-        out.append(seen)
-    return out
-
-
-def guess_ghost_victim(last_seen_entries, shot_position=None, max_dist=None):
-    """Pick a last-seen (灭点) enemy as the shell victim when ModsAPI omits the id.
-
-    ``last_seen_entries`` is an iterable of collector last-seen records:
-    ``{identity: {vehicleId, relation, ...}, pos: [x,y,z]}``. Only explicit
-    enemies (relation==2) are eligible. Duplicate rows for one vehicle (uiId then
-    vehicleId) count as one ship. With a shot impact, the nearest enemy
-    within ``max_dist`` BigWorld units wins; without one, a single remaining
-    enemy ghost is used. Invalid shot positions are treated as missing.
-    """
-    if max_dist is None:
-        max_dist = GHOST_MATCH_MAX_DIST
-    unique = {}
-    for seen in last_seen_entries or []:
-        ident = None
-        pos = None
-        if isinstance(seen, dict):
-            ident = seen.get('identity') or seen
-            pos = seen.get('pos')
-        if not isinstance(ident, dict):
-            continue
-        if ident.get('relation') != 2:
-            continue
-        vid = extract_vehicle_id(ident.get('vehicleId'))
-        if vid is None:
-            vid = extract_vehicle_id(ident.get('vehicleID'))
-        if vid is None:
-            continue
-        if vid not in unique:
-            unique[vid] = pos
-        elif unique[vid] is None and pos is not None:
-            unique[vid] = pos
-    enemies = []
-    for vid, pos in unique.items():
-        enemies.append((vid, pos))
-    if not enemies:
-        return None
-    shot = _xz(shot_position)
-    if shot is None:
-        if len(enemies) == 1:
-            return enemies[0][0]
-        return None
-    best = None
-    best_d = None
-    max_d2 = max_dist * max_dist
-    for vid, pos in enemies:
-        xz = _xz(pos)
-        if xz is None:
-            continue
-        dx = xz[0] - shot[0]
-        dz = xz[1] - shot[1]
-        d2 = dx * dx + dz * dz
-        if d2 > max_d2:
-            continue
-        if best_d is None or d2 < best_d:
-            best_d = d2
-            best = vid
-    if best is not None:
-        return best
-    return None
-
-
-def _impact_is_recent(impact, now, max_age=None):
-    if max_age is None:
-        max_age = GHOST_IMPACT_MAX_AGE
-    if not isinstance(impact, dict):
-        return False
-    try:
-        age = float(now) - float(impact.get('at'))
-    except Exception:
-        return False
-    return 0.0 <= age <= max_age
-
-
-def ghost_impact_position(impact):
-    """Return a cached impact position only when its shape is valid."""
-    if not isinstance(impact, dict):
-        return None
-    position = impact.get('position')
-    return position if _xz(position) is not None else None
-
-
-def preferred_ghost_shot(shot_position, last_impact=None, shooter_id=None,
-                         shot_id=None, now=None, max_age=None):
-    """Impact used to name a 灭点 victim.
-
-    Shell callbacks carry the hit point when ModsAPI argument order is
-    right. Reuse a missing hit point only for the same recent shooter and
-    shot; a naked position cache can otherwise leak across targets.
-    """
-    point = _xz(shot_position)
-    if point is not None:
-        return {
-            'position': [point[0], 0.0, point[1]],
-            'shooterId': extract_vehicle_id(shooter_id),
-            'shotId': _as_id(shot_id),
-            'at': now,
-        }
-    if not _impact_is_recent(last_impact, now, max_age):
-        return None
-    shooter = extract_vehicle_id(shooter_id)
-    shot = _as_id(shot_id)
-    if shooter is None or shot is None:
-        return None
-    if last_impact.get('shooterId') != shooter:
-        return None
-    if last_impact.get('shotId') != shot:
-        return None
-    return last_impact
-
-
-def consume_ghost_impact(last_impact, damages, now=None, max_age=None):
-    """Use one recent impact for a damage packet from the same shooter."""
-    if not _impact_is_recent(last_impact, now, max_age):
-        return None
-    shooter = last_impact.get('shooterId')
-    if shooter is None:
-        return None
-    try:
-        entries = damages or []
-    except Exception:
-        entries = []
-    for entry in entries:
-        if extract_attacker_vehicle_id(entry) == shooter:
-            return ghost_impact_position(last_impact)
-    return None
 
 
 def freeze_damage_packet(victim_vehicle_id, damages):
@@ -512,7 +322,7 @@ class DamageTracker(object):
 
         When the victim is currently unspotted, ModsAPI often passes
         victimId 0. Count the shell against the shooter anyway; pass
-        ``fallback_victim`` (a last-seen ghost id) to name the target.
+        ``fallback_victim`` to name the target if supplied by the caller.
         """
         dmg = extract_damage({'damage': damage})
         if dmg is None:

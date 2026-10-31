@@ -245,3 +245,6 @@ metaは戦闘表示時に書き、遅れて到着する地図情報等のため�
 - `torpedoArmament.available=true`でも、すべての下位項目が取れたとは限りません。下位Statusを確認します。
 - 状態生成の外側の保護で例外を捕捉した場合、torpedoArmamentが `{"available":false}`だけになることがあります。
 - 引数不足等の呼び出し例外はunknown、取得口自体がない場合はunsupportedです。細かい失敗理由をこの版のJSONは出しません。
+# 0.3.2の出力変更について
+
+現行の観測値・可視状態・最終目撃フィールド撤去は [OBSERVATIONS.ja.md](OBSERVATIONS.ja.md) を優先してください。

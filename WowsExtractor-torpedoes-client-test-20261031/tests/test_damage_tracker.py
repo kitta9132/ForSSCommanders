@@ -255,7 +255,7 @@ def test_sentinel_vehicle_ids_are_not_real_entities():
 
 def test_shell_hit_on_unspotted_victim_still_counts_with_fallback():
     """Hitting a 灭点: onReceiveShellInfo fires with victimId=0, but the
-    last-seen ghost still tells us who we shot. That damage must land in
+    caller supplies the victim id. That damage must land in
     the running total -- otherwise every dark-target salvo is silently
     dropped even though the in-game ribbon and damage counter move."""
     tracker = _tracker(live=lambda _vid: None)
@@ -319,7 +319,7 @@ def test_unspotted_shell_plus_later_dot_on_named_victim_adds_dot():
 
 
 def test_unattributed_shell_and_later_dot_keep_both_in_total():
-    """Without a ghost match, the dark salvo still sits in the shooter
+    """Without a victim id, the dark salvo still sits in the shooter
     total; a later named DoT packet is extra, not a replacement."""
     tracker = _tracker(live=lambda _vid: None)
     tracker.remember(77, 901, 1)
@@ -343,58 +343,6 @@ def test_damages_packet_with_sentinel_victim_uses_fallback():
     snap = tracker.snapshot()
     assert snap['inflicted']['537']['total'] == 8800
     assert snap['received']['901']['total'] == 8800
-
-
-def test_guess_ghost_victim_picks_nearest_enemy_last_seen():
-    ghosts = [
-        {'identity': {'vehicleId': 77, 'playerId': 901, 'relation': 2},
-         'pos': [100.0, 0.0, 100.0]},
-        {'identity': {'vehicleId': 88, 'playerId': 902, 'relation': 2},
-         'pos': [800.0, 0.0, 800.0]},
-        {'identity': {'vehicleId': 11, 'playerId': 537, 'relation': 1},
-         'pos': [101.0, 0.0, 101.0]},
-    ]
-    assert D.guess_ghost_victim(ghosts, [110.0, 0.0, 90.0]) == 77
-
-
-def test_guess_ghost_victim_only_accepts_explicit_enemies():
-    ghosts = [
-        {'identity': {'vehicleId': 11, 'relation': 0},
-         'pos': [0.0, 0.0, 0.0]},
-        {'identity': {'vehicleId': 12, 'relation': -1},
-         'pos': [1.0, 0.0, 0.0]},
-        {'identity': {'vehicleId': 77, 'relation': 2},
-         'pos': [2.0, 0.0, 0.0]},
-    ]
-
-    assert D.guess_ghost_victim(ghosts, [0.0, 0.0, 0.0]) == 77
-
-
-def test_guess_ghost_victim_rejects_impact_over_2500_metres_away():
-    ghosts = [
-        {'identity': {'vehicleId': 77, 'relation': 2},
-         'pos': [100.0, 0.0, 0.0]},
-    ]
-
-    assert D.guess_ghost_victim(ghosts, [0.0, 0.0, 0.0]) is None
-
-
-def test_guess_ghost_victim_uses_the_only_enemy_ghost_without_shot_pos():
-    ghosts = [
-        {'identity': {'vehicleId': 77, 'playerId': 901, 'relation': 2},
-         'pos': [100.0, 0.0, 100.0]},
-        {'identity': {'vehicleId': 11, 'playerId': 537, 'relation': 1},
-         'pos': [0.0, 0.0, 0.0]},
-    ]
-    assert D.guess_ghost_victim(ghosts, None) == 77
-
-
-def test_guess_ghost_victim_stays_none_when_several_ghosts_and_no_shot():
-    ghosts = [
-        {'identity': {'vehicleId': 77, 'relation': 2}, 'pos': [0.0, 0.0, 0.0]},
-        {'identity': {'vehicleId': 88, 'relation': 2}, 'pos': [50.0, 0.0, 0.0]},
-    ]
-    assert D.guess_ghost_victim(ghosts, None) is None
 
 
 def test_lookup_accepts_cached_player_id_as_alias():
@@ -434,82 +382,3 @@ def test_prior_named_salvo_does_not_eat_later_unattributed_dark_shell():
     assert tracker.snapshot()['inflicted']['537']['total'] == 25000
 
 
-def test_guess_ghost_victim_dedupes_same_ship_under_two_last_seen_keys():
-    """uiId then vehicleId can leave two last-seen rows for one enemy.
-    Without a shot pos that must still count as the only dark target."""
-    ghosts = [
-        {'identity': {'vehicleId': 77, 'uiId': 5, 'relation': 2},
-         'pos': [0.0, 0.0, 0.0]},
-        {'identity': {'vehicleId': 77, 'uiId': 5, 'relation': 2},
-         'pos': [0.0, 0.0, 0.0]},
-    ]
-    assert D.guess_ghost_victim(ghosts, None) == 77
-
-
-def test_dark_last_seen_entries_skip_ships_that_are_currently_spotted():
-    last_seen = {
-        'v77': {'identity': {'vehicleId': 77, 'playerId': 901, 'relation': 2},
-                'pos': [100.0, 0.0, 100.0]},
-        'v88': {'identity': {'vehicleId': 88, 'playerId': 902, 'relation': 2},
-                'pos': [800.0, 0.0, 800.0]},
-    }
-    dark = D.dark_last_seen_entries(last_seen, visible_keys=set(['v77', 'p901']))
-    assert [e['identity']['vehicleId'] for e in dark] == [88]
-
-
-def test_dark_filter_then_guess_does_not_pick_closer_spotted_enemy():
-    """_lastSeen also stores currently lit ships. Nearest-in-2500m among
-    all of them would mis-attribute a 灭点 hit to a spotted neighbour."""
-    last_seen = {
-        'v11': {'identity': {'vehicleId': 11, 'relation': 2},
-                'pos': [100.0, 0.0, 100.0]},
-        'v77': {'identity': {'vehicleId': 77, 'relation': 2},
-                'pos': [400.0, 0.0, 400.0]},
-    }
-    shot = [110.0, 0.0, 90.0]
-    assert D.guess_ghost_victim(list(last_seen.values()), shot) == 11
-    dark = D.dark_last_seen_entries(last_seen, visible_keys=set(['v11']))
-    assert D.guess_ghost_victim(dark, shot) is None
-
-
-def test_guess_ghost_victim_treats_invalid_shot_position_as_missing():
-    """If ModsAPI argument order is off, yaw/flags must not become a point."""
-    ghosts = [
-        {'identity': {'vehicleId': 77, 'relation': 2}, 'pos': [0.0, 0.0, 0.0]},
-        {'identity': {'vehicleId': 88, 'relation': 2}, 'pos': [50.0, 0.0, 0.0]},
-    ]
-    assert D.guess_ghost_victim(ghosts, 1.57) is None
-    assert D.guess_ghost_victim(ghosts, True) is None
-
-
-def test_preferred_ghost_shot_keeps_a_valid_shell_impact():
-    shot = [110.0, 0.0, 90.0]
-    impact = D.preferred_ghost_shot(
-        shot, shooter_id=1, shot_id=7, now=100.0)
-
-    assert D.ghost_impact_position(impact) == shot
-
-
-def test_preferred_ghost_shot_reuses_only_same_recent_shell():
-    last = D.preferred_ghost_shot(
-        [400.0, 0.0, 400.0], shooter_id=1, shot_id=7, now=100.0)
-
-    assert D.preferred_ghost_shot(
-        None, last, shooter_id=1, shot_id=7, now=100.5) == last
-    assert D.preferred_ghost_shot(
-        None, last, shooter_id=2, shot_id=7, now=100.5) is None
-    assert D.preferred_ghost_shot(
-        None, last, shooter_id=1, shot_id=8, now=100.5) is None
-    assert D.preferred_ghost_shot(
-        None, last, shooter_id=1, shot_id=7, now=101.1) is None
-
-
-def test_damage_packet_uses_only_recent_impact_from_same_shooter():
-    last = D.preferred_ghost_shot(
-        [400.0, 0.0, 400.0], shooter_id=1, shot_id=7, now=100.0)
-    matching = [{'vehicleID': 1, 'damage': 5000}]
-    other = [{'vehicleID': 2, 'damage': 5000}]
-
-    assert D.consume_ghost_impact(last, matching, now=100.5) == [400.0, 0.0, 400.0]
-    assert D.consume_ghost_impact(last, other, now=100.5) is None
-    assert D.consume_ghost_impact(last, matching, now=101.1) is None

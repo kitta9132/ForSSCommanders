@@ -54,8 +54,8 @@ function draw(snapshot, networkError=false){
   for(const s of state?.ships||[]){
     const own=state.self?.playerId!=null&&s.playerId===state.self.playerId;
     const color=own?'#ffffff':s.relation===1?'#66dcff':s.relation===2?'#ff7474':'#e4d790';
-    const ghost=s.visible===false;const p=ghost?pair(s.lastNx,s.lastNy):pair(s.nx,s.ny);
-    add(own?'self':'ship',s,p,ghost?'lastNx/lastNy 最終目撃':'nx/ny 地図位置候補（鮮度未検証）',ghost,s.uiId??s.vehicleId??s.playerId,color);
+    const p=pair(s.nx,s.ny);
+    add(own?'self':'ship',s,p,'nx/ny 取得座標（鮮度未検証）',false,s.uiId??s.vehicleId??s.playerId,color);
   }
   if(state?.torpedoStatus?.available===true)for(const t of state.torpedoes||[]){
     const direct=Array.isArray(t.mapPosition)?pair(t.mapPosition[0],t.mapPosition[1]):null;

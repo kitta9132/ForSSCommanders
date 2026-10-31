@@ -70,8 +70,7 @@ def main():
     from map_calibration import MapCalibration
     geo = ns['Collector'].__new__(ns['Collector'])
     geo._mapCalibration = MapCalibration()
-    geo._lastSeen, geo._deadKeys, geo._visibleShipKeys = {}, set(), set()
-    geo._lastSeenTtl = 60.
+    geo._mapVisibility = {}
     geo._damage = Obj(remember=lambda *args: None)
     geo._relation = lambda team: 1 if team == 0 else 2
     geo._get_ship_position = lambda ship, pid, vid: ship.pos
@@ -93,6 +92,13 @@ def main():
     assert ships[1]['positionSource'] == 'calibratedMapPosition'
     assert abs(ships[1]['position'][0] - 120.) < 1e-6
     assert abs(ships[1]['position'][2] - 120.) < 1e-6
+    ns['battle'].getAllShips = lambda: [own]
+    ships, diagnostics = geo._build_ships(4.)
+    assert len(ships) == 1
+    assert 'ghosts' not in diagnostics
+    assert not any(key in ships[0] for key in (
+        'lastPosition', 'lastPositionSource', 'lastNx', 'lastNy',
+        'lastYaw', 'lastHealth', 'lastSeenTs', 'staleSeconds'))
     print('Collector map integration, source labels and uncalibrated position: OK')
     print('These are offline doubles, not a game client test.')
 

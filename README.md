@@ -1,5 +1,7 @@
 # ForSSCommanders
 
+- [開発タスク・残課題](TASKS.md)（仮マップはパラメーター確認用。本番マップはmod完成後に別途開発）
+
 World of Warshipsの潜水艦向け外部2Dマップと、公開ModsAPIを使う戦闘情報収集modの開発プロジェクトです。
 
 現在のソース・日本語資料は [`WowsExtractor-torpedoes-client-test-20261031/`](WowsExtractor-torpedoes-client-test-20261031/) にあります。
@@ -10,7 +12,7 @@ World of Warshipsの潜水艦向け外部2Dマップと、公開ModsAPIを使う
 
 ## 現在の状態
 
-mod `0.3.1-map-motion`。Steam版build 13357625の訓練戦で、魚雷位置・type、
+mod `0.3.2-observations`（[出力変更](WowsExtractor-torpedoes-client-test-20261031/docs/OBSERVATIONS.ja.md)、新仕様の実機試験は未実施）。旧0.3.1ではSteam版build 13357625の訓練戦で、魚雷位置・type、
 ATM由来の誘導/被発見状態、移動履歴による座標較正などを試験しています。
 簡易2Dマップのグリッドとゲーム内位置が概ね一致することをテスターが目視確認しました。
 12対12・別地図・失探時の鮮度などは未検証です。完成版ではありません。
@@ -40,7 +42,7 @@ cd WowsExtractor-torpedoes-client-test-20261031
 python -m pytest -q
 ```
 
-pytestが必要です。現在132件。Node.jsがない場合は任意のJSロジックテスト1件をスキップします。
+pytestが必要です。現在121件（旧ghost推測の専用テストは機能撤去に伴い削除）。Node.jsがない場合は任意のJSロジックテスト1件をスキップします。
 ゲームmodはPython 2.7想定、外部ツールはPython 3.10以上です。
 
 ## ライセンス・出自

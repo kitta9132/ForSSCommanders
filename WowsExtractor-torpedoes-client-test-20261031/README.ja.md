@@ -1,7 +1,10 @@
 # WowsExtractor 魚雷出力版：実機テスト用パッケージ
 
 作成日：2026-10-31（日本時間）  
-modバージョン：`0.3.1-map-motion` / ModsAPI：`API_v1.0`
+modバージョン：`0.3.2-observations` / ModsAPI：`API_v1.0`
+
+0.3.2は最終目撃キャッシュを撤去し、可視状態と取得座標を分離しました。
+出力の変更点は [OBSERVATIONS.ja.md](docs/OBSERVATIONS.ja.md) を参照（新仕様の実機試験は未実施）。
 
 元仕様と実機取得状況の最新版：[詳細対応表](docs/SPEC_COVERAGE_0.3.1.ja.md)。
 
