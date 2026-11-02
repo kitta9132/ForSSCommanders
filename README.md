@@ -1,18 +1,22 @@
 # ForSSCommanders
 
 - [開発タスク・残課題](TASKS.md)（仮マップはパラメーター確認用。本番マップはmod完成後に別途開発）
+- [開発方針・Git運用](DEVELOPMENT.md)（バージョン更新ごとにメインエージェントがコミット）
 
 World of Warshipsの潜水艦向け外部2Dマップと、公開ModsAPIを使う戦闘情報収集modの開発プロジェクトです。
 
-現在のソース・日本語資料は [`WowsExtractor-torpedoes-client-test-20261031/`](WowsExtractor-torpedoes-client-test-20261031/) にあります。
+目標・共同作業・自律進行・収集層の責務・Git運用は [DEVELOPMENT.md](DEVELOPMENT.md) を参照してください。
 
-- [導入・概要](WowsExtractor-torpedoes-client-test-20261031/README.ja.md)
-- [元仕様との詳細対応表](WowsExtractor-torpedoes-client-test-20261031/docs/SPEC_COVERAGE_0.3.1.ja.md)
-- [簡易2Dマップ](WowsExtractor-torpedoes-client-test-20261031/docs/SIMPLE_MAP.ja.md)
+現在のソース・日本語資料は [`WowsExtractor-torpedoes-client-test/`](WowsExtractor-torpedoes-client-test/) にあります。
+
+- [導入・概要](WowsExtractor-torpedoes-client-test/README.ja.md)
+- [潜水艦probe短時間試験](WowsExtractor-torpedoes-client-test/docs/TEST_SUBMARINE_PROBE.ja.md)
+- [元仕様との詳細対応表](WowsExtractor-torpedoes-client-test/docs/SPEC_COVERAGE_0.3.1.ja.md)
+- [簡易2Dマップ](WowsExtractor-torpedoes-client-test/docs/SIMPLE_MAP.ja.md)
 
 ## 現在の状態
 
-mod `0.3.2-observations`（[出力変更](WowsExtractor-torpedoes-client-test-20261031/docs/OBSERVATIONS.ja.md)、新仕様の実機試験は未実施）。旧0.3.1ではSteam版build 13357625の訓練戦で、魚雷位置・type、
+現行ソースは `0.3.14-identity-depth-candidates`（未導入）。ID対応候補と魚雷の明示深度候補を追加し、従来の`isOwn`・raw IDを保持します。B27ではUndineの潜水・Battery・二重pingに対応するraw遷移を確認。UI由来の単位hint・enum名は別のmetadataであり、サーバー状態一般を保証しません。失効条件・ID namespaceの一般契約・命中区画は未確定です。B18のparameter複合keyは既存記録のoffline再生で確認済み。同じ潜水／parameter試験の再要求は不要です。詳細と残課題は [TASKS.md](TASKS.md) を参照。旧0.3.1ではSteam版build 13357625の訓練戦で、魚雷位置・type、
 ATM由来の誘導/被発見状態、移動履歴による座標較正などを試験しています。
 簡易2Dマップのグリッドとゲーム内位置が概ね一致することをテスターが目視確認しました。
 12対12・別地図・失探時の鮮度などは未検証です。完成版ではありません。
@@ -22,12 +26,16 @@ ATM由来のUI状態はATMの別途導入が必要で、取得できない場合
 
 ## Gitから利用する場合
 
+### この作業環境の運用
+
+正本は `WowsExtractor-torpedoes-client-test/`。旧日付付きフォルダーは削除・Git除外します。通常の開発ではZIPを作成せず、メインエージェントがmanifest更新・導入・版ごとのコミットを行います。詳細は [DEVELOPMENT.md](DEVELOPMENT.md)。以下のZIP生成は配布が必要な場合のみです。
+
 チェックサム・一覧・一括ソースは生成物のためGitへ含めません。
 インストーラーはチェックサムを必要とするため、まずPython 3.10以上で配布物を生成してください。
 既存の出力ZIPは上書きされません。必要なら新しい出力名を指定します。
 
 ```powershell
-cd WowsExtractor-torpedoes-client-test-20261031
+cd WowsExtractor-torpedoes-client-test
 python tools/build_bundle.py --output ../ForSSCommanders-bundle.zip
 ```
 
@@ -38,15 +46,15 @@ ATMありで試験する場合、導入後に `restore-atm-13357625.bat` を実�
 ## テスト
 
 ```powershell
-cd WowsExtractor-torpedoes-client-test-20261031
+cd WowsExtractor-torpedoes-client-test
 python -m pytest -q
 ```
 
-pytestが必要です。現在121件（旧ghost推測の専用テストは機能撤去に伴い削除）。Node.jsがない場合は任意のJSロジックテスト1件をスキップします。
+pytestが必要です。Node.jsがない場合は任意のJSロジックテスト1件をスキップします。
 ゲームmodはPython 2.7想定、外部ツールはPython 3.10以上です。
 
 ## ライセンス・出自
 
-MIT。[原著作権表示とライセンス](WowsExtractor-torpedoes-client-test-20261031/LICENSE)。
+MIT。[原著作権表示とライセンス](WowsExtractor-torpedoes-client-test/LICENSE)。
 収集modは [Tz-WIND/8111_for_wows](https://github.com/Tz-WIND/8111_for_wows) 由来です。
 公式リリースやWargamingによる動作保証ではありません。

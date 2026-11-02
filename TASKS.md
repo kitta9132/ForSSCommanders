@@ -1,17 +1,8 @@
 # 開発タスク
 
-現在のmod：0.3.2-observations（新仕様の実機試験は未実施）。更新：2026-11-01。
+現在の正本ソース：`WowsExtractor-torpedoes-client-test/`、0.3.14-identity-depth-candidates（未導入）。UI由来metadataとraw観測を保持し、ID対応候補と魚雷の明示深度候補を追加。従来の`isOwn`・raw IDは上書きしない。B27の潜水・Battery・二重pingは当該条件で確認済み、同じ試験の再要求は不要。失効条件・ID namespaceの一般契約・区画ID等は未確定。更新：2026-11-02。
 
-## 方針
-
-- 現在の簡易マップは仮のパラメーター確認用。本番のSS用マップはmod完成後に別途作る。
-- modはその時点でゲームから確認できた値と取得状態・取得元を出力する収集層とする。最終目撃履歴、失探判定、保持期限、ghost生成・表示はマップアプリ側の責務。
-- ゲーム自身が保持する古い座標や最終発見時刻も、取得できれば由来・鮮度不明を区別して出力する。mod独自の可視判定で観測値を隠さない。
-- 現在の派生値は直接値と区別して扱う。既存キャッシュ等の撤去は別途コード変更として扱い、方針変更だけで撤去済みとはしない。
-- 下記はバックログであり、取得可能性や実装を保証するものではない。
-- 直接取得・UI/ATM判定・推定・unknown・古い情報を区別する。取得不可をfalseや0にしない。
-- 未確認の取得経路は調査し、不可能なら制約を記録する。予測で直接取得値を代用しない。
-- 実機試験は原則として手持ちのMinotaur／Undineを使う。
+開発目標・共同作業・自律進行・収集層の責務・Git運用は [DEVELOPMENT.md](DEVELOPMENT.md) を参照。以下は進捗と残課題。
 
 ## P0：位置鮮度・失探管理（実質完了／マップ実装時へ移管）
 
@@ -24,11 +15,20 @@
 
 ## P1：収集層への整理（設計反映・別途コード変更）
 
+状態記号：`[x]` 完了、`[△]` 一部対応・調査済みだが未完了、`[ ]` 未着手。
+
 - [x] 自前の最終目撃キャッシュ・60秒TTL・ghost生成を撤去し、関連設定／出力／テスト／資料／仮ビューアを整理。
 - [x] 可視状態の候補値と取得元を位置から分離して出力。意味は未検証と明示し、座標の存在だけで発見中と断定しない。
 - [x] 可視判定で捨てていた地図座標を保持して出力。範囲外の生座標も別フィールドに保持。
-- [ ] 新しい可視状態候補の実値・意味を実機で確認（アプリの失探管理とは別）。
-- [ ] ゲーム由来の最終発見時刻などが取得可能なら生値として追加。アプリ側の履歴推定とは区別する。
+- [x] 新しい可視状態候補の実値を実機で確認。0.3.2で2艦のmapVisible=true→false→true、false時18行の座標保持を確認。1386 activeフレーム、正常終了、modログエラー0件。
+- [△] 可視状態候補の意味を確定。0.3.2に加え、0.3.4実機記録でKREMLIN複数個体のmapVisible候補true/false、false中の座標保持、一覧欠落後の再出現を確認。raw.visible候補はint 1でnonBoolean、ship API候補はmissing。複数個体から報告対象を一意に割り当てられず、残時間・操作・最終目撃UIとの照合もないため、発見状態との同一視はせずsemantics=unverifiedを維持する。詳細は `WowsExtractor-torpedoes-client-test/docs/VALIDATION_0.3.4_VISIBILITY.ja.md`。
+- [△] ゲーム由来の最終発見時刻などの取得経路を調査。抽出GUI参照と公開API資料では経路を発見できず、クライアントpyc指定範囲は安全な静的解析手段がなく中身未確認。取得可否はunknown（未公開経路は未確認）。取得可能なら生値を追加する。アプリ側の履歴推定とは区別し、撤去済みの独自lastSeenTsでは代用しない。
+
+2026-11-01追記：可視候補は標準UIでmapVisibleとvisibleが別参照・別用途であることを限定確認。0.3.4実機記録でmapVisibleの実値・遷移・false時の座標保持を確認したが、複数Kremlinの識別とUI/操作時刻の証拠が不足し、最終発見時刻もunknownのため`[△]`を維持。結果は `WowsExtractor-torpedoes-client-test/docs/VALIDATION_0.3.4_VISIBILITY.ja.md`、診断仕様・JSON形状は `docs/VISIBILITY_RESEARCH.ja.md` と `docs/OUTPUT_SPEC.ja.md`。
+調査範囲・制約・具体的な実機試験は
+`docs/VISIBILITY_RESEARCH.ja.md`（ソースフォルダー内）を参照。
+
+次の着手順：0.3.4記録の再試験では対象を一隻に識別し、画面録画・残時間・操作時刻とJSONLを同時に照合する。最終目撃表示と候補値の関係を試験条件内で確認し、味方視界のみは再現できる場合だけ別区間で評価する。最終発見時刻の未公開経路調査と魚雷所有者の識別調査は継続。
 
 ## P1：魚雷識別・運動・単位（mod）
 
@@ -41,18 +41,25 @@
 
 ## P1：装填・魚雷性能（取得経路調査→mod）
 
-- [ ] 発射管別の装填残数・再装填残時間・発射可否。
+- [△] 0.3.9で`selectedTorpedoParamsProbe`実装。controller selection → unique slot.type → exact slot.id/ammo.id → `viewData.paramsDescriptor` → 固定TTX variantの経路をread-only候補として追加。B15で当該Undine条件の値を確認済み。0.3.10でGUI抽出owner参照を確認し、`torpedoTooltipParameterProbe`を追加。B18でPython playerAvatar singleton、complete parameter collection（54行）、固定field shape/raw valuesを実機確認。正本0.3.10 raw selectorは複合key誤構成でnoExactMatchだった。修正後はB18のraw rowsを使ったoffline選択確認済み。これは実機の修正版再試験ではなく、GUI lookup/namespaceの意味確認も未完了。詳細は[B18記録](WowsExtractor-torpedoes-client-test/docs/VALIDATION_0.3.10_B18_PARAMETERS.ja.md)。
+  - 2026-11-02 B15追記：0.3.9実機のUndine選択魚雷で、selection 162/162 strict一意match、descriptorはpinger 25→torpedo 137、`selfVehicle`/`shipTTX`は162/162 available。選択`torpedo` variantは137/137 available、speed 75.0/delta 0、maxDist 9.0/delta 0（すべてvalue/delta available）。画面報告75kts/9kmとの当該条件内の数値整合を確認。`ttxStatus=partial`は固定3 variant中deepwater/alternativeが`none`のためで、selected leafの失敗ではない。`ammoParams`は162 stateで`{}`のままで、今回の値は別経路。補正後live値・単位・delta意味・Battle tooltip上書き・全艦一般は未確認のため[△]維持。追加実機試験は当該条件では不要。詳細は[B15記録](WowsExtractor-torpedoes-client-test/docs/VALIDATION_0.3.9_B15_TTX.ja.md)。
+
+- [△] B14のUndine当該条件では管別reload対応を確認：gun raw type=2の6行で初期装填が3+3に分かれ、battleTimer約90秒で全6行full/READY。その後1行が再進捗し、記録上の魚雷1本初出と時間的に一致、約45秒後にREADYへ戻る。ユーザーの独立目視（最初45秒で3/6、全装填ほぼ直後に一本、その後45秒完了）とも整合。根拠・隣接frame・UI enum/predicateは[B14記録](WowsExtractor-torpedoes-client-test/docs/VALIDATION_0.3.8_B14_RELOAD.ja.md)。これは取得したgun state/progressとユーザー目視による当該艦・条件内の確認で、物理的な管番号や全艦一般を保証しない。
+- [ ] 未確認は直接取得の装填残数、発射可否、管の故障／破壊状態と修理timerの区別。progressから数える場合は派生候補であり、直接loaded countとして扱わない。
+- [△] 0.3.4 weaponSlot/progress/ammo/serialLoad、0.3.6 context/clock、0.3.8 gun/reloadBar/gunBarrel候補をread-only診断。B11時計・選択は試験条件内で整合確認。B12はslot初期装填のみだったが、B14で発射後reloadも含む当該Undine条件を確認済み。gun collection 6行の直接進捗が取得できているため、modifier参照の`getEntity` unknownと`serialLoads` unknownは別経路の制約であり、今回の完了条件ではない。追加実機試験・unknown診断ループは行わない。選択魚雷性能（ammoParams/速度/最大射程）の取得経路調査へ進む。slot/type/order推測joinは禁止。過去記録：[B12](WowsExtractor-torpedoes-client-test/docs/VALIDATION_0.3.7_B12_WEAPONS.ja.md)、[調査](WowsExtractor-torpedoes-client-test/docs/RESEARCH_TUBE_RELOAD.ja.md)、[出力仕様](WowsExtractor-torpedoes-client-test/docs/OUTPUT_SPEC.ja.md)。
 - [ ] 選択魚雷の種類・速度・最大射程。`ammoParams={}`の取得経路を調査。
+  - 2026-11-02 B15追記：Undine当該条件では`shipTTX.torpedoes.torpedo`からspeed 75.0/delta 0、maxDist 9.0/delta 0を実機取得（選択137 state）。これは`ammoParams`ではなくUI descriptor経由の静的TTX候補。`ammoParams={}`は通常162 stateで継続しており、API経路の調査項目自体は未完了。補正後live値・単位・全艦一般は未確認。
+  - 2026-11-02 B18追記：tooltip約10秒の実機報告は画面75kts/9kmでB15と同一。今回のJSONLでも選択`torpedo` TTX raw 75.0/9.0・delta 0を取得し、独立目視報告と整合。別経路の`torpedoTooltipParameterProbe`はowner/collection取得済み（54 complete rows）だがcomposite id exact matchなし。これは補正overrideがない証拠ではない。再試験を求めず、GUI lookup/key/namespaceのコード調査後に潜水艦固有情報P1へ進む。詳細は[B18記録](WowsExtractor-torpedoes-client-test/docs/VALIDATION_0.3.10_B18_PARAMETERS.ja.md)。
 - [ ] 飛翔中魚雷の残り射程・残存寿命。実取得と性能表／観測からの推定を分ける。
-- [ ] 管の故障／破壊状態、修理タイマーと装填タイマーの区別を実機確認。
 
 ## P1：潜水艦固有情報（取得経路調査→mod）
 
-- [ ] 自艦・対象艦・魚雷の深度、および深度差。地図から補ったy=0を深度と扱わない。
-- [ ] ping対象艦・命中区画・一重／二重状態・命中／更新／失効時刻・効果残時間。
+- [△] 0.3.11で`selfSubmarineProbe`と`waveHitProbe`を追加。B23は両probeが列挙例外だった一方、同じ2,622 active frameすべてで既存`weaponContextProbe.collections.selfVehicle`は完全なsingletonとしてavailable。0.3.12で列挙を`for ... in enumerate(...)`へ変更し、制限builtins fixtureを含むoffline回帰を追加。B24の206 active frameでは両collectionが正常取得され、selfVehicle singletonと各Submarine/Battery raw fieldがavailable、WaveHitはcompleteな正常空collection。B23の原因は依然未確定。B27ではUndineの2,233 active samplesとWaveHit 439 snapshotsをraw照合し、depth/Battery/WaveHitのUI用途根拠を静的資料で別metadata化（0.3.13）。depthのmはUI hint、enum名はUI label、`lifeTime`はUIの秒countdown入力に限り、サーバー状態一般は確定しない。同じ潜水試験の再要求は不要。B27記録：[潜水艦](WowsExtractor-torpedoes-client-test/docs/VALIDATION_0.3.12_B27_SUBMARINE.ja.md)／[WaveHit](WowsExtractor-torpedoes-client-test/docs/VALIDATION_0.3.12_B27_WAVEHIT.ja.md)、[UI根拠](WowsExtractor-torpedoes-client-test/docs/RESEARCH_SUBMARINE_STATE_SEMANTICS.ja.md)。
+- [△] 対象艦・魚雷の深度および深度差。魚雷の`dataHub.torpedo.depth`固定候補を追加し、一意UI ID対応時だけ`uiState.depth`へ伝播（次回導入分、実機未確認）。`position.y`・地図から補ったy=0は代用しない。単位・対象艦深度・深度差は未確定。専用試験を増やさず次の通常発射記録で取得可否を確認する。
+- [△] ping対象艦・命中区画・一重／二重状態・命中／更新／失効時刻・効果残時間。B27では6:42の二重ping報告と`hitCount=1→2`、`maxLifeTime=25→50`が整合。439 snapshotで1 row、1,794 snapshotは正常空。UIが直接countdown表示する`lifeTime`には秒hintを付けたが、期限・失効条件、対象ID namespace、命中区画、`maxLifeTime`単位は未確定。[B27 WaveHit記録](WowsExtractor-torpedoes-client-test/docs/VALIDATION_0.3.12_B27_WAVEHIT.ja.md)。
 - [ ] 魚雷の誘導先ID、誘導停止距離／地点／理由。最寄り艦を確定対象にしない。
 - [ ] 魚雷の消滅理由（命中・射程切れ等）。一覧からの消失とは区別する。
-- [ ] 潜航能力の残量・消費／回復・枯渇など、自艦潜水艦の状態。
+- [△] 潜航能力の残量・消費／回復・枯渇など、自艦潜水艦の状態。B27の2,233 active snapshotでSubmarine/Battery全allowlistを取得。潜航・浮上に沿う`depth=0→30→0`とBattery値の減少・回復、`currentRate=-1→0.6`を確認。depthのm hintとdepthIndex/Battery enum labelはUI文脈で記録したが、Battery割合・残時間、rateの単位、枯渇条件、物理的な無敵状態は確定しない。[B27潜水艦記録](WowsExtractor-torpedoes-client-test/docs/VALIDATION_0.3.12_B27_SUBMARINE.ja.md)。同じ潜水試験の再実施は不要。
 - [ ] ソナー・レーダー・潜水艦探知装置の距離、作動／準備／クールダウン、残時間。
 - [ ] 消耗品の残数・状態・endTimeの時刻基準、搭載なし／取得不可の区別。
 
@@ -88,5 +95,8 @@
 
 ## 既存資料
 
-- [取得状況の詳細対応表](WowsExtractor-torpedoes-client-test-20261031/docs/SPEC_COVERAGE_0.3.1.ja.md)
-- [仮マップの使い方](WowsExtractor-torpedoes-client-test-20261031/docs/SIMPLE_MAP.ja.md)
+- [先行調査：潜水艦深度・Battery・ping・誘導・探知装置](WowsExtractor-torpedoes-client-test/docs/RESEARCH_SUBMARINE_SYSTEMS.ja.md)
+- [先行調査：座標・単位・較正・実機安定性](WowsExtractor-torpedoes-client-test/docs/RESEARCH_UNITS_STABILITY.ja.md)
+- [P1コード調査：収集層・魚雷・装填](WowsExtractor-torpedoes-client-test/docs/P1_CODE_RESEARCH.ja.md)
+- [取得状況の詳細対応表](WowsExtractor-torpedoes-client-test/docs/SPEC_COVERAGE_0.3.1.ja.md)
+- [仮マップの使い方](WowsExtractor-torpedoes-client-test/docs/SIMPLE_MAP.ja.md)
