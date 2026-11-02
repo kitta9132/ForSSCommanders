@@ -20,7 +20,8 @@ def main():
     sys.path.insert(0, str(root))
     expected_modules = ('Main.py', 'battle_identity.py', 'damage_tracker.py',
                         'emit_guard.py', 'ui_health.py', 'torpedo_telemetry.py',
-                        'submarine_telemetry.py', 'map_calibration.py')
+                        'submarine_telemetry.py', 'map_calibration.py',
+                        'performance_profiler.py')
     missing = [name for name in expected_modules if not (root / name).is_file()]
     if missing:
         raise SystemExit('Missing required collector modules: ' + ', '.join(missing))

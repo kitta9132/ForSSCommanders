@@ -23,7 +23,8 @@ $script:PythonFiles = @(
     'ui_health.py',
     'torpedo_telemetry.py',
     'submarine_telemetry.py',
-    'map_calibration.py'
+    'map_calibration.py',
+    'performance_profiler.py'
 )
 $script:CopyFiles = @($script:PythonFiles + 'config.example.ini')
 $script:Manifest = @{}

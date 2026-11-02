@@ -9,6 +9,7 @@ MODULES = (
     'Main.py', 'battle_identity.py', 'damage_tracker.py', 'emit_guard.py',
     'ui_health.py', 'torpedo_telemetry.py', 'submarine_telemetry.py',
     'map_calibration.py',
+    'performance_profiler.py',
 )
 
 
@@ -35,7 +36,7 @@ def test_collector_offline_smoke_includes_safe_submarine_probe_failure():
 
 def test_main_versions_and_emits_both_probe_keys():
     main = (ROOT / 'res_mods/PnFMods/WowsExtractor/Main.py').read_text(encoding='utf-8')
-    assert "MOD_VERSION = '0.3.19-self-snapshot-reuse'" in main
+    assert "MOD_VERSION = '0.3.20-opt-in-profiling'" in main
     assert 'safe_submarine_probe(diagnostic_hub, CC, now)' in main
     assert "'selfSubmarineProbe': submarine_probes['selfSubmarineProbe']" in main
     assert "'waveHitProbe': submarine_probes['waveHitProbe']" in main

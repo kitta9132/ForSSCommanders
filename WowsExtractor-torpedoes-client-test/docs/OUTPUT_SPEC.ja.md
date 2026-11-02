@@ -1,5 +1,11 @@
 # WowsExtractor 魚雷出力版（WoWSクライアント用mod）
 
+## 0.3.20-opt-in-profiling
+
+`profiler_enabled` は既定falseで、`collection_enabled=true`との明示opt-inが両方そろった場合だけ標準timerを固定8 readで初期probeします。collection無効時はtimer read 0回です。`state.performance` はprofiler opt-in時のみ追加されます。5秒window未成立なら`status=notSampled`と`clockStatus=available`を出し、unsupported/disabled/invalid等はclock statusを保持します。window成立時だけ`phases`を含み、各phaseは`count/total/max`のみ（durationはms）。`sampleStartSeconds`/`sampleEndSeconds`はclock自体の秒値です。`timebase.source`と`timebase.basis=assumed`は時計候補と未確認のOS基準を示します。無効なclockで0msレコードは作りません。
+
+区間は `state_cycle_total`, `snapshot_build_total`, `avatar`, `self`, `ships`, `torpedoes`, `armament_systems`, `diagnostics_due`, `submit` の最大9種で、各 `count/total/max` のみです（total/maxはms、countは完了した有効測定数）。`sampleStartSeconds`/`sampleEndSeconds`は選択timerの秒値で、Unix時刻やgame clockではありません。`avatar`はsnapshot capture/roster/health、`self`は自艦info/ship取得とteam解決、`ships`はship builder、`torpedoes`はtorpedo取得・due時UI probe・motion/map変換、`armament_systems`は両adapter、`diagnostics_due`はdue時の詳細probe構築を囲います（schedulerとidentity candidate後処理は含みません）。未知phaseは拒否し、statsを増やしません。計測可能な最大tickでは18 clock readsです。`torpedoes`内のUI probeは同phaseに含まれ、phase値は包含関係を持つため足し算して総時間と解釈しません。p95・毎tick詳細値・各艦/API別timerはありません。`writerMode=asyncHandoff`のsubmitはgame-thread handoff時間でserialize/file I/Oを含まず、`syncEncodeWrite`は同期fallbackのencode/write込みです。異なるmodeの値を同列比較しません。writer thread時間は未計測です。FPS、GPU/draw時間、game API内部時間も未計測です。timer候補・OS基準・分解能は実ゲーム未検証で、`resolutionObserved`はprobeで観測した差であり保証値ではありません。Windows Python 2.7の`time.clock`説明は候補の根拠に留まり、実機runtime挙動は未確認です。詳細は[計測計画](PLAN_PERFORMANCE_PROFILING.ja.md)。
+
 ## 0.3.17-snapshot-reuse：既定収集停止・診断sample内collection共有
 
 0.3.14導入後のFPS報告を受けた安全措置として、`collection_enabled` は既定falseです。`config.ini` 不在・読込失敗・不正値も収集停止になり、明示した文字列 `true` のみ有効です。停止中はbattle ship/torpedo API、dataHub収集、Ballistics API、damage/ballistics tracker開始・tick、定期callbackを実行しません。battle lifecycleを維持し、battle shown時のdisabled stateとquit時のinactive stateのみを書きます。stateの`collection`は`{"status":"disabled","source":"config.collection_enabled"}`を示します。外部読取側は通常のtelemetry snapshotが出ないことを許容してください。
@@ -180,6 +186,7 @@ ATM由来の誘導・被発見状態はuiStateに分離し、type文字列から
 | `damage` | オブジェクト | 既存のダメージ集計 |
 | `ballistics` | オブジェクト | 既存の砲弾／航空機弾種の情報。魚雷誘導情報ではない |
 | `diag` | オブジェクト | 既存の艦船収集に関する診断値 |
+| `performance` | オブジェクト | `profiler_enabled=true`時のみ。5秒集約ができたときだけphase payloadを持ち、その他は小さなstatus metadata。profiler disabledのstateには追加しない |
 
 ### `weaponHubProbe`: 装填候補のread-only診断（0.3.4）
 

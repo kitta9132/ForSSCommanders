@@ -2,9 +2,9 @@
 
 ## 緊急優先：通常プレイのFPS低下
 
-- [ ] 0.3.14導入後の通常プレイで「自艦撃沈までminFPS 25、撃沈後110まで回復」と報告（外部記録ツール未使用）。因果未確定。追加FPS比較実機試験は依頼しない。0.3.15で既定収集停止、0.3.16で診断既定1Hz、0.3.17でdiagnostic sample内共有、0.3.18でcore avatar getterを3→1へ、0.3.19-self-snapshot-reuse（source only・未導入）でgetSelfPlayerInfo/getSelfPlayerShipを各state 1回に共有。既定OFF維持。FPS未計測・改善未確認で、24艦core処理時間・armament/public_data等は未評価。通常プレイにはmod退避を推奨。0.3.14 mod退避先はユーザー許可済み、再導入禁止。[性能問題記録](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_INCIDENT_0.3.14.ja.md)。
+- [ ] 0.3.14導入後の通常プレイで「自艦撃沈までminFPS 25、撃沈後110まで回復」と報告（外部記録ツール未使用）。因果未確定。追加FPS比較実機試験は依頼しない。0.3.15で既定収集停止、0.3.16で診断既定1Hz、0.3.17でdiagnostic sample内共有、0.3.18でcore avatar getterを3→1へ、0.3.19でself getterを各state 1回へ共有。0.3.20-opt-in-profiling（source only・未導入）でcollection/diagnostics/profiler既定OFFのまま最大9区間の5秒phase集計を追加。OFF時clock calls 0、FPS未計測・改善未確認、timer候補はWoWS runtime未検証。writer thread/FPS/API内部時間未計測、24艦core処理時間・armament/public_data等は未評価。通常プレイにはmod退避を推奨。0.3.14 mod退避先はユーザー許可済み、再導入禁止。[性能問題記録](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_INCIDENT_0.3.14.ja.md)。
 
-現在の正本ソース：`WowsExtractor-torpedoes-client-test/`。作業対象は0.3.19-self-snapshot-reuse（source only・未導入、既定収集停止）。core avatar getter 3→1、およびself info/ship getter各1回の同state共有をoffline確認対象とする。FPS未評価、24艦core処理時間・armament/public_dataは未評価。0.3.14までの機能状態・残課題は以下を参照。更新：2026-11-02。
+現在の正本ソース：`WowsExtractor-torpedoes-client-test/`。作業対象は0.3.20-opt-in-profiling（source only・未導入）。collection/diagnostics/profiler既定OFFを維持し、明示opt-in時に最大9区間を5秒集計する。OFF時clock calls 0、game-thread phase予算18 reads/tick。Python timer候補の実ゲーム挙動、FPS、writer thread、API内部時間は未確認/未計測。通常プレイにはmod退避を推奨。0.3.14までの機能状態・残課題は以下を参照。更新：2026-11-02。
 
 開発目標・収集層の責務は [DEVELOPMENT.md](DEVELOPMENT.md)、AI向け指示・自律進行・Git運用は [.ai/INSTRUCTIONS.md](.ai/INSTRUCTIONS.md) を参照。以下は進捗と残課題。
 

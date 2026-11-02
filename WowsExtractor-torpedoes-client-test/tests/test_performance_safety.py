@@ -1,5 +1,9 @@
 from pathlib import Path
 import textwrap
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] /
+                      'res_mods/PnFMods/WowsExtractor'))
+from performance_profiler import PerformanceProfiler
 
 
 SOURCE = (Path(__file__).resolve().parents[1] /
@@ -21,7 +25,8 @@ def test_config_is_opt_in_and_unknown_values_are_off():
     current = {}
     load = method('_load_config', {
         '_load_mod_config': lambda: current,
-        '_cfg_float': lambda cfg, key, default: default, 'STATE_INTERVAL': .1})
+        '_cfg_float': lambda cfg, key, default: default, 'STATE_INTERVAL': .1,
+        'PerformanceProfiler': _DisabledProfiler})
     for config, expected in [({}, False), ({'collection_enabled': 'false'}, False),
                              ({'collection_enabled': 'yes'}, False),
                              ({'collection_enabled': 'TRUE'}, False),
@@ -33,6 +38,8 @@ def test_config_is_opt_in_and_unknown_values_are_off():
         assert c._collectionEnabled is expected
         assert c._diagnosticsEnabled is False
         assert c._diagnosticsInterval == 1.0
+        if not expected:
+            assert c._performanceProfiler is None
 
     c = type('C', (), {})()
     current.clear()
@@ -42,7 +49,8 @@ def test_config_is_opt_in_and_unknown_values_are_off():
 
     c = type('C', (), {})()
     ns = {'_load_mod_config': lambda: (_ for _ in ()).throw(ValueError()),
-          '_cfg_float': lambda cfg, key, default: default, 'STATE_INTERVAL': .1}
+          '_cfg_float': lambda cfg, key, default: default, 'STATE_INTERVAL': .1,
+          'PerformanceProfiler': _DisabledProfiler}
     method('_load_config', ns)(c)
     assert c._collectionEnabled is False
 
@@ -67,6 +75,70 @@ def test_diagnostic_scheduler_samples_twice_per_two_seconds_without_catchup():
     c._diagnosticsEnabled = False
     assert due(c, 4.2) is False
     assert c._diagnosticsNextDue is None
+
+
+def test_main_tick_keeps_collection_alive_when_profiler_clock_fails(monkeypatch):
+    import performance_profiler
+    class BadTime(object):
+        @staticmethod
+        def clock():
+            raise RuntimeError('do not leak this text')
+    monkeypatch.setattr(performance_profiler, 'time', BadTime())
+    profiler = PerformanceProfiler(True, True)
+    assert profiler.status == 'clockException'
+    writes, builds, errors = [], [], []
+    now_values = iter([1.0, 2.0])
+    ns = {'_now': lambda: next(now_values), '_get': getattr, '_str': str,
+          'logError': errors.append}
+    tick = method('_tick', ns)
+    c = type('Collector', (), {})()
+    c._active = c._collectionEnabled = True
+    c._diagnosticsEnabled = False
+    c._diagnosticsSampleDue = False
+    c._diagnosticsLastNow = None
+    c._diagnosticsNextDue = c._diagnosticsLastSampleTs = None
+    c._diagnostics_due = lambda now: False
+    c._refresh_meta = lambda now: None
+    c._stateInterval, c._lastWrite = .1, 0.0
+    c._performanceProfiler, c._profilerEnabled = profiler, True
+    c._writer = None
+    c._build_state = lambda now: builds.append(now) or {'active': True}
+    c._write_state = writes.append
+    tick(c)
+    tick(c)
+    assert builds == [1.0, 2.0]
+    assert profiler.clock_calls == 1
+    assert len(writes) == 2
+    assert writes[0]['performance']['status'] == 'clockException'
+    assert writes[0]['performance']['writerMode'] == 'syncEncodeWrite'
+    assert not errors
+    assert 'do not leak' not in repr(writes)
+
+
+def test_config_profiler_isolation_and_no_reprobe_per_battle(monkeypatch):
+    import performance_profiler
+    clock = type('Clock', (), {'__init__': lambda self: setattr(self, 'calls', 0),
+        '__call__': lambda self: setattr(self, 'calls', self.calls + 1) or
+            self.calls * 0.1})()
+    monkeypatch.setattr(performance_profiler, 'time', type('Time', (), {
+        'clock': staticmethod(clock)})())
+    config = {'profiler_enabled': 'true'}
+    ns = {'_load_mod_config': lambda: config,
+          '_cfg_float': lambda cfg, key, default: default,
+          'STATE_INTERVAL': .1, 'PerformanceProfiler': PerformanceProfiler}
+    load = method('_load_config', ns)
+    c = type('Collector', (), {'_performanceProfiler': None,
+                                '_profilerEnabled': False})()
+    load(c)
+    assert c._performanceProfiler is None
+    assert clock.calls == 0
+
+    config['collection_enabled'] = 'true'
+    load(c)
+    assert c._performanceProfiler.status == 'available'
+    assert clock.calls == c._performanceProfiler.clock_calls == 8
+    load(c)  # battle config refresh resets the window, not the clock probe
+    assert clock.calls == c._performanceProfiler.clock_calls == 8
 
 
 def test_disabled_start_tick_double_start_and_quit_do_not_poll_game_apis():
@@ -313,6 +385,13 @@ def _attempt(fn, default=None):
         return default
 
 
+class _DisabledProfiler(object):
+    def __init__(self, enabled, collection_enabled):
+        self.enabled = bool(enabled and collection_enabled)
+    def reset_battle(self):
+        pass
+
+
 def test_build_state_shares_fresh_core_snapshot_even_when_diagnostics_off():
     calls = []
     rows = [object() for _ in range(24)]
@@ -325,6 +404,7 @@ def test_build_state_shares_fresh_core_snapshot_even_when_diagnostics_off():
     build = method('_build_state', ns)
     c = type('C', (), {})()
     c._active, c._diagnosticsEnabled, c._diagnosticsSampleDue = True, False, False
+    c._performanceProfiler, c._profilerEnabled = None, False
     c._battleId, c._selfTeam = 'b', None
     captured = {'entities': rows, 'status': 'complete',
         'count': 24, 'limit': 256, 'reason': None}
@@ -342,6 +422,7 @@ def test_build_state_shares_fresh_core_snapshot_even_when_diagnostics_off():
     c._damage = type('D', (), {'snapshot': lambda self: {}})()
     c._ballistics = type('B', (), {'snapshot': lambda self: {}})()
     complete = build(c, 1.)
+    assert 'performance' not in complete
     assert [name for name, _ in calls] == ['roster', 'health', 'ships']
     assert all(entities is rows for _, entities in calls)
     assert calls[1][1] is calls[0][1]

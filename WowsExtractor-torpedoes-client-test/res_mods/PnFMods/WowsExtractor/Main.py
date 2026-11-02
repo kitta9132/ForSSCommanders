@@ -6,7 +6,7 @@
 
 API_VERSION = 'API_v1.0'
 MOD_NAME = 'WowsExtractor'
-MOD_VERSION = '0.3.19-self-snapshot-reuse'
+MOD_VERSION = '0.3.20-opt-in-profiling'
 
 # ---------------------------------------------------------------------------
 # WowsExtractor -- in-game data collector for the "8111 for WoWS" project.
@@ -81,6 +81,11 @@ try:
     from .submarine_telemetry import safe_submarine_probe
 except:
     from submarine_telemetry import safe_submarine_probe
+
+try:
+    from .performance_profiler import PerformanceProfiler
+except:
+    from performance_profiler import PerformanceProfiler
 
 try:
     from .map_calibration import MapCalibration
@@ -743,6 +748,8 @@ class Collector(object):
         self._stateInterval = STATE_INTERVAL
         self._collectionEnabled = False
         self._diagnosticsEnabled = False
+        self._profilerEnabled = False
+        self._performanceProfiler = None
         self._diagnosticsInterval = 1.0
         self._diagnosticsNextDue = None
         self._diagnosticsLastSampleTs = None
@@ -797,12 +804,25 @@ class Collector(object):
         self._collectionEnabled = cfg.get('collection_enabled') == 'true'
         self._diagnosticsEnabled = (
             self._collectionEnabled and cfg.get('diagnostics_enabled') == 'true')
+        profiler_enabled = (
+            self._collectionEnabled and cfg.get('profiler_enabled') == 'true')
+        # Keep OFF as None: no disabled-profiler wrappers or closures on each
+        # frame. A failed opt-in profiler remains available for status output.
+        if profiler_enabled:
+            if (getattr(self, '_performanceProfiler', None) is None or
+                    not getattr(self, '_profilerEnabled', False)):
+                self._performanceProfiler = PerformanceProfiler(True, True)
+        else:
+            self._performanceProfiler = None
+        self._profilerEnabled = profiler_enabled
         self._diagnosticsInterval = max(
             _cfg_float(cfg, 'diagnostics_interval', 1.0), 0.1)
         self._diagnosticsNextDue = None
         self._diagnosticsLastSampleTs = None
         self._diagnosticsLastNow = None
         self._diagnosticsSampleDue = False
+        if self._performanceProfiler is not None:
+            self._performanceProfiler.reset_battle()
         # clamp the interval so a typo (0 / negative) can't hammer the disk
         self._stateInterval = max(_cfg_float(cfg, 'state_interval', STATE_INTERVAL), 0.02)
 
@@ -1065,21 +1085,44 @@ class Collector(object):
         self._refresh_meta(now)
         if (now - self._lastWrite) < self._stateInterval:
             return
+        profiler = _get(self, '_performanceProfiler')
+        measure_profiler = (profiler if profiler is not None and
+                            profiler.status == 'available' else None)
         self._diagnosticsSampleDue = self._diagnostics_due(now)
         self._lastWrite = now
+        cycle = (measure_profiler.begin('state_cycle_total')
+                 if measure_profiler is not None else None)
+        cycle_completed = False
         try:
-            snap = self._build_state(now)
+            snap = (measure_profiler.measure('snapshot_build_total', self._build_state, now)
+                    if measure_profiler is not None else self._build_state(now))
             # Quit can land while we were building; never overwrite the terminal
             # inactive frame with a stale live snapshot.
             if not self._active:
                 return
-            self._write_state(snap)
+            if self._profilerEnabled:
+                snap['performance'] = profiler.take_summary()
+                snap['performance']['writerMode'] = (
+                    'asyncHandoff' if self._writer is not None else
+                    'syncEncodeWrite')
+            submit = (measure_profiler.begin('submit')
+                      if measure_profiler is not None else None)
+            submitted = False
+            try:
+                self._write_state(snap)
+                submitted = True
+                cycle_completed = True
+            finally:
+                if measure_profiler is not None:
+                    measure_profiler.finish(submit, submitted)
             if self._diagnosticsSampleDue:
                 self._diagnosticsLastSampleTs = now
                 self._diagnosticsNextDue = now + self._diagnosticsInterval
         except Exception, e:
             logError('tick failed: {}'.format(_str(e)))
         finally:
+            if measure_profiler is not None:
+                measure_profiler.finish(cycle, cycle_completed)
             self._diagnosticsSampleDue = False
 
     def _diagnostics_due(self, now):
@@ -1363,22 +1406,39 @@ class Collector(object):
         self._selfTeam = _UNSET   # recompute self team once for this frame
         # Capture fresh self API results once per state; None is a captured
         # unknown, not a request to retry in another consumer.
-        self_info = _try(lambda: battle.getSelfPlayerInfo())
-        self_ship = _try(lambda: battle.getSelfPlayerShip())
-        self_team = self._self_team(self_info)
+        profiler = getattr(self, '_performanceProfiler', None)
+        if profiler is not None and profiler.status != 'available':
+            profiler = None
+        if profiler is not None:
+            def capture_self():
+                info = _try(lambda: battle.getSelfPlayerInfo())
+                ship = _try(lambda: battle.getSelfPlayerShip())
+                return info, ship, self._self_team(info)
+            self_info, self_ship, self_team = profiler.measure('self', capture_self)
+        else:
+            self_info = _try(lambda: battle.getSelfPlayerInfo())
+            self_ship = _try(lambda: battle.getSelfPlayerShip())
+            self_team = self._self_team(self_info)
         diagnostic_enabled = _get(self, '_diagnosticsEnabled', False) is True
         diagnostic_due = diagnostic_enabled and _get(
             self, '_diagnosticsSampleDue', False) is True
+        avatar_phase = profiler.begin('avatar') if profiler is not None else None
         avatar_snapshot = self._capture_avatar_snapshot()
         avatar_entities = avatar_snapshot['entities']
         self._remember_roster_vehicles(avatar_entities)
         # Incomplete snapshots cannot safely assert UI alive/dead from absence.
         ui_hp = self._collect_avatar_health(
             avatar_entities if avatar_snapshot['status'] == 'complete' else [])
-        ships, diag = self._build_ships(now, ui_hp, avatar_entities)
+        if profiler is not None:
+            profiler.finish(avatar_phase)
+        ships, diag = (profiler.measure(
+            'ships', self._build_ships, now, ui_hp, avatar_entities)
+            if profiler is not None else
+            self._build_ships(now, ui_hp, avatar_entities))
         diag['avatarSnapshotStatus'] = {
             'status': avatar_snapshot['status'], 'count': avatar_snapshot['count'],
             'limit': avatar_snapshot['limit'], 'reason': avatar_snapshot['reason']}
+        torpedoes_phase = profiler.begin('torpedoes') if profiler is not None else None
         torpedoes, torpedo_status = _try(
             lambda: self._torpedoes.torpedoes(self_team),
             ([], {'available': False, 'status': 'unknown',
@@ -1402,9 +1462,13 @@ class Collector(object):
             torpedo['mapPosition'] = normalized
             torpedo['mapPositionStatus'] = 'available' if normalized else 'unknown'
             torpedo['mapPositionSource'] = 'calibratedWorldPosition' if normalized else None
+        if profiler is not None:
+            profiler.finish(torpedoes_phase)
         disabled = {'status': 'disabled', 'source': 'config.diagnostics_enabled'}
         unsampled = {'status': 'notSampled', 'source': 'scheduling',
                      'sampleTs': None}
+        diagnostics_phase = (profiler.begin('diagnostics_due')
+                             if profiler is not None and diagnostic_due else None)
         if diagnostic_due:
             weapon_probe = _try(lambda: safe_weapon_hub_probe(diagnostic_hub, CC),
                 {'source': 'dataHub weapon UI candidates', 'status': 'unknown',
@@ -1460,6 +1524,8 @@ class Collector(object):
             torpedo_tooltip_parameter = dict(state)
             submarine_probes = {'selfSubmarineProbe': dict(state),
                                 'waveHitProbe': dict(state)}
+        if profiler is not None and diagnostic_due:
+            profiler.finish(diagnostics_phase)
         self_state = self._build_self(ui_hp, self_info, self_ship)
         if diagnostic_due:
             identity_candidates_state = _try(
@@ -1476,6 +1542,18 @@ class Collector(object):
                             identity_candidates_state):
                 if isinstance(_sample, dict):
                     _sample['sampleTs'] = now
+        if profiler is not None:
+            def build_armament_systems():
+                return (_try(lambda: self._torpedoes.armament(self_ship),
+                             {'available': False}),
+                        _try(lambda: self._torpedoes.systems(self_ship),
+                             {'status': 'unknown'}))
+            armament_systems = profiler.measure(
+                'armament_systems', build_armament_systems)
+        else:
+            armament_systems = (
+                _try(lambda: self._torpedoes.armament(self_ship), {'available': False}),
+                _try(lambda: self._torpedoes.systems(self_ship), {'status': 'unknown'}))
         return {
             'schema': SCHEMA_VERSION,
             'apiVersion': WIRE_API_VERSION,
@@ -1496,10 +1574,8 @@ class Collector(object):
             'selfSubmarineProbe': submarine_probes['selfSubmarineProbe'],
             'waveHitProbe': submarine_probes['waveHitProbe'],
             'gameClockProbe': game_clock,
-            'torpedoArmament': _try(
-                lambda: self._torpedoes.armament(self_ship), {'available': False}),
-            'selfSystems': _try(lambda: self._torpedoes.systems(self_ship),
-                                {'status': 'unknown'}),
+            'torpedoArmament': armament_systems[0],
+            'selfSystems': armament_systems[1],
             'damage': self._damage.snapshot(),
             'ballistics': _try(lambda: self._ballistics.snapshot(), {'available': False}),
             'diag': diag,

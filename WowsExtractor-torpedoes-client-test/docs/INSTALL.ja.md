@@ -28,7 +28,7 @@
 
 ## 3. mod本体をコピーする
 
-配布物の `res_mods/PnFMods/WowsExtractor/` を丸ごとコピーします。必要なのはPythonファイル7個と、任意の設定ファイルです。
+配布物の `res_mods/PnFMods/WowsExtractor/` を丸ごとコピーします。0.3.20の必要Python sourceは9個と、任意の設定ファイルです。
 
 ```text
 Main.py                  エントリーポイント、イベント、スナップショット、書き込み
@@ -37,7 +37,9 @@ damage_tracker.py        既存のダメージ収集
 emit_guard.py            退場後に古い活動中フレームを出さないための判定
 ui_health.py             既存のUI由来HPの補助
 torpedo_telemetry.py     今回追加した魚雷・発射元・自艦兵装の収集
+submarine_telemetry.py   潜水艦・WaveHitの限定診断
 map_calibration.py      移動履歴からの地図座標較正
+performance_profiler.py opt-in game-thread phase集計
 config.example.ini      設定テンプレート
 ```
 
@@ -58,6 +60,7 @@ config.example.ini      設定テンプレート
 ```ini
 collection_enabled = false
 diagnostics_enabled = false
+profiler_enabled = false
 diagnostics_interval = 1.0
 state_interval = 0.1
 ```
@@ -66,6 +69,7 @@ state_interval = 0.1
 | --- | --- | --- |
 | `collection_enabled` | `false` | `true`を明示した場合だけ収集を開始 |
 | `diagnostics_enabled` | `false` | `collection_enabled=true`時に診断probeを許可 |
+| `profiler_enabled` | `false` | collection有効時だけclockを初期probeし、game-thread区間を集約 |
 | `diagnostics_interval` | `1.0` | 診断一式を実行する秒間隔。非due tickは古いprobeを再利用しない |
 | `state_interval` | `0.1` | `state.json` の収集・出力を行う目安の秒間隔。0.1=約10Hz、0.2=約5Hz |
 
