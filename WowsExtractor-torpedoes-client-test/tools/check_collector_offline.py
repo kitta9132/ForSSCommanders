@@ -39,9 +39,9 @@ def main():
     api = Obj(getAllTorpedoes=lambda: [Obj(uiId=1, ownerId=3, ownerTeamId=0,
         ownerType='Ship', shotId=2, type='future_type', position=(1, -2, 3))])
     collector = ns['Collector'].__new__(ns['Collector'])
-    collector._remember_roster_vehicles = lambda: None
-    collector._collect_avatar_health = lambda: {}
-    collector._build_ships = lambda now, hp: ([{'uiId': 5}], {})
+    collector._remember_roster_vehicles = lambda entities: None
+    collector._collect_avatar_health = lambda entities: {}
+    collector._build_ships = lambda now, hp, entities: ([{'uiId': 5}], {})
     collector._build_self = lambda hp: {'teamId': 0}
     collector._self_team = lambda: 0
     collector._torpedoes = TorpedoTelemetry(api, Obj())
@@ -65,6 +65,7 @@ def main():
     duplicated = sorted(name for name in set(collection_calls)
                         if collection_calls.count(name) > 1)
     assert not duplicated, 'diagnostic collection calls were not shared: ' + repr(duplicated)
+    assert collection_calls.count('avatar') == 1, collection_calls
     print('Main diagnostic collection API calls:',
           {name: collection_calls.count(name) for name in sorted(set(collection_calls))})
     assert snap['ships'] == [{'uiId': 5}]
@@ -112,7 +113,8 @@ def main():
     enemy = Obj(id=2, teamId=1, uiId=2, pos=None, isAlive=lambda: True)
     ns['battle'] = Obj(getAllShips=lambda: [own, enemy],
                        getPlayerByVehicleId=lambda vid: Obj(id=vid, teamId=vid - 1))
-    geo._collect_map_positions = lambda: {1: (.5, .5, 0.), 2: (.6, .4, 0.)}
+    geo._collect_map_positions = lambda avatar_entities=None: {
+        1: (.5, .5, 0.), 2: (.6, .4, 0.)}
     ships, diagnostics = geo._build_ships(1.)
     assert ships[0]['positionSource'] == 'shipOrPlayerApi'
     assert ships[1].get('position') is None  # no invented fit from one point

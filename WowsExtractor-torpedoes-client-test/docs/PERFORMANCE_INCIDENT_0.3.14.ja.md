@@ -23,6 +23,7 @@
 - 0.3.17-snapshot-reuseは未導入のsource-only変更。0.3.16の既定収集停止・診断1.0秒間隔を維持し、due sample内のfixed-name collection getterを共有する。offline Main統合fixtureで同名original getter呼出し各1回を確認。FPS未計測で改善を主張しない。collection_enabled/diagnostics_enabled既定falseを維持する。
 - 0.3.17でもstate/core intervalは0.1秒。core経路・core 24艦負荷・armament/public_data負荷は未評価で、通常プレイに安全とは宣言しない。0.3.14 mod退避先はユーザー許可済みだが、再導入しない。
 - 同一due sample内のgetter call reductionはoffline Main統合fixtureで確認したが、FPS改善量・API内部frame snapshot・field値の時間的一貫性を保証しない。
+- 0.3.18-core-avatar-reuseはsource only・未導入。`_build_state`ごとにavatar collectionをfresh captureし、`_remember_roster_vehicles`/`_collect_avatar_health`/`_collect_map_positions`の3 getterを1回に統合する。診断OFFでもcoreの共有contextは使い、collection無効時はstate build自体がないため呼ばない。captureは最大256 rowを保持して257件目を検出し、diagにstatus/count/limit/reasonを出す。None/getter error/iteration errorはpartial/unknownとして明示し、途中例外後にAPIを再試行しない。partial/truncated health indexは適用せず、map/rosterは見えたrowだけ処理するため、欠落をalive/deadや座標として補完しない。各従来経路ではgetter例外は`_try`で空扱いだった一方、取得後のiteration exceptionはroster/health/mapともstate buildまで伝播し得た。新経路は列挙例外を捕捉しstateをpartialとして継続するため、従来のstate中断規則とは異なるが、partial metadataと位置unknown fallbackで明示的に扱う。通常成功時のraw/status同値と3→1 getter countはofflineテスト対象。FPS・API内部一貫性・core 24艦処理時間は未評価。
 
 ## 調査対象
 

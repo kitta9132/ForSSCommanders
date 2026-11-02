@@ -232,7 +232,7 @@ def test_ship_api_visibility_is_a_separate_diagnostic_source():
                     _mapCalibration=Calibration(),
                     _self_team=lambda: 1, _relation=lambda team: 1,
                     _get_ship_position=lambda *args: None,
-                    _collect_map_positions=lambda: collect_map_positions(collector),
+                        _collect_map_positions=lambda avatar_entities=None: collect_map_positions(collector),
                     _map_to_world=lambda *args: None)
     rows, _diag = build(collector, 0.1, {})
     visibility = rows[0]['visibility']

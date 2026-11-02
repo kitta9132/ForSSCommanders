@@ -313,8 +313,9 @@ AP/CSでは `startRicochet`, `alwaysRicochet`, `overmatch`、APでは `detonator
 
 ### diag（元プロジェクト継承）
 
-候補は `totalShips`, `allies`, `alliesVisible`, `enemies`, `enemiesVisible`, `ghosts`, `mapCalib`, `mapSamples`, `uiHealth`。
+候補は `totalShips`, `allies`, `alliesVisible`, `enemies`, `enemiesVisible`, `ghosts`, `mapCalib`, `mapSamples`, `uiHealth`。0.3.18から`avatarSnapshotStatus`も出力し、core state内で共有したavatar collectionの`status`（`complete`/`partial`/`truncated`）、観測`count`、上限`limit`、`reason`を示します。上限は256 entityで、257件目を検出した場合は`truncated`です。getter戻り値None・getter例外・列挙途中例外は`partial`で、それぞれ`reason=none`/`getterError`/`iterationError`となります。空collectionは`complete,count=0`です。
 `mapCalib`は地図座標の補助変換方式、`mapSamples`はその校正用サンプル数です。魚雷のtype取得成功を示す診断値ではありません。
+このsnapshotは各state build内で一度だけ取得し、roster vehicle、avatar health、map positionへ渡します。healthはsnapshotがcompleteの場合のみ補助適用し、partial/truncatedの未観測を死亡判定に使いません。partial/truncated時のmap/rosterは観測済みrowだけを扱い、欠落位置は通常fallback/unknownのままです。前stateからの値持越し・global dataHub書換えはありません。イベント経路のroster lookupは独立取得を維持します。
 
 ## meta.jsonの全トップレベル項目
 

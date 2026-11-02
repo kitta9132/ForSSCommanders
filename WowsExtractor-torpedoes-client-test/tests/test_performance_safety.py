@@ -8,7 +8,9 @@ SOURCE = (Path(__file__).resolve().parents[1] /
 
 def method(name, ns):
     start = SOURCE.index('    def ' + name + '(')
-    end = SOURCE.find('\n    def ', start + 1)
+    ends = [pos for marker in ('\n    def ', '\n    @staticmethod')
+            if (pos := SOURCE.find(marker, start + 1)) != -1]
+    end = min(ends) if ends else -1
     code = SOURCE[start:end if end != -1 else None]
     code = code.replace('except Exception, e:', 'except Exception as e:')
     exec(textwrap.dedent(code), ns)
@@ -160,9 +162,11 @@ def test_diagnostics_off_builds_fresh_disabled_shapes_without_probe_calls():
     c._diagnosticsEnabled = False
     c._battleId = 'b'
     c._selfTeam = None
-    c._remember_roster_vehicles = lambda: None
-    c._collect_avatar_health = lambda: {}
-    c._build_ships = lambda now, hp: ([], {})
+    c._capture_avatar_snapshot = lambda: {'entities': [], 'status': 'complete',
+        'count': 0, 'limit': 256, 'reason': None}
+    c._remember_roster_vehicles = lambda entities: None
+    c._collect_avatar_health = lambda entities: {}
+    c._build_ships = lambda now, hp, entities: ([], {})
     c._self_team = lambda: 1
     c._torpedoes = type('T', (), {'torpedoes': lambda self, team: ([], {'available': True}),
         'armament': lambda self: {}, 'systems': lambda self: {}})()
@@ -186,3 +190,163 @@ def test_diagnostics_off_builds_fresh_disabled_shapes_without_probe_calls():
     assert not_sampled['selfSubmarineProbe']['status'] == 'notSampled'
     assert not_sampled['uiTorpedoProbe']['status'] == 'notSampled'
     assert not calls
+
+
+def test_core_avatar_capture_is_bounded_fresh_and_preserves_failure_status():
+    calls = []
+    source = list(range(256))
+    ns = {'dataHub': type('Hub', (), {'getEntityCollections':
+        lambda self, name: calls.append(name) or source})()}
+    capture = method('_capture_avatar_snapshot', ns)
+    snap = capture(type('C', (), {})())
+    assert snap == {'entities': source, 'status': 'complete', 'count': 256,
+                    'limit': 256, 'reason': None}
+    assert calls == ['avatar']
+
+    source.append(256)
+    next_snap = capture(type('C', (), {})())
+    assert next_snap['status'] == 'truncated' and next_snap['count'] == 256
+    assert next_snap['entities'] == source[:256]
+    assert calls == ['avatar', 'avatar']  # no cross-frame reuse
+
+    ns['dataHub'].getEntityCollections = lambda name: []
+    empty = capture(type('C', (), {})())
+    assert empty['status'] == 'complete' and empty['count'] == 0
+    ns['dataHub'].getEntityCollections = lambda name: None
+    none = capture(type('C', (), {})())
+    assert none['status'] == 'partial' and none['reason'] == 'none'
+    ns['dataHub'].getEntityCollections = lambda name: (_ for _ in ()).throw(RuntimeError())
+    failed = capture(type('C', (), {})())
+    assert failed['status'] == 'partial' and failed['reason'] == 'getterError'
+
+    def broken_rows():
+        yield 'first'
+        raise RuntimeError('after row')
+    ns['dataHub'].getEntityCollections = lambda name: broken_rows()
+    partial = capture(type('C', (), {})())
+    assert partial['entities'] == ['first']
+    assert partial['status'] == 'partial' and partial['reason'] == 'iterationError'
+
+
+def test_roster_event_caller_keeps_independent_lookup_without_state_argument():
+    calls = []
+    ns = {'_UNSET': object(), '_try': lambda fn, default=None: _attempt(fn, default),
+          '_get': lambda obj, key, default=None: (obj.get(key, default)
+              if isinstance(obj, dict) else getattr(obj, key, default)),
+          '_is_mapping': lambda obj: isinstance(obj, dict),
+          'battle': type('Battle', (), {'getPlayersInfo': lambda self: []})(),
+          'CC': type('CC', (), {'avatar': 'avatar', 'vehicle': 'vehicle'})(),
+          'dataHub': type('Hub', (), {'getEntityCollections': lambda self, name:
+              calls.append(name) or [{'avatar': {}, 'vehicle': {}}]})(),
+          'roster_ids_from_avatar': lambda avatar, vehicle: None}
+    class Damage(object):
+        def remember(self, *args):
+            pass
+    remember = method('_remember_roster_vehicles', ns)
+    collector = type('C', (), {'_damage': Damage()})()
+    remember(collector)       # event caller: independent getter remains
+    remember(collector, [])   # state caller: supplied capture; no getter
+    assert calls == ['avatar']
+
+
+def test_24_avatar_core_outputs_match_independent_getters_and_share_one_call():
+    fixture = [{'avatar': {'playerId': pid}, 'vehicle': {'id': 1000 + pid},
+                'health': {'value': 800 - pid, 'max': 1000, 'isAlive': True},
+                'mapPosition': {'position': (pid / 100.0, pid / 200.0), 'yaw': pid}}
+               for pid in range(1, 25)]
+    getter_calls = []
+    hub = type('Hub', (), {'getEntityCollections': lambda self, name:
+        getter_calls.append(name) or fixture})()
+    cc = type('CC', (), {'avatar': 'avatar', 'vehicle': 'vehicle',
+        'health': 'health', 'mapPosition': 'mapPosition', 'visibility': 'visibility'})()
+    def make_ns():
+        return {'_UNSET': object(), '_try': _attempt,
+            '_get': lambda obj, key, default=None: (obj.get(key, default)
+                if isinstance(obj, dict) else getattr(obj, key, default)),
+            '_is_mapping': lambda obj: isinstance(obj, dict), 'dataHub': hub, 'CC': cc,
+            'battle': type('Battle', (), {'getPlayersInfo': lambda self: []})(),
+            'roster_ids_from_avatar': lambda avatar, vehicle:
+                (avatar.get('playerId'), vehicle.get('id'), 1),
+            'index_avatar_health': lambda entities, _cc: {
+                row['avatar']['playerId']: row['health'] for row in entities},
+            '_point_xy': lambda point: point}
+    class Damage(object):
+        def __init__(self):
+            self.rows = []
+        def remember(self, *args):
+            self.rows.append(args)
+    roster = method('_remember_roster_vehicles', make_ns())
+    health = method('_collect_avatar_health', make_ns())
+    positions = method('_collect_map_positions', make_ns())
+    def consumer():
+        damage = Damage()
+        collector = type('C', (), {'_damage': damage,
+            '_diagnosticsEnabled': False, '_diagnosticsSampleDue': False})()
+        roster(collector)
+        hp = health(collector)
+        maps = positions(collector)
+        return damage.rows, hp, maps
+    independent = consumer()
+    assert getter_calls == ['avatar', 'avatar', 'avatar']
+    getter_calls[:] = []
+    def shared_consumer():
+        damage = Damage()
+        collector = type('C', (), {'_damage': damage,
+            '_diagnosticsEnabled': False, '_diagnosticsSampleDue': False})()
+        rows = hub.getEntityCollections('avatar')
+        roster(collector, rows)
+        hp = health(collector, rows)
+        maps = positions(collector, rows)
+        return damage.rows, hp, maps
+    shared = shared_consumer()
+    assert shared == independent
+    assert getter_calls == ['avatar']
+    assert len(shared[0]) == len(shared[1]) == len(shared[2]) == 24
+
+
+def _attempt(fn, default=None):
+    try:
+        return fn()
+    except Exception:
+        return default
+
+
+def test_build_state_shares_fresh_core_snapshot_even_when_diagnostics_off():
+    calls = []
+    rows = [object() for _ in range(24)]
+    ns = {'_UNSET': object(), '_try': lambda fn, default=None: fn(),
+          '_get': lambda obj, key, default=None: getattr(obj, key, default),
+          'SCHEMA_VERSION': 1, 'WIRE_API_VERSION': '1.0',
+          'dataHub': object(), 'CC': object(), 'attach_ui_state': lambda *a: None}
+    build = method('_build_state', ns)
+    c = type('C', (), {})()
+    c._active, c._diagnosticsEnabled, c._diagnosticsSampleDue = True, False, False
+    c._battleId, c._selfTeam = 'b', None
+    captured = {'entities': rows, 'status': 'complete',
+        'count': 24, 'limit': 256, 'reason': None}
+    c._capture_avatar_snapshot = lambda: captured
+    c._remember_roster_vehicles = lambda entities: calls.append(('roster', entities))
+    c._collect_avatar_health = lambda entities: calls.append(('health', entities)) or {}
+    c._build_ships = lambda now, hp, entities: (
+        calls.append(('ships', entities)) or ([], {}))
+    c._self_team = lambda: 1
+    c._torpedoes = type('T', (), {'torpedoes': lambda self, team: ([], {'available': True}),
+        'armament': lambda self: {}, 'systems': lambda self: {}})()
+    c._torpedoMotion = type('T', (), {'update': lambda *args: None})()
+    c._mapCalibration = type('M', (), {'world_to_map': lambda *args: None})()
+    c._build_self = lambda hp: {}
+    c._damage = type('D', (), {'snapshot': lambda self: {}})()
+    c._ballistics = type('B', (), {'snapshot': lambda self: {}})()
+    complete = build(c, 1.)
+    assert [name for name, _ in calls] == ['roster', 'health', 'ships']
+    assert all(entities is rows for _, entities in calls)
+    assert calls[1][1] is calls[0][1]
+    assert complete['diag']['avatarSnapshotStatus']['status'] == 'complete'
+    calls[:] = []
+    captured.update({'entities': rows[:1], 'status': 'partial', 'count': 1,
+                     'reason': 'iterationError'})
+    partial = build(c, 2.)
+    assert calls[1][1] == []  # partial health cannot assert alive/dead by absence
+    assert partial['diag']['avatarSnapshotStatus'] == {
+        'status': 'partial', 'count': 1, 'limit': 256,
+        'reason': 'iterationError'}

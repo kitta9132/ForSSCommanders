@@ -6,7 +6,7 @@
 
 API_VERSION = 'API_v1.0'
 MOD_NAME = 'WowsExtractor'
-MOD_VERSION = '0.3.17-snapshot-reuse'
+MOD_VERSION = '0.3.18-core-avatar-reuse'
 
 # ---------------------------------------------------------------------------
 # WowsExtractor -- in-game data collector for the "8111 for WoWS" project.
@@ -965,7 +965,7 @@ class Collector(object):
         if vehicle_id is not None and pid is not None:
             self._damage.remember(vehicle_id, pid, team_id)
 
-    def _remember_roster_vehicles(self):
+    def _remember_roster_vehicles(self, avatar_entities=None):
         """Cache vehicleId -> playerId for the whole roster, including ships
         that are already dead or were never in getAllShips() this tick.
 
@@ -986,7 +986,10 @@ class Collector(object):
         veh_key = _get(CC, 'vehicle')
         if av_key is None:
             return
-        for entity in _try(lambda: dataHub.getEntityCollections('avatar'), []) or []:
+        if avatar_entities is None:
+            avatar_entities = _try(
+                lambda: dataHub.getEntityCollections('avatar'), []) or []
+        for entity in avatar_entities or []:
             avatar = _try(lambda e=entity, k=av_key: e[k])
             vehicle = _try(lambda e=entity, k=veh_key: e[k]) if veh_key is not None else None
             rec = roster_ids_from_avatar(avatar, vehicle)
@@ -1327,14 +1330,47 @@ class Collector(object):
         return out
 
     # -- state (per frame) --------------------------------------------------
+    def _capture_avatar_snapshot(self):
+        """Capture one bounded, fresh avatar view for this state build only."""
+        limit = 256
+        try:
+            entities = dataHub.getEntityCollections('avatar')
+        except Exception:
+            return {'entities': [], 'status': 'partial', 'count': 0,
+                    'limit': limit, 'reason': 'getterError'}
+        if entities is None:
+            return {'entities': [], 'status': 'partial', 'count': 0,
+                    'limit': limit, 'reason': 'none'}
+        rows = []
+        try:
+            for index, entity in enumerate(entities):
+                if index >= limit:
+                    return {'entities': rows, 'status': 'truncated',
+                            'count': len(rows), 'limit': limit,
+                            'reason': 'rowLimit'}
+                rows.append(entity)
+        except Exception:
+            return {'entities': rows, 'status': 'partial',
+                    'count': len(rows), 'limit': limit,
+                    'reason': 'iterationError'}
+        return {'entities': rows, 'status': 'complete',
+                'count': len(rows), 'limit': limit, 'reason': None}
+
     def _build_state(self, now):
         self._selfTeam = _UNSET   # recompute self team once for this frame
         diagnostic_enabled = _get(self, '_diagnosticsEnabled', False) is True
         diagnostic_due = diagnostic_enabled and _get(
             self, '_diagnosticsSampleDue', False) is True
-        self._remember_roster_vehicles()
-        ui_hp = self._collect_avatar_health()
-        ships, diag = self._build_ships(now, ui_hp)
+        avatar_snapshot = self._capture_avatar_snapshot()
+        avatar_entities = avatar_snapshot['entities']
+        self._remember_roster_vehicles(avatar_entities)
+        # Incomplete snapshots cannot safely assert UI alive/dead from absence.
+        ui_hp = self._collect_avatar_health(
+            avatar_entities if avatar_snapshot['status'] == 'complete' else [])
+        ships, diag = self._build_ships(now, ui_hp, avatar_entities)
+        diag['avatarSnapshotStatus'] = {
+            'status': avatar_snapshot['status'], 'count': avatar_snapshot['count'],
+            'limit': avatar_snapshot['limit'], 'reason': avatar_snapshot['reason']}
         torpedoes, torpedo_status = _try(
             lambda: self._torpedoes.torpedoes(self._self_team()),
             ([], {'available': False, 'status': 'unknown',
@@ -1461,11 +1497,12 @@ class Collector(object):
             'diag': diag,
         }
 
-    def _collect_avatar_health(self):
+    def _collect_avatar_health(self, entities=None):
         """Live HP from the same dataHub `health` component TTaroTeamPanel binds."""
         if CC is None:
             return {}
-        entities = _try(lambda: dataHub.getEntityCollections('avatar'), []) or []
+        if entities is None:
+            entities = _try(lambda: dataHub.getEntityCollections('avatar'), []) or []
         return index_avatar_health(entities, CC)
 
     def _build_self(self, ui_hp=None):
@@ -1578,7 +1615,7 @@ class Collector(object):
                             return pos
         return None
 
-    def _collect_map_positions(self):
+    def _collect_map_positions(self, avatar_entities=None):
         """Map playerId -> (mapX, mapY, mapYaw) from each ship entity's
         mapPosition component.
 
@@ -1598,7 +1635,10 @@ class Collector(object):
         visKey = _get(CC, 'visibility')
         if avKey is None:
             return out
-        for entity in _try(lambda: dataHub.getEntityCollections('avatar'), []) or []:
+        if avatar_entities is None:
+            avatar_entities = _try(
+                lambda: dataHub.getEntityCollections('avatar'), []) or []
+        for entity in avatar_entities or []:
             a = _try(lambda e=entity: e[avKey])
             if a is None:
                 continue
@@ -1738,10 +1778,10 @@ class Collector(object):
     def _map_to_world(self, mx, my):
         return self._mapCalibration.map_to_world(mx, my)
 
-    def _build_ships(self, now, ui_hp=None):
+    def _build_ships(self, now, ui_hp=None, avatar_entities=None):
         self._positionDiagnostics = {}
         ships = _try(lambda: battle.getAllShips(), []) or []
-        mapIndex = self._collect_map_positions()   # playerId -> (mapX, mapY, mapYaw)
+        mapIndex = self._collect_map_positions(avatar_entities)   # playerId -> (mapX, mapY, mapYaw)
 
         # -- pass 1: resolve ids + world positions; calibrate map->world ---------
         infos = []
