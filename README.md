@@ -1,11 +1,12 @@
 # ForSSCommanders
 
 - [開発タスク・残課題](TASKS.md)（仮マップはパラメーター確認用。本番マップはmod完成後に別途開発）
-- [開発方針・Git運用](DEVELOPMENT.md)（バージョン更新ごとにメインエージェントがコミット）
+- [開発方針](DEVELOPMENT.md)
+- [AI向け指示・Git運用](.ai/INSTRUCTIONS.md)
 
 World of Warshipsの潜水艦向け外部2Dマップと、公開ModsAPIを使う戦闘情報収集modの開発プロジェクトです。
 
-目標・共同作業・自律進行・収集層の責務・Git運用は [DEVELOPMENT.md](DEVELOPMENT.md) を参照してください。
+目標・収集層の責務は [DEVELOPMENT.md](DEVELOPMENT.md)、AIの共同作業・自律進行・Git運用は [.ai/INSTRUCTIONS.md](.ai/INSTRUCTIONS.md) を参照してください。
 
 現在のソース・日本語資料は [`WowsExtractor-torpedoes-client-test/`](WowsExtractor-torpedoes-client-test/) にあります。
 
@@ -28,7 +29,7 @@ ATM由来のUI状態はATMの別途導入が必要で、取得できない場合
 
 ### この作業環境の運用
 
-正本は `WowsExtractor-torpedoes-client-test/`。旧日付付きフォルダーは削除・Git除外します。通常の開発ではZIPを作成せず、メインエージェントがmanifest更新・導入・版ごとのコミットを行います。詳細は [DEVELOPMENT.md](DEVELOPMENT.md)。以下のZIP生成は配布が必要な場合のみです。
+正本は `WowsExtractor-torpedoes-client-test/`。旧日付付きフォルダーは削除・Git除外済みです。通常の開発ではZIPを作成しません。AIによる導入・コミットの担当は [.ai/INSTRUCTIONS.md](.ai/INSTRUCTIONS.md) を参照。以下のZIP生成は配布が必要な場合のみです。
 
 チェックサム・一覧・一括ソースは生成物のためGitへ含めません。
 インストーラーはチェックサムを必要とするため、まずPython 3.10以上で配布物を生成してください。

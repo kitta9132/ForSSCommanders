@@ -2,7 +2,7 @@
 
 現在の正本ソース：`WowsExtractor-torpedoes-client-test/`、0.3.14-identity-depth-candidates（未導入）。UI由来metadataとraw観測を保持し、ID対応候補と魚雷の明示深度候補を追加。従来の`isOwn`・raw IDは上書きしない。B27の潜水・Battery・二重pingは当該条件で確認済み、同じ試験の再要求は不要。失効条件・ID namespaceの一般契約・区画ID等は未確定。更新：2026-11-02。
 
-開発目標・共同作業・自律進行・収集層の責務・Git運用は [DEVELOPMENT.md](DEVELOPMENT.md) を参照。以下は進捗と残課題。
+開発目標・収集層の責務は [DEVELOPMENT.md](DEVELOPMENT.md)、AI向け指示・自律進行・Git運用は [.ai/INSTRUCTIONS.md](.ai/INSTRUCTIONS.md) を参照。以下は進捗と残課題。
 
 ## P0：位置鮮度・失探管理（実質完了／マップ実装時へ移管）
 

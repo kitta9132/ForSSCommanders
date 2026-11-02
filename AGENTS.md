@@ -1,6 +1,3 @@
-# プロジェクト指示
+# AI指示の参照入口
 
-作業前に [DEVELOPMENT.md](DEVELOPMENT.md) の開発方針・Git運用と [TASKS.md](TASKS.md) の現状を確認する。
-
-正本は `WowsExtractor-torpedoes-client-test/`。旧日付付きフォルダーは再作成しない。
-版更新のコミットはメインエージェントが行い、サブエージェントはcommit/pushしない。
+作業前に [.ai/INSTRUCTIONS.md](.ai/INSTRUCTIONS.md) を読む。AI向け指示の本文・今後の追記先は `.ai/` 内とし、このファイルは参照入口に限定する。
