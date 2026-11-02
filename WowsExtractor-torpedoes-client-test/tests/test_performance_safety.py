@@ -28,6 +28,7 @@ def test_config_is_opt_in_and_unknown_values_are_off():
         load(c)
         assert c._collectionEnabled is expected
         assert c._diagnosticsEnabled is False
+        assert c._diagnosticsInterval == 1.0
 
     c = type('C', (), {})()
     current.clear()
@@ -40,6 +41,28 @@ def test_config_is_opt_in_and_unknown_values_are_off():
           '_cfg_float': lambda cfg, key, default: default, 'STATE_INTERVAL': .1}
     method('_load_config', ns)(c)
     assert c._collectionEnabled is False
+
+
+def test_diagnostic_scheduler_samples_twice_per_two_seconds_without_catchup():
+    due = method('_diagnostics_due', {})
+    c = type('C', (), {'_diagnosticsEnabled': True,
+        '_diagnosticsInterval': 1.0, '_diagnosticsNextDue': None,
+        '_diagnosticsLastSampleTs': None, '_diagnosticsLastNow': None})()
+    samples = [now for now in [i / 10.0 for i in range(20)]
+               if due(c, now)]
+    assert samples == [0.0, 1.0]
+    # A delayed tick samples once and schedules from its actual timestamp.
+    assert due(c, 5.0) is True
+    assert due(c, 5.01) is False
+    assert c._diagnosticsNextDue == 6.0
+    # Clock rollback reopens the schedule immediately; invalid time clears history.
+    assert due(c, 4.0) is True
+    assert due(c, float('nan')) is False
+    assert c._diagnosticsNextDue is None
+    assert due(c, 4.1) is True
+    c._diagnosticsEnabled = False
+    assert due(c, 4.2) is False
+    assert c._diagnosticsNextDue is None
 
 
 def test_disabled_start_tick_double_start_and_quit_do_not_poll_game_apis():
@@ -103,7 +126,7 @@ def test_disabled_start_tick_double_start_and_quit_do_not_poll_game_apis():
 def test_diagnostic_calls_are_gated_but_opt_in_path_keeps_probe_payload():
     # The active snapshot path retains its established payload when diagnostics
     # are explicitly enabled; the regular offline checker exercises this path.
-    assert "if _get(self, '_diagnosticsEnabled', False) is True" in SOURCE
+    assert 'diagnostic_due = diagnostic_enabled and _get(' in SOURCE
     for fn in ('safe_weapon_hub_probe', 'safe_weapon_context_probe',
                'safe_game_clock_probe', 'safe_gun_reload_probe',
                'safe_selected_torpedo_params_probe',
@@ -151,3 +174,12 @@ def test_diagnostics_off_builds_fresh_disabled_shapes_without_probe_calls():
         'status': 'disabled', 'source': 'config.diagnostics_enabled'}
     assert snapshot['selfSubmarineProbe']['status'] == 'disabled'
     assert snapshot['identityCandidates']['status'] == 'disabled'
+    c._diagnosticsEnabled = True
+    c._diagnosticsSampleDue = False
+    not_sampled = build(c, 2.)
+    assert not_sampled['weaponHubProbe'] == {
+        'status': 'notSampled', 'source': 'scheduling',
+        'sampleTs': None}
+    assert not_sampled['selfSubmarineProbe']['status'] == 'notSampled'
+    assert not_sampled['uiTorpedoProbe']['status'] == 'notSampled'
+    assert not calls

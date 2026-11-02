@@ -56,16 +56,21 @@ config.example.ini      設定テンプレート
 任意で `config.example.ini` を同じフォルダーに `config.ini` としてコピーします。Windowsでは拡張子の非表示に注意し、`config.ini.txt` にしないでください。
 
 ```ini
+collection_enabled = false
+diagnostics_enabled = false
+diagnostics_interval = 1.0
 state_interval = 0.1
-last_seen_ttl = 60.0
 ```
 
 | 設定 | 標準値 | 意味 |
 | --- | --- | --- |
+| `collection_enabled` | `false` | `true`を明示した場合だけ収集を開始 |
+| `diagnostics_enabled` | `false` | `collection_enabled=true`時に診断probeを許可 |
+| `diagnostics_interval` | `1.0` | 診断一式を実行する秒間隔。非due tickは古いprobeを再利用しない |
 | `state_interval` | `0.1` | `state.json` の収集・出力を行う目安の秒間隔。0.1=約10Hz、0.2=約5Hz |
-| `last_seen_ttl` | `60.0` | 既存の艦船最終目撃情報の保持秒数。魚雷には適用しない |
 
 `state_interval` は0.02秒未満を0.02に丸めます。これは50Hzの保証ではありません。ゲームのtick、処理時間、非同期書き込みの状況によってフレームが省略されます。最初は0.1、負荷が気になる場合は0.2で確認してください。
+`diagnostics_interval` は0.1秒未満を0.1に丸めます。FPS改善を保証する設定ではありません。
 通常の有限な正の数を設定します。不明な設定キーは無視されます。設定は読み込み時と戦闘開始時に読み直されます。戦闘中の変更を即時反映する仕組みではありません。
 
 ## 6. 初回確認

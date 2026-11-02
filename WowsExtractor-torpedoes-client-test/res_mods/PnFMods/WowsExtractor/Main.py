@@ -6,7 +6,7 @@
 
 API_VERSION = 'API_v1.0'
 MOD_NAME = 'WowsExtractor'
-MOD_VERSION = '0.3.15-performance-safety'
+MOD_VERSION = '0.3.16-diagnostic-scheduling'
 
 # ---------------------------------------------------------------------------
 # WowsExtractor -- in-game data collector for the "8111 for WoWS" project.
@@ -741,6 +741,11 @@ class Collector(object):
         self._stateInterval = STATE_INTERVAL
         self._collectionEnabled = False
         self._diagnosticsEnabled = False
+        self._diagnosticsInterval = 1.0
+        self._diagnosticsNextDue = None
+        self._diagnosticsLastSampleTs = None
+        self._diagnosticsLastNow = None
+        self._diagnosticsSampleDue = False
         self._lastMetaWrite = 0.0
         self._metaRetryUntil = 0.0
         self._metaReady = False
@@ -790,6 +795,12 @@ class Collector(object):
         self._collectionEnabled = cfg.get('collection_enabled') == 'true'
         self._diagnosticsEnabled = (
             self._collectionEnabled and cfg.get('diagnostics_enabled') == 'true')
+        self._diagnosticsInterval = max(
+            _cfg_float(cfg, 'diagnostics_interval', 1.0), 0.1)
+        self._diagnosticsNextDue = None
+        self._diagnosticsLastSampleTs = None
+        self._diagnosticsLastNow = None
+        self._diagnosticsSampleDue = False
         # clamp the interval so a typo (0 / negative) can't hammer the disk
         self._stateInterval = max(_cfg_float(cfg, 'state_interval', STATE_INTERVAL), 0.02)
 
@@ -814,6 +825,9 @@ class Collector(object):
         self._torpedoMotion.clear()
         self._damage.clear()
         self._mapTransform = None
+        self._diagnosticsNextDue = None
+        self._diagnosticsLastSampleTs = None
+        self._diagnosticsLastNow = None
         self._lastMetaWrite = 0.0
         self._metaRetryUntil = 0.0
         self._metaReady = False
@@ -1030,9 +1044,23 @@ class Collector(object):
         if not self._active or not self._collectionEnabled:
             return
         now = _now()
+        previous_now = self._diagnosticsLastNow
+        try:
+            clock_ok = (float(now) == float(now) and
+                        float(now) != float('inf') and
+                        float(now) != -float('inf'))
+        except Exception:
+            clock_ok = False
+        if not clock_ok or (previous_now is not None and now < previous_now):
+            self._diagnosticsNextDue = None
+            self._diagnosticsLastSampleTs = None
+            self._diagnosticsLastNow = None
+            if previous_now is not None and clock_ok:
+                self._lastWrite = 0.0
         self._refresh_meta(now)
         if (now - self._lastWrite) < self._stateInterval:
             return
+        self._diagnosticsSampleDue = self._diagnostics_due(now)
         self._lastWrite = now
         try:
             snap = self._build_state(now)
@@ -1041,8 +1069,43 @@ class Collector(object):
             if not self._active:
                 return
             self._write_state(snap)
+            if self._diagnosticsSampleDue:
+                self._diagnosticsLastSampleTs = now
+                self._diagnosticsNextDue = now + self._diagnosticsInterval
         except Exception, e:
             logError('tick failed: {}'.format(_str(e)))
+        finally:
+            self._diagnosticsSampleDue = False
+
+    def _diagnostics_due(self, now):
+        """Schedule one complete diagnostics sample; never replay missed periods."""
+        if not self._diagnosticsEnabled:
+            self._diagnosticsNextDue = None
+            self._diagnosticsLastSampleTs = None
+            self._diagnosticsLastNow = None
+            return False
+        try:
+            now = float(now)
+            if now != now or now == float('inf') or now == -float('inf'):
+                self._diagnosticsNextDue = None
+                self._diagnosticsLastSampleTs = None
+                self._diagnosticsLastNow = None
+                return False
+        except Exception:
+            self._diagnosticsNextDue = None
+            self._diagnosticsLastSampleTs = None
+            self._diagnosticsLastNow = None
+            return False
+        previous = self._diagnosticsLastNow
+        if previous is not None and now < previous:
+            self._diagnosticsNextDue = None
+            self._diagnosticsLastSampleTs = None
+        self._diagnosticsLastNow = now
+        due = self._diagnosticsNextDue is None or now >= self._diagnosticsNextDue
+        if due:
+            # Advance from actual sample time. A late tick cannot trigger catch-up.
+            self._diagnosticsNextDue = now + self._diagnosticsInterval
+        return due
 
     # -- relation helper ----------------------------------------------------
     def _self_team(self):
@@ -1264,6 +1327,9 @@ class Collector(object):
     # -- state (per frame) --------------------------------------------------
     def _build_state(self, now):
         self._selfTeam = _UNSET   # recompute self team once for this frame
+        diagnostic_enabled = _get(self, '_diagnosticsEnabled', False) is True
+        diagnostic_due = diagnostic_enabled and _get(
+            self, '_diagnosticsSampleDue', False) is True
         self._remember_roster_vehicles()
         ui_hp = self._collect_avatar_health()
         ships, diag = self._build_ships(now, ui_hp)
@@ -1271,13 +1337,15 @@ class Collector(object):
             lambda: self._torpedoes.torpedoes(self._self_team()),
             ([], {'available': False, 'status': 'unknown',
                    'source': 'battle.getAllTorpedoes'}))
-        if _get(self, '_diagnosticsEnabled', False) is True:
+        if diagnostic_due:
             probe = _try(lambda: ui_torpedo_probe(dataHub, CC, torpedoes),
                          {'status': 'unknown', 'source': 'dataHub.torpedo'})
             _try(lambda: attach_ui_state(torpedoes, probe))
         else:
-            probe = {'status': 'disabled', 'source': 'config.diagnostics_enabled',
-                     'rows': []}
+            probe = ({'status': 'notSampled', 'source': 'scheduling',
+                      'sampleTs': None, 'rows': []} if diagnostic_enabled else
+                     {'status': 'disabled', 'source': 'config.diagnostics_enabled',
+                      'rows': []})
         _try(lambda: self._torpedoMotion.update(
             torpedoes, now, torpedo_status.get('available', False)))
         for torpedo in torpedoes:
@@ -1288,7 +1356,9 @@ class Collector(object):
             torpedo['mapPositionStatus'] = 'available' if normalized else 'unknown'
             torpedo['mapPositionSource'] = 'calibratedWorldPosition' if normalized else None
         disabled = {'status': 'disabled', 'source': 'config.diagnostics_enabled'}
-        if _get(self, '_diagnosticsEnabled', False) is True:
+        unsampled = {'status': 'notSampled', 'source': 'scheduling',
+                     'sampleTs': None}
+        if diagnostic_due:
             weapon_probe = _try(lambda: safe_weapon_hub_probe(dataHub, CC),
                 {'source': 'dataHub weapon UI candidates', 'status': 'unknown',
                  'semantics': 'unverified', 'collections': {}})
@@ -1334,21 +1404,31 @@ class Collector(object):
                 for _observation in _get(_probe, 'observations', {}).values():
                     _observation['sampleTs'] = now
         else:
-            weapon_probe = dict(disabled)
-            weapon_context = dict(disabled)
-            game_clock = dict(disabled)
-            gun_reload = dict(disabled)
-            selected_torpedo_params = dict(disabled)
-            torpedo_tooltip_parameter = dict(disabled)
-            submarine_probes = {'selfSubmarineProbe': dict(disabled),
-                                'waveHitProbe': dict(disabled)}
+            state = unsampled if diagnostic_enabled else disabled
+            weapon_probe = dict(state)
+            weapon_context = dict(state)
+            game_clock = dict(state)
+            gun_reload = dict(state)
+            selected_torpedo_params = dict(state)
+            torpedo_tooltip_parameter = dict(state)
+            submarine_probes = {'selfSubmarineProbe': dict(state),
+                                'waveHitProbe': dict(state)}
         self_state = self._build_self(ui_hp)
-        if _get(self, '_diagnosticsEnabled', False) is True:
+        if diagnostic_due:
             identity_candidates_state = _try(
                 lambda: safe_identity_candidates(ships, self_state, torpedoes,
                     submarine_probes['waveHitProbe']), dict(disabled))
         else:
-            identity_candidates_state = dict(disabled)
+            identity_candidates_state = dict(unsampled if diagnostic_enabled else disabled)
+        if diagnostic_due:
+            for _sample in (probe, weapon_probe, weapon_context, game_clock,
+                            gun_reload, selected_torpedo_params,
+                            torpedo_tooltip_parameter,
+                            submarine_probes['selfSubmarineProbe'],
+                            submarine_probes['waveHitProbe'],
+                            identity_candidates_state):
+                if isinstance(_sample, dict):
+                    _sample['sampleTs'] = now
         return {
             'schema': SCHEMA_VERSION,
             'apiVersion': WIRE_API_VERSION,
@@ -1524,11 +1604,15 @@ class Collector(object):
                 pid = _get(a, 'id')
             if pid is None:
                 continue
-            if _get(self, '_diagnosticsEnabled', False) is not True:
+            if (_get(self, '_diagnosticsEnabled', False) is not True or
+                    _get(self, '_diagnosticsSampleDue', True) is not True):
                 self._mapVisibility[pid] = {}
                 self._mapVisibilityDiagnostics[pid] = {
-                    'status': 'disabled',
-                    'source': 'config.diagnostics_enabled'}
+                    'status': ('notSampled' if _get(
+                        self, '_diagnosticsEnabled', False) is True else 'disabled'),
+                    'source': ('scheduling' if _get(
+                        self, '_diagnosticsEnabled', False) is True else
+                        'config.diagnostics_enabled'), 'sampleTs': None}
                 comp = _try(lambda e=entity: e[mpKey]) if mpKey is not None else None
                 if comp is not None:
                     xy = _point_xy(_get(comp, 'position'))

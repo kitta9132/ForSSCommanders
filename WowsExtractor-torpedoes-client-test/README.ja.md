@@ -1,13 +1,13 @@
 # WowsExtractor 魚雷出力版：実機テスト用パッケージ
 
 作成日：2026-11-02（日本時間）
-modバージョン：`0.3.15-performance-safety` / ModsAPI：`API_v1.0`（未導入）
+modバージョン：`0.3.16-diagnostic-scheduling` / ModsAPI：`API_v1.0`（source only・未導入）
 
 ## 最優先：性能報告と安全設定
 
-0.3.14導入後「自艦が沈むまでminFPS 25、撃沈後110まで回復」と報告されています。外部記録ツールは未使用とのことですが、mod内部のtick・state書込は別途戦闘中継続します。因果は未確定です。通常プレイには収集modのロード対象外への退避を推奨します。0.3.15は `collection_enabled = false` が既定の**収集停止安全版**であり、FPS改善済み・改善確認済みではありません。ゲーム稼働中の変更やFPS比較の追加実機試験は行いません。詳細：[性能事故記録](docs/PERFORMANCE_INCIDENT_0.3.14.ja.md)
+0.3.14導入後「自艦が沈むまでminFPS 25、撃沈後110まで回復」と報告されています。外部記録ツールは未使用とのことですが、mod内部のtick・state書込は別途戦闘中継続します。因果は未確定です。0.3.16はsource only・未導入です。`collection_enabled = false`と`diagnostics_enabled = false`の既定を維持し、診断有効時は既定1秒間隔へ抑制します。FPS改善済み・実機安全確認済みとは主張しません。通常プレイには収集modのロード対象外への退避を推奨します。詳細：[性能事故記録](docs/PERFORMANCE_INCIDENT_0.3.14.ja.md)
 
-`config.ini` がない場合・読み込みに失敗した場合も収集停止です。明示的に `collection_enabled = true` のときだけ通常収集を開始します。重いUI/dataHub probeはさらに `diagnostics_enabled = true` が必要です。収集停止中はprobe/API poll・定期tickを行わず、戦闘開始時のdisabled stateと終了stateだけを書きます。
+`config.ini` がない場合・読み込みに失敗した場合も収集停止です。明示的に `collection_enabled = true` のときだけ通常収集を開始します。重いUI/dataHub probeはさらに `diagnostics_enabled = true` が必要で、`diagnostics_interval` は既定1.0秒です。収集停止中はprobe/API poll・定期tickを行わず、戦闘開始時のdisabled stateと終了stateだけを書きます。core収集（0.1秒）およびarmament/public_dataの負荷は未評価です。
 
 0.3.7は0.3.6のraw診断を維持し、成功したnamed collectionから完全な単一rowの場合だけweapon／clockの通常観測を別fieldに追加します。0/複数row、partial、truncated、field不明はunknownです。B11では5 collectionすべて単一row、controller `selectedWeapon` 0→2（active開始+21.335秒）、`battleTime` 0→37、`duration` 10を観測し、ユーザー画面報告9:40の選択・数値・操作順との整合を当該試験条件で確認しました。一般条件・サーバー情報としては未保証です。clock残時間は別collectionの同一snapshot観測からのUI式推定で、unit・意味は未検証です。0.3.3配布物・生成物は変更していません。[B11記録](docs/VALIDATION_0.3.6_B11_ROUTES.ja.md)を参照。
 
