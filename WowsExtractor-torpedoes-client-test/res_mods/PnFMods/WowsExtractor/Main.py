@@ -6,7 +6,7 @@
 
 API_VERSION = 'API_v1.0'
 MOD_NAME = 'WowsExtractor'
-MOD_VERSION = '0.3.14-identity-depth-candidates'
+MOD_VERSION = '0.3.15-performance-safety'
 
 # ---------------------------------------------------------------------------
 # WowsExtractor -- in-game data collector for the "8111 for WoWS" project.
@@ -739,6 +739,8 @@ class Collector(object):
         self._battleId = None
         self._selfTeam = _UNSET       # memoized once per snapshot build
         self._stateInterval = STATE_INTERVAL
+        self._collectionEnabled = False
+        self._diagnosticsEnabled = False
         self._lastMetaWrite = 0.0
         self._metaRetryUntil = 0.0
         self._metaReady = False
@@ -754,7 +756,7 @@ class Collector(object):
 
         # Move JSON encoding + disk writes off the game thread when possible.
         self._writer = None
-        if _threading is not None:
+        if self._collectionEnabled and _threading is not None:
             try:
                 self._writer = _AsyncWriter(_threading)
                 logInfo('async writer enabled (encoding + disk I/O off game thread)')
@@ -768,17 +770,26 @@ class Collector(object):
         events.onReceiveDamagesOnShip(self._on_damages)
         _try(lambda: events.onReceiveShellInfo(self._on_shell_info))
         # ballistics (best effort; some builds may not expose all of these)
-        _try(lambda: events.onArtilleryAmmoChanged(self._ballistics.on_ammo_changed))
-        _try(lambda: events.onWeaponTypeChanged(self._ballistics.on_weapon_changed))
-        _try(lambda: events.onSquadronActivated(self._ballistics.on_squadron))
-        _try(lambda: events.onSquadronDeactivated(self._ballistics.on_squadron_off))
+        _try(lambda: events.onArtilleryAmmoChanged(self._on_artillery_ammo_changed))
+        _try(lambda: events.onWeaponTypeChanged(self._on_weapon_type_changed))
+        _try(lambda: events.onSquadronActivated(self._on_squadron_activated))
+        _try(lambda: events.onSquadronDeactivated(self._on_squadron_deactivated))
         logInfo('loaded v{} (state interval {}s)'.format(MOD_VERSION, self._stateInterval))
 
     # -- config -------------------------------------------------------------
     def _load_config(self):
         """(Re)read config.ini from the mod folder. Called at load and again on
         each battle start, so edits are picked up without restarting the game."""
-        cfg = _load_mod_config()
+        try:
+            cfg = _load_mod_config()
+            if not isinstance(cfg, dict):
+                cfg = {}
+        except:
+            cfg = {}
+        # Collection is opt-in. Only the literal, valid value "true" enables it.
+        self._collectionEnabled = cfg.get('collection_enabled') == 'true'
+        self._diagnosticsEnabled = (
+            self._collectionEnabled and cfg.get('diagnostics_enabled') == 'true')
         # clamp the interval so a typo (0 / negative) can't hammer the disk
         self._stateInterval = max(_cfg_float(cfg, 'state_interval', STATE_INTERVAL), 0.02)
 
@@ -806,11 +817,15 @@ class Collector(object):
         self._lastMetaWrite = 0.0
         self._metaRetryUntil = 0.0
         self._metaReady = False
-        self._selfPlayerId = _try(lambda: battle.getSelfPlayerInfo().id)
-        self._remember_player_vehicle(_try(lambda: battle.getSelfPlayerInfo()))
-        self._remember_roster_vehicles()
-        self._battleId = self._battleIdentity.start(
-            self._selfPlayerId, self._find_arena_id())
+        if self._collectionEnabled:
+            self._selfPlayerId = _try(lambda: battle.getSelfPlayerInfo().id)
+            self._remember_player_vehicle(_try(lambda: battle.getSelfPlayerInfo()))
+            self._remember_roster_vehicles()
+            self._battleId = self._battleIdentity.start(
+                self._selfPlayerId, self._find_arena_id())
+        else:
+            self._selfPlayerId = None
+            self._battleId = self._battleIdentity.start(None, None)
         self._battleStarted = True
         if self._battleShown:
             self._start_collection()
@@ -847,6 +862,15 @@ class Collector(object):
         if self._active:
             return
         self._active = True
+        if not self._collectionEnabled:
+            # Keep lifecycle visible without polling game APIs or scheduling ticks.
+            self._write_state({'schema': SCHEMA_VERSION,
+                'apiVersion': WIRE_API_VERSION, 'battleId': self._battleId,
+                'active': True, 'collection': {'status': 'disabled',
+                    'source': 'config.collection_enabled'}, 'ts': _now(),
+                'ships': [], 'self': None, 'torpedoes': [], 'damage': {}})
+            logInfo('collection disabled by config')
+            return
         self._ballistics.start()
         self._metaRetryUntil = _now() + META_RETRY_SECONDS
         self._remember_roster_vehicles()
@@ -864,7 +888,8 @@ class Collector(object):
         self._mapCalibration.clear()
         self._torpedoMotion.clear()
         self._stop_tick()
-        self._ballistics.stop()
+        if self._collectionEnabled:
+            self._ballistics.stop()
         self._mapTransform = None
         # write one final snapshot marking the battle inactive (through the same
         # single writer, so it can't race a still-queued "active" frame)
@@ -876,6 +901,9 @@ class Collector(object):
                     'torpedoStatus': {'available': False, 'status': 'unknown'},
                     'torpedoArmament': {'available': False},
                     'damage': self._damage.snapshot()}
+            if not self._collectionEnabled:
+                snap['collection'] = {'status': 'disabled',
+                                      'source': 'config.collection_enabled'}
             self._write_state(snap)
         except:
             pass
@@ -950,12 +978,31 @@ class Collector(object):
                 self._damage.remember(rec[0], rec[1], rec[2])
 
     def _on_damages(self, victimId, damages):
+        if not self._collectionEnabled or not self._active:
+            return
         _try(lambda: self._damage.on_damages(victimId, damages))
 
     def _on_shell_info(self, victimId, shooterId, ammoId=None, matId=None,
                        shotId=None, booleans=None, damage=0, shotPosition=None,
                        *args):
-        _try(lambda: self._damage.on_shell(victimId, shooterId, damage))
+        if self._collectionEnabled and self._active:
+            _try(lambda: self._damage.on_shell(victimId, shooterId, damage))
+
+    def _on_artillery_ammo_changed(self, *args):
+        if self._collectionEnabled and self._active:
+            _try(lambda: self._ballistics.on_ammo_changed(*args))
+
+    def _on_weapon_type_changed(self, *args):
+        if self._collectionEnabled and self._active:
+            _try(lambda: self._ballistics.on_weapon_changed(*args))
+
+    def _on_squadron_activated(self, *args):
+        if self._collectionEnabled and self._active:
+            _try(lambda: self._ballistics.on_squadron(*args))
+
+    def _on_squadron_deactivated(self, *args):
+        if self._collectionEnabled and self._active:
+            _try(lambda: self._ballistics.on_squadron_off(*args))
 
     # -- state output -------------------------------------------------------
     def _write_state(self, snap):
@@ -980,7 +1027,7 @@ class Collector(object):
 
     # -- per-frame (throttled) ---------------------------------------------
     def _tick(self, *args):
-        if not self._active:
+        if not self._active or not self._collectionEnabled:
             return
         now = _now()
         self._refresh_meta(now)
@@ -1224,9 +1271,13 @@ class Collector(object):
             lambda: self._torpedoes.torpedoes(self._self_team()),
             ([], {'available': False, 'status': 'unknown',
                    'source': 'battle.getAllTorpedoes'}))
-        probe = _try(lambda: ui_torpedo_probe(dataHub, CC, torpedoes),
-                     {'status': 'unknown', 'source': 'dataHub.torpedo'})
-        _try(lambda: attach_ui_state(torpedoes, probe))
+        if _get(self, '_diagnosticsEnabled', False) is True:
+            probe = _try(lambda: ui_torpedo_probe(dataHub, CC, torpedoes),
+                         {'status': 'unknown', 'source': 'dataHub.torpedo'})
+            _try(lambda: attach_ui_state(torpedoes, probe))
+        else:
+            probe = {'status': 'disabled', 'source': 'config.diagnostics_enabled',
+                     'rows': []}
         _try(lambda: self._torpedoMotion.update(
             torpedoes, now, torpedo_status.get('available', False)))
         for torpedo in torpedoes:
@@ -1236,67 +1287,68 @@ class Collector(object):
             torpedo['mapPosition'] = normalized
             torpedo['mapPositionStatus'] = 'available' if normalized else 'unknown'
             torpedo['mapPositionSource'] = 'calibratedWorldPosition' if normalized else None
-        weapon_probe = _try(
-            lambda: safe_weapon_hub_probe(dataHub, CC),
-            {'source': 'dataHub weapon UI candidates', 'status': 'unknown',
-              'semantics': 'unverified', 'collections': {}})
-        weapon_context = _try(
-            lambda: safe_weapon_context_probe(dataHub, CC),
-            {'source': 'dataHub selfVehicle weapon UI context',
-             'status': 'unknown', 'semantics': 'unverified'})
-        game_clock = _try(
-            lambda: safe_game_clock_probe(dataHub, CC),
-            {'source': 'dataHub UI game clock candidates',
-             'status': 'unknown', 'semantics': 'unverified', 'candidates': {}})
-        gun_reload = _try(
-            lambda: safe_gun_reload_probe(dataHub, CC),
-            {'source': 'dataHub UI gun reload candidates',
-             'status': 'unknown', 'semantics': 'unverified', 'collections': {},
-              'references': [], 'error': 'probeFailed'})
-        selected_torpedo_params = _try(
-            lambda: safe_selected_torpedo_params_probe(
-                dataHub, CC, weapon_context, weapon_probe),
-            {'source': 'dataHub selfVehicle shipTTX torpedo candidates',
-             'status': 'unknown', 'semantics': 'unverified',
-             'selection': {'status': 'unknown', 'descriptor': None},
-              'selfVehicle': {'status': 'unknown'}, 'variant': None,
-              'fields': {}, 'variants': {}, 'error': 'probeFailed'})
-        torpedo_tooltip_parameter = _try(
-            lambda: safe_torpedo_tooltip_parameter_probe(
-                dataHub, CC, selected_torpedo_params),
-            {'source': 'dataHub playerAvatar owner + parameter candidates',
-             'status': 'unknown', 'semantics': 'unverified',
-             'ownerEntityId': {'status': 'unknown'},
-             'parameterCollection': {'status': 'unknown', 'rows': []},
-             'selectedParameter': {'status': 'unknown', 'reason': 'probeFailed',
-                                   'fields': {}},
-              'stages': {'owner': 'unknown', 'parameterCollection': 'unknown',
-                         'match': 'unknown'}})
-        submarine_probes = _try(
-            lambda: safe_submarine_probe(dataHub, CC, now),
-            {'selfSubmarineProbe': {'source': 'dataHub.selfVehicle',
-                                    'status': 'unknown', 'semantics': 'unverified',
-                                    'sampleTs': now, 'collection': {},
-                                    'entityIdCandidate': None, 'components': {}},
-             'waveHitProbe': {'source': 'dataHub.waveHit', 'status': 'unknown',
-                              'semantics': 'unverified', 'sampleTs': now,
-                              'collection': {}, 'componentKeyStatus': 'unknown',
-                              'rows': [], 'truncated': False, 'partial': False}})
-        for _probe in (weapon_context, game_clock):
-            for _observation in _get(_probe, 'observations', {}).values():
-                _observation['sampleTs'] = now
+        disabled = {'status': 'disabled', 'source': 'config.diagnostics_enabled'}
+        if _get(self, '_diagnosticsEnabled', False) is True:
+            weapon_probe = _try(lambda: safe_weapon_hub_probe(dataHub, CC),
+                {'source': 'dataHub weapon UI candidates', 'status': 'unknown',
+                 'semantics': 'unverified', 'collections': {}})
+            weapon_context = _try(lambda: safe_weapon_context_probe(dataHub, CC),
+                {'source': 'dataHub selfVehicle weapon UI context',
+                 'status': 'unknown', 'semantics': 'unverified'})
+            game_clock = _try(lambda: safe_game_clock_probe(dataHub, CC),
+                {'source': 'dataHub UI game clock candidates',
+                 'status': 'unknown', 'semantics': 'unverified', 'candidates': {}})
+            gun_reload = _try(lambda: safe_gun_reload_probe(dataHub, CC),
+                {'source': 'dataHub UI gun reload candidates', 'status': 'unknown',
+                 'semantics': 'unverified', 'collections': {}, 'references': [],
+                 'error': 'probeFailed'})
+            selected_torpedo_params = _try(
+                lambda: safe_selected_torpedo_params_probe(
+                    dataHub, CC, weapon_context, weapon_probe),
+                {'source': 'dataHub selfVehicle shipTTX torpedo candidates',
+                 'status': 'unknown', 'semantics': 'unverified',
+                 'selection': {'status': 'unknown', 'descriptor': None},
+                 'selfVehicle': {'status': 'unknown'}, 'variant': None,
+                 'fields': {}, 'variants': {}, 'error': 'probeFailed'})
+            torpedo_tooltip_parameter = _try(
+                lambda: safe_torpedo_tooltip_parameter_probe(
+                    dataHub, CC, selected_torpedo_params),
+                {'source': 'dataHub playerAvatar owner + parameter candidates',
+                 'status': 'unknown', 'semantics': 'unverified',
+                 'ownerEntityId': {'status': 'unknown'},
+                 'parameterCollection': {'status': 'unknown', 'rows': []},
+                 'selectedParameter': {'status': 'unknown',
+                    'reason': 'probeFailed', 'fields': {}},
+                 'stages': {'owner': 'unknown', 'parameterCollection': 'unknown',
+                    'match': 'unknown'}})
+            submarine_probes = _try(lambda: safe_submarine_probe(dataHub, CC, now),
+                {'selfSubmarineProbe': {'source': 'dataHub.selfVehicle',
+                    'status': 'unknown', 'semantics': 'unverified',
+                    'sampleTs': now, 'collection': {}, 'entityIdCandidate': None,
+                    'components': {}},
+                 'waveHitProbe': {'source': 'dataHub.waveHit', 'status': 'unknown',
+                    'semantics': 'unverified', 'sampleTs': now, 'collection': {},
+                    'componentKeyStatus': 'unknown', 'rows': [],
+                    'truncated': False, 'partial': False}})
+            for _probe in (weapon_context, game_clock):
+                for _observation in _get(_probe, 'observations', {}).values():
+                    _observation['sampleTs'] = now
+        else:
+            weapon_probe = dict(disabled)
+            weapon_context = dict(disabled)
+            game_clock = dict(disabled)
+            gun_reload = dict(disabled)
+            selected_torpedo_params = dict(disabled)
+            torpedo_tooltip_parameter = dict(disabled)
+            submarine_probes = {'selfSubmarineProbe': dict(disabled),
+                                'waveHitProbe': dict(disabled)}
         self_state = self._build_self(ui_hp)
-        identity_candidates_state = _try(
-            lambda: safe_identity_candidates(
-                ships, self_state, torpedoes,
-                submarine_probes['waveHitProbe']),
-            {'source': 'sameSnapshotValueEqualityCandidates',
-             'status': 'unknown', 'semantics': 'unverified',
-             'contractStatus': 'unverified', 'history': 'none',
-             'apiCallsAdded': 0, 'shipsCollection': {},
-             'torpedoRowsStatus': 'notEvaluated', 'waveHitUsage': None,
-             'evaluatedCount': 0, 'exactCount': 0,
-             'identityCandidates': [], 'error': 'probeFailed'})
+        if _get(self, '_diagnosticsEnabled', False) is True:
+            identity_candidates_state = _try(
+                lambda: safe_identity_candidates(ships, self_state, torpedoes,
+                    submarine_probes['waveHitProbe']), dict(disabled))
+        else:
+            identity_candidates_state = dict(disabled)
         return {
             'schema': SCHEMA_VERSION,
             'apiVersion': WIRE_API_VERSION,
@@ -1471,6 +1523,17 @@ class Collector(object):
             if pid is None:
                 pid = _get(a, 'id')
             if pid is None:
+                continue
+            if _get(self, '_diagnosticsEnabled', False) is not True:
+                self._mapVisibility[pid] = {}
+                self._mapVisibilityDiagnostics[pid] = {
+                    'status': 'disabled',
+                    'source': 'config.diagnostics_enabled'}
+                comp = _try(lambda e=entity: e[mpKey]) if mpKey is not None else None
+                if comp is not None:
+                    xy = _point_xy(_get(comp, 'position'))
+                    if xy is not None:
+                        out[pid] = (xy[0], xy[1], _get(comp, 'yaw'))
                 continue
             raw_visibility = {}
             candidate_diagnostics = {}

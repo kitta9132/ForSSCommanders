@@ -1,5 +1,13 @@
 # WowsExtractor 魚雷出力版（WoWSクライアント用mod）
 
+## 0.3.15-performance-safety：既定収集停止
+
+0.3.14導入後のFPS報告を受けた安全措置として、`collection_enabled` は既定falseです。`config.ini` 不在・読込失敗・不正値も収集停止になり、明示した文字列 `true` のみ有効です。停止中はbattle ship/torpedo API、dataHub収集、Ballistics API、damage/ballistics tracker開始・tick、定期callbackを実行しません。battle lifecycleを維持し、battle shown時のdisabled stateとquit時のinactive stateのみを書きます。stateの`collection`は`{"status":"disabled","source":"config.collection_enabled"}`を示します。外部読取側は通常のtelemetry snapshotが出ないことを許容してください。
+
+収集を明示有効化した場合も `diagnostics_enabled` の既定はfalseです。trueの場合だけUI/dataHub診断群を呼び、falseでは各diagnosticに`status=disabled`と`source=config.diagnostics_enabled`を出し、古いprobe値は再利用しません。既存のcore収集（艦船・魚雷・自艦等）はcollection opt-in時に動作し、state intervalは従来どおり0.1秒です。core opt-in時の残負荷は未評価です。
+
+この変更は同期収集経路の既定停止であり、FPS改善・原因特定を確認したものではありません。通常プレイではmodをロード対象外へ退避することを推奨します。詳細は[性能事故記録](PERFORMANCE_INCIDENT_0.3.14.ja.md)。
+
 [Tz-WIND/8111_for_wows](https://github.com/Tz-WIND/8111_for_wows) のクライアント側収集modに、公開ModsAPIの魚雷情報出力を追加したものです。
 ベースのコミット: `28470b6ff0c05bac8aa41bd7d986daa6814242e2`。
 既存の `state.json` に魚雷関係のフィールドを追加します。

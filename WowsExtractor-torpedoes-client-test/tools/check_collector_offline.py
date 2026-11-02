@@ -49,6 +49,8 @@ def main():
     collector._torpedoMotion = Obj(clear=lambda: None)
     collector._ballistics = Obj(snapshot=lambda: {'available': False}, stop=lambda: None)
     collector._active = True
+    collector._collectionEnabled = True
+    collector._diagnosticsEnabled = True
     collector._battleId = 'offline-battle'
     ns['dataHub'] = Obj(getEntityCollections=lambda name: [])
     ns['CC'] = Obj(selfVehicle='selfVehicle-key', submarine='submarine-key',

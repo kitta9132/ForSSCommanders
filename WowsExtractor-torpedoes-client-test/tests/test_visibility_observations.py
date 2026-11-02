@@ -70,8 +70,8 @@ def test_visibility_helpers_execute_main_source_and_enforce_safe_raw_contract():
 
 
 def test_hidden_and_unknown_visibility_do_not_discard_coordinates():
-    def get(obj, key):
-        return obj.get(key) if isinstance(obj, dict) else getattr(obj, key, None)
+    def get(obj, key, default=None):
+        return obj.get(key, default) if isinstance(obj, dict) else getattr(obj, key, default)
 
     def attempt(fn, default=None):
         try:
@@ -91,7 +91,7 @@ def test_hidden_and_unknown_visibility_do_not_discard_coordinates():
         'dataHub': Obj(getEntityCollections=lambda name: entities),
         '_get': get, '_try': attempt, '_point_xy': lambda p: p})
     collect = method('_collect_map_positions', ns)
-    collector = Obj()
+    collector = Obj(_diagnosticsEnabled=True)
     result = collect(collector)
     assert result[1][:2] == (0.2, 0.3)
     assert result[2][:2] == (1.2, 0.3)  # raw out-of-range observation retained
@@ -115,10 +115,10 @@ def test_visibility_unknown_is_not_false_and_non_scalars_are_not_exported():
     ns = visibility_ns(**{
         'CC': Obj(mapPosition=None, avatar='avatar', visibility='visibility'),
         'dataHub': Obj(getEntityCollections=lambda name: entities),
-        '_get': lambda obj, key: (obj.get(key) if isinstance(obj, dict)
-                                  else getattr(obj, key, None)),
+        '_get': lambda obj, key, default=None: (obj.get(key, default) if isinstance(obj, dict)
+                                  else getattr(obj, key, default)),
         '_try': lambda fn, default=None: fn(), '_point_xy': lambda p: p})
-    collector = Obj()
+    collector = Obj(_diagnosticsEnabled=True)
     assert method('_collect_map_positions', ns)(collector) == {}
     assert collector._mapVisibility == {1: {'visible': False, 'isShipVisible': 0}}
     candidates = collector._mapVisibilityDiagnostics[1]['candidates']
@@ -151,10 +151,10 @@ def test_visibility_diagnostics_distinguish_missing_error_component_and_cc_key()
     ns = visibility_ns(**{
         'CC': Obj(mapPosition=None, avatar='avatar', visibility='visibility'),
         'dataHub': Obj(getEntityCollections=lambda name: entities),
-        '_get': lambda obj, key: (obj.get(key) if isinstance(obj, dict)
-                                  else getattr(obj, key, None)),
+        '_get': lambda obj, key, default=None: (obj.get(key, default) if isinstance(obj, dict)
+                                  else getattr(obj, key, default)),
         '_try': lambda fn, default=None: fn(), '_point_xy': lambda p: p})
-    collector = Obj()
+    collector = Obj(_diagnosticsEnabled=True)
     method('_collect_map_positions', ns)(collector)
     first = collector._mapVisibilityDiagnostics[1]['candidates']
     assert first['mapVisible']['status'] == 'missing'
@@ -176,10 +176,10 @@ def test_nonfinite_visibility_is_not_exported_as_json_number():
     ns = visibility_ns(**{
         'CC': Obj(mapPosition=None, avatar='avatar', visibility='visibility'),
         'dataHub': Obj(getEntityCollections=lambda name: entities),
-        '_get': lambda obj, key: (obj.get(key) if isinstance(obj, dict)
-                                  else getattr(obj, key, None)),
+        '_get': lambda obj, key, default=None: (obj.get(key, default) if isinstance(obj, dict)
+                                  else getattr(obj, key, default)),
         '_try': lambda fn, default=None: fn(), '_point_xy': lambda p: p})
-    collector = Obj()
+    collector = Obj(_diagnosticsEnabled=True)
     method('_collect_map_positions', ns)(collector)
     assert collector._mapVisibility == {1: {}}
     candidates = collector._mapVisibilityDiagnostics[1]['candidates']
@@ -197,7 +197,7 @@ def test_ship_api_visibility_is_a_separate_diagnostic_source():
              Obj(_Ship__id=101, teamId=1, isVisible=True)]
     ns = visibility_ns(**{
         '_try': lambda fn, default=None: _attempt(fn, default),
-        '_get': lambda obj, key: getattr(obj, key, None),
+        '_get': lambda obj, key, default=None: getattr(obj, key, default),
         '_map_norm_xy': lambda x, y: None,
         'apply_ui_health': lambda *args, **kwargs: None,
         'battle': Obj(getAllShips=lambda: ships,
@@ -224,7 +224,7 @@ def test_ship_api_visibility_is_a_separate_diagnostic_source():
             for pid, value in ((10, 0), (11, 1))}
         return {}
 
-    collector = Obj(_positionDiagnostics={}, _mapVisibility={},
+    collector = Obj(_diagnosticsEnabled=True, _positionDiagnostics={}, _mapVisibility={},
                     _mapVisibilityDiagnostics={}, _damage=Damage(),
                     _mapCalibration=Calibration(),
                     _self_team=lambda: 1, _relation=lambda team: 1,

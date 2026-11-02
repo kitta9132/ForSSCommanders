@@ -1,6 +1,10 @@
 # 開発タスク
 
-現在の正本ソース：`WowsExtractor-torpedoes-client-test/`、0.3.14-identity-depth-candidates（未導入）。UI由来metadataとraw観測を保持し、ID対応候補と魚雷の明示深度候補を追加。従来の`isOwn`・raw IDは上書きしない。B27の潜水・Battery・二重pingは当該条件で確認済み、同じ試験の再要求は不要。失効条件・ID namespaceの一般契約・区画ID等は未確定。更新：2026-11-02。
+## 緊急優先：通常プレイのFPS低下
+
+- [ ] 0.3.14導入後の通常プレイで「自艦撃沈までminFPS 25、撃沈後110まで回復」と報告（外部記録ツール未使用）。記録ツール未使用でもmod内部tick/state書込は継続する。因果未確定。FPS差の候補としてlive自艦時の処理差・診断/core API呼出しを重点確認するが、追加FPS比較実機試験は依頼しない。0.3.15-performance-safetyでは既定収集を停止し、通常プレイにはmod退避を推奨。これはFPS改善済みを意味しない。ゲーム稼働中の変更は禁止。[性能問題記録](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_INCIDENT_0.3.14.ja.md)。
+
+現在の正本ソース：`WowsExtractor-torpedoes-client-test/`。作業対象は0.3.15-performance-safety（未導入、既定収集停止）。0.3.14までの機能状態：UI由来metadata/raw観測、ID対応候補、魚雷明示深度候補。従来の`isOwn`・raw IDは上書きしない。B27の潜水・Battery・二重pingは当該条件で確認済み、同じ試験の再要求は不要。失効条件・ID namespaceの一般契約・区画ID等は未確定。更新：2026-11-02。
 
 開発目標・収集層の責務は [DEVELOPMENT.md](DEVELOPMENT.md)、AI向け指示・自律進行・Git運用は [.ai/INSTRUCTIONS.md](.ai/INSTRUCTIONS.md) を参照。以下は進捗と残課題。
 

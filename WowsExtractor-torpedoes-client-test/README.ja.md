@@ -1,7 +1,13 @@
 # WowsExtractor 魚雷出力版：実機テスト用パッケージ
 
 作成日：2026-11-02（日本時間）
-modバージョン：`0.3.14-identity-depth-candidates` / ModsAPI：`API_v1.0`
+modバージョン：`0.3.15-performance-safety` / ModsAPI：`API_v1.0`（未導入）
+
+## 最優先：性能報告と安全設定
+
+0.3.14導入後「自艦が沈むまでminFPS 25、撃沈後110まで回復」と報告されています。外部記録ツールは未使用とのことですが、mod内部のtick・state書込は別途戦闘中継続します。因果は未確定です。通常プレイには収集modのロード対象外への退避を推奨します。0.3.15は `collection_enabled = false` が既定の**収集停止安全版**であり、FPS改善済み・改善確認済みではありません。ゲーム稼働中の変更やFPS比較の追加実機試験は行いません。詳細：[性能事故記録](docs/PERFORMANCE_INCIDENT_0.3.14.ja.md)
+
+`config.ini` がない場合・読み込みに失敗した場合も収集停止です。明示的に `collection_enabled = true` のときだけ通常収集を開始します。重いUI/dataHub probeはさらに `diagnostics_enabled = true` が必要です。収集停止中はprobe/API poll・定期tickを行わず、戦闘開始時のdisabled stateと終了stateだけを書きます。
 
 0.3.7は0.3.6のraw診断を維持し、成功したnamed collectionから完全な単一rowの場合だけweapon／clockの通常観測を別fieldに追加します。0/複数row、partial、truncated、field不明はunknownです。B11では5 collectionすべて単一row、controller `selectedWeapon` 0→2（active開始+21.335秒）、`battleTime` 0→37、`duration` 10を観測し、ユーザー画面報告9:40の選択・数値・操作順との整合を当該試験条件で確認しました。一般条件・サーバー情報としては未保証です。clock残時間は別collectionの同一snapshot観測からのUI式推定で、unit・意味は未検証です。0.3.3配布物・生成物は変更していません。[B11記録](docs/VALIDATION_0.3.6_B11_ROUTES.ja.md)を参照。
 
@@ -9,7 +15,7 @@ modバージョン：`0.3.14-identity-depth-candidates` / ModsAPI：`API_v1.0`
 
 0.3.13ではraw fieldsを保ったまま、静的UI根拠とB27範囲に限定したdepth unit hint、depthIndex/Battery enum label、WaveHit `lifeTime` seconds hintを別`interpretations` metadataに追加しました。サーバー状態一般は確定せず、Battery派生値・depth丸め・`maxLifeTime`計算もありません。同じ潜水テストの再要求は不要です。[正本とB27記録](docs/RESEARCH_SUBMARINE_STATE_SEMANTICS.ja.md)を参照。
 
-0.3.14-identity-depth-candidatesは**未導入・実機未確認**のソース版です。`uiTorpedoProbe.rows[].depth`と`torpedoes[].uiState.depth`に、有限数値だけのread-only depth候補を追加（0保持、`position.y`代用・前frame持越しなし）。さらに`identityCandidates`として、同じsnapshotの`ships[].vehicleId`と魚雷`ownerId`／WaveHit`targetID`の厳密scalar値一致候補を別出力します。候補はAPI契約ではなく、`matchStatus`と`completeness=unknown`を分離し、0件一致は`indeterminate`、複数は`ambiguousMultiple`（最大8候補）、単一`targetShipId`は出しません。legacy`isOwn`／`owner`／`targetID`は上書きしません。B10/B12/B14はself-only、B27は敵1 targetのoffline根拠に限定し、現在のships列挙完全性は不明のままです。0.3.13の`interpretations` raw/metadataは変更しません。[ID名前空間調査](docs/RESEARCH_ID_NAMESPACE_CANDIDATES.ja.md)を参照。専用の実機試験は追加せず、次回の通常魚雷発射時にdepth候補を相乗り確認します。
+0.3.14-identity-depth-candidatesまでの以下の機能は開発履歴です。0.3.15の既定では収集停止となり、出力されません。`uiTorpedoProbe.rows[].depth`と`torpedoes[].uiState.depth`に、有限数値だけのread-only depth候補を追加（0保持、`position.y`代用・前frame持越しなし）。さらに`identityCandidates`として、同じsnapshotの`ships[].vehicleId`と魚雷`ownerId`／WaveHit`targetID`の厳密scalar値一致候補を別出力します。候補はAPI契約ではなく、`matchStatus`と`completeness=unknown`を分離し、0件一致は`indeterminate`、複数は`ambiguousMultiple`（最大8候補）、単一`targetShipId`は出しません。legacy`isOwn`／`owner`／`targetID`は上書きしません。B10/B12/B14はself-only、B27は敵1 targetのoffline根拠に限定し、現在のships列挙完全性は不明のままです。0.3.13の`interpretations` raw/metadataは変更しません。[ID名前空間調査](docs/RESEARCH_ID_NAMESPACE_CANDIDATES.ja.md)を参照。専用の実機試験は追加せず、次回の通常魚雷発射時にdepth候補を相乗り確認します。
 
 オフライン全回帰：`python -m pytest -q`。ゲーム上の潜水艦probe取得可否・意味は実機未検証です。導入・manifest/ZIPは親セッションが管理します。
 
@@ -67,7 +73,7 @@ World_of_Warships/
                └─ config.example.ini
 ```
 
-`config.example.ini` は必要なら `config.ini` にコピーします。未作成なら標準設定で動きます。`Main.py` 単体では動きません。
+`config.example.ini` は必要なら `config.ini` にコピーします。未作成なら収集停止です。`Main.py` 単体では動きません。
 
 導入に必要なPython sourceは8 filesです：`Main.py`, `battle_identity.py`, `damage_tracker.py`, `emit_guard.py`, `ui_health.py`, `torpedo_telemetry.py`, `submarine_telemetry.py`, `map_calibration.py`。installerの明示allowlistと`tools/check_collector_offline.py`の必須module listを同期しています。offline確認は対応するPython 3.10–3.12で`python tools/check_collector_offline.py`、回帰は`python -m pytest -q`。manifest/checksumは生成物で、今回更新せず親セッション管理です。
 

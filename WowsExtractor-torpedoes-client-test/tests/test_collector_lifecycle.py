@@ -32,6 +32,7 @@ def harness():
     cls = type('CollectorHarness', (), {n: load_method(n, ns) for n in names})
     c = cls()
     c._active = c._battleStarted = c._battleShown = False
+    c._collectionEnabled = True
     c._stateFile = c._metaFile = None
     c._battleId = None
     c._load_config = lambda: None

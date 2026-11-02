@@ -17,7 +17,11 @@ World of Warshipsの潜水艦向け外部2Dマップと、公開ModsAPIを使う
 
 ## 現在の状態
 
-現行ソースは `0.3.14-identity-depth-candidates`（未導入）。ID対応候補と魚雷の明示深度候補を追加し、従来の`isOwn`・raw IDを保持します。B27ではUndineの潜水・Battery・二重pingに対応するraw遷移を確認。UI由来の単位hint・enum名は別のmetadataであり、サーバー状態一般を保証しません。失効条件・ID namespaceの一般契約・命中区画は未確定です。B18のparameter複合keyは既存記録のoffline再生で確認済み。同じ潜水／parameter試験の再要求は不要です。詳細と残課題は [TASKS.md](TASKS.md) を参照。旧0.3.1ではSteam版build 13357625の訓練戦で、魚雷位置・type、
+### 最優先：通常プレイ時のFPS報告
+
+0.3.14導入後「自艦が沈むまでminFPS 25、撃沈後は110まで回復」と報告されています（外部記録ツール未使用）。mod内部のtick・state書込は別に戦闘中継続するため、因果は未確定です。通常プレイでは収集modのロード対象外への退避を推奨します。0.3.15-performance-safetyは**既定収集停止**の安全版で、FPS改善済み・性能改善確認済みではありません。ゲーム稼働中の変更や追加FPS比較試験は行いません。[事故記録](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_INCIDENT_0.3.14.ja.md)
+
+現行の安全版ソースは `0.3.15-performance-safety`（未導入）。既定ではbattle収集を停止し、同期収集経路を開始しません。収集を明示有効化しても重い診断は別opt-inです。これはFPS改善確認ではありません。旧開発ソース0.3.14までの内容はID対応候補・魚雷の明示深度候補を含み、詳細と残課題は [TASKS.md](TASKS.md) を参照してください。旧0.3.1ではSteam版build 13357625の訓練戦で、魚雷位置・type、
 ATM由来の誘導/被発見状態、移動履歴による座標較正などを試験しています。
 簡易2Dマップのグリッドとゲーム内位置が概ね一致することをテスターが目視確認しました。
 12対12・別地図・失探時の鮮度などは未検証です。完成版ではありません。
