@@ -3,10 +3,10 @@
 ## 緊急優先：通常プレイのFPS低下
 
 - [ ] **B28で0.3.20を一時導入して計測したところ、12vs12・収集ON／診断OFF／計測ONで「minFPS約20にほぼ固定、カクつき悪化」と報告。試験を中止し、クライアント停止確認後にWowsExtractorのみを再退避済み。** 診断OFFだけでは解消しない。core・書込み・計測器・外部記録の寄与は解析待ちで、追加実機・再導入は行わない。[B28性能記録](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_B28_0.3.20.ja.md)。
-- B28の4集計窓では`ships`がsnapshot buildの約84%を占める（同一時計の記録値の比率）。191 sampleの`ships`平均約27.4ms・最大約40ms、魚雷処理平均約0.03ms。診断OFFを確認済み。優先対象を艦のplayer取得・位置fallback・属性読取りへ絞る。`time.clock`のruntime意味とFPS因果は未確定で、FPS改善を主張しない。通常戦での再現は依頼せず、既存記録とコードを調べる。
+- B28の4集計窓では`ships`がsnapshot buildの約84%を占める（同一時計の記録値の比率）。191 sampleの`ships`平均約27.4ms・最大約40ms、魚雷処理平均約0.03ms。診断OFFを確認済み。B28静的調査でposition/worldPosition/positionHullが各9,100 missing、同一frame player lookup重複を確認。0.3.21ではship.getPosition一回、同frame player再利用、重いfallbackをdiagnostic due+opt-inだけにした。FPS因果と`time.clock`のruntime意味は未確定。通常戦での再現・再導入は依頼しない。
 - [ ] 0.3.14導入後の通常プレイで「自艦撃沈までminFPS 25、撃沈後110まで回復」と報告（外部記録ツール未使用）。因果未確定。追加FPS比較実機試験は依頼しない。0.3.15で既定収集停止、0.3.16で診断既定1Hz、0.3.17でdiagnostic sample内共有、0.3.18でcore avatar getterを3→1へ、0.3.19でself getterを各state 1回へ共有。0.3.20-opt-in-profiling（source only・未導入）でcollection/diagnostics/profiler既定OFFのまま最大9区間の5秒phase集計を追加。OFF時clock calls 0、FPS未計測・改善未確認、timer候補はWoWS runtime未検証。writer thread/FPS/API内部時間未計測、24艦core処理時間・armament/public_data等は未評価。通常プレイにはmod退避を推奨。0.3.14 mod退避先はユーザー許可済み、再導入禁止。[性能問題記録](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_INCIDENT_0.3.14.ja.md)。
 
-現在の正本ソース：`WowsExtractor-torpedoes-client-test/`。作業対象は0.3.20-opt-in-profiling（source only・未導入）。collection/diagnostics/profiler既定OFFを維持し、明示opt-in時に最大9区間を5秒集計する。OFF時clock calls 0、game-thread phase予算18 reads/tick。Python timer候補の実ゲーム挙動、FPS、writer thread、API内部時間は未確認/未計測。通常プレイにはmod退避を推奨。0.3.14までの機能状態・残課題は以下を参照。更新：2026-11-02。
+現在の正本ソース：`WowsExtractor-torpedoes-client-test/`。作業対象は0.3.21-position-read-budget（source only・未導入）。collection/diagnostics/profiler/position fallbackは既定OFF。coreはship.getPosition一回とmap座標を維持し、position fallbackは明示opt-inかつdiagnostic due時のみ。FPS、writer thread、API内部時間・候補getter時間は未確認/未計測。通常プレイにはmod退避を推奨。0.3.14までの機能状態・残課題は以下を参照。更新：2026-11-02。
 
 開発目標・収集層の責務は [DEVELOPMENT.md](DEVELOPMENT.md)、AI向け指示・自律進行・Git運用は [.ai/INSTRUCTIONS.md](.ai/INSTRUCTIONS.md) を参照。以下は進捗と残課題。
 

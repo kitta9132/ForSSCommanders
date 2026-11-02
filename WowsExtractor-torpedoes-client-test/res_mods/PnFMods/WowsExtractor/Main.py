@@ -6,7 +6,7 @@
 
 API_VERSION = 'API_v1.0'
 MOD_NAME = 'WowsExtractor'
-MOD_VERSION = '0.3.20-opt-in-profiling'
+MOD_VERSION = '0.3.21-position-read-budget'
 
 # ---------------------------------------------------------------------------
 # WowsExtractor -- in-game data collector for the "8111 for WoWS" project.
@@ -749,6 +749,7 @@ class Collector(object):
         self._collectionEnabled = False
         self._diagnosticsEnabled = False
         self._profilerEnabled = False
+        self._positionFallbacksEnabled = False
         self._performanceProfiler = None
         self._diagnosticsInterval = 1.0
         self._diagnosticsNextDue = None
@@ -804,6 +805,8 @@ class Collector(object):
         self._collectionEnabled = cfg.get('collection_enabled') == 'true'
         self._diagnosticsEnabled = (
             self._collectionEnabled and cfg.get('diagnostics_enabled') == 'true')
+        self._positionFallbacksEnabled = (
+            self._collectionEnabled and cfg.get('position_fallbacks_enabled') == 'true')
         profiler_enabled = (
             self._collectionEnabled and cfg.get('profiler_enabled') == 'true')
         # Keep OFF as None: no disabled-profiler wrappers or closures on each
@@ -1619,12 +1622,14 @@ class Collector(object):
         apply_ui_health(data, ui_hp)
         return data if data else None
 
-    def _position_from_obj(self, obj):
+    def _position_from_obj(self, obj, skip_get_position=False):
         """Extract world position from a ship-like object or mapping."""
         if obj is None:
             return None
         missing = object()
-        for name in ('getPosition', 'position', 'worldPosition', 'positionHull'):
+        names = (('position', 'worldPosition', 'positionHull') if skip_get_position
+                 else ('getPosition', 'position', 'worldPosition', 'positionHull'))
+        for name in names:
             result = 'missing'
             raw = None
             try:
@@ -1673,33 +1678,79 @@ class Collector(object):
                     return pos
         return None
 
-    def _get_ship_position(self, ship, playerId=None, vehId=None):
-        """Try multiple sources to get a ship's world position.
-        Different WoWS builds expose position via different APIs; spotted enemies
-        in particular may only be reachable through getPlayerShipInfo()."""
-        pos = self._position_from_obj(ship)
+    def _get_ship_position(self, ship, playerId=None, vehId=None, player=_UNSET,
+                           allow_fallback=False):
+        """Read the public ship getter once; expensive legacy paths are sampled only."""
+        direct = None
+        # Read getPosition exactly once; do not let a failing/None getter trigger
+        # another lookup or a second call on the same ship object.
+        missing = object()
+        attr_error = False
+        try:
+            getter = getattr(ship, 'getPosition', missing) if ship is not None else missing
+        except Exception:
+            getter = None
+            attr_error = True
+        status = 'error' if attr_error else 'missing'
+        raw = None
+        if getter is None and not attr_error:
+            status = 'none'
+        elif getter is not missing and not attr_error:
+            try:
+                raw = getter() if callable(getter) else getter
+                status = 'none' if raw is None else 'value'
+            except Exception:
+                status = 'error'
+        pos = _vec(raw)
         if pos:
-            return pos
+            status = 'available'
+            direct = pos
+        elif status == 'value':
+            status = 'invalidVector'
+        attempts = getattr(self, '_positionDiagnostics', None)
+        if attempts is not None:
+            key = 'getPosition:' + status
+            attempts[key] = attempts.get(key, 0) + 1
+        details = {'status': 'available' if direct else 'unknown',
+                   'source': 'ship.getPosition',
+                   'attempted': True, 'reason': None if direct else status,
+                   'policy': 'diagnosticExtendedFallback' if allow_fallback else
+                              'coreDirectOnly',
+                   'fallbackStatus': 'notSampled', 'fallbackSource': None}
+        if direct:
+            return direct, details
+        if not allow_fallback:
+            return None, details
+        details['fallbackStatus'] = 'attempted'
+
+        # The extended compatibility search is intentionally 1Hz diagnostic-only.
+        # Never perform a second getPlayerByVehicleId lookup: None and exceptions
+        # from the caller's lookup are final for this frame.
+        candidates = [(lambda: ship, True)]
         if playerId is not None:
-            for getter in (lambda: battle.getPlayerShipInfo(playerId),
-                           lambda: battle.getPlayerInfo(playerId)):
-                pos = self._position_from_obj(_try(getter))
-                if pos:
-                    return pos
-        if vehId is not None:
-            player = _try(lambda: battle.getPlayerByVehicleId(vehId))
-            if player is not None:
-                pos = self._position_from_obj(player)
-                if pos:
-                    return pos
-                pid = _get(player, 'id')
-                if pid is not None and pid != playerId:
-                    for getter in (lambda: battle.getPlayerShipInfo(pid),
-                                   lambda: battle.getPlayerInfo(pid)):
-                        pos = self._position_from_obj(_try(getter))
-                        if pos:
-                            return pos
-        return None
+            candidates.extend([(lambda: _try(
+                lambda: battle.getPlayerShipInfo(playerId)), False),
+                               (lambda: _try(
+                lambda: battle.getPlayerInfo(playerId)), False)])
+        if player is not _UNSET and player is not None:
+            candidates.append((lambda: player, False))
+            pid = _get(player, 'id')
+            if pid is not None and pid != playerId:
+                candidates.extend([(lambda: _try(
+                    lambda: battle.getPlayerShipInfo(pid)), False),
+                                   (lambda: _try(
+                    lambda: battle.getPlayerInfo(pid)), False)])
+        for candidate_getter, skip_getter in candidates:
+            # ship/player getPosition was already read once above/on the direct
+            # object; only the historical non-getPosition candidates are retried.
+            candidate = candidate_getter()
+            found = self._position_from_obj(candidate, skip_get_position=skip_getter)
+            if found:
+                details.update({'fallbackSource': 'diagnosticFallback',
+                                'fallbackStatus': 'available'})
+                return found, details
+        details['fallbackStatus'] = 'unknown'
+        return None, details
 
     def _collect_map_positions(self, avatar_entities=None):
         """Map playerId -> (mapX, mapY, mapYaw) from each ship entity's
@@ -1868,6 +1919,9 @@ class Collector(object):
         self._positionDiagnostics = {}
         ships = _try(lambda: battle.getAllShips(), []) or []
         mapIndex = self._collect_map_positions(avatar_entities)   # playerId -> (mapX, mapY, mapYaw)
+        fallback_due = (_get(self, '_positionFallbacksEnabled', False) is True and
+                        _get(self, '_diagnosticsEnabled', False) is True and
+                        _get(self, '_diagnosticsSampleDue', False) is True)
 
         # -- pass 1: resolve ids + world positions; calibrate map->world ---------
         infos = []
@@ -1883,8 +1937,13 @@ class Collector(object):
             if vehId is not None and pid is not None:
                 self._damage.remember(
                     vehId, pid, _get(player, 'teamId') or _get(ship, 'teamId'))
-            worldPos = self._get_ship_position(ship, pid, vehId)
-            infos.append((ship, vehId, player, pid, worldPos))
+            worldPos, position_read = self._get_ship_position(
+                ship, pid, vehId, player=player, allow_fallback=fallback_due)
+            fallback_attempted = position_read['fallbackStatus'] != 'notSampled'
+            count_key = ('fallbackSampledShips' if fallback_attempted else
+                         'fallbackNotSampledShips')
+            self._positionDiagnostics[count_key] = self._positionDiagnostics.get(count_key, 0) + 1
+            infos.append((ship, vehId, player, pid, worldPos, position_read))
             if worldPos and pid is not None:
                 mp = mapIndex.get(pid)
                 if mp is not None and self._mapVisibility.get(pid, {}).get('mapVisible') != False:
@@ -1900,7 +1959,7 @@ class Collector(object):
         nAllyVis = 0
         nEnemy = 0
         nEnemyVis = 0
-        for ship, vehId, player, pid, worldPos in infos:
+        for ship, vehId, player, pid, worldPos, position_read in infos:
             entry = {}
             entry['uiId'] = _get(ship, 'uiId')
             if vehId is not None:
@@ -1970,6 +2029,19 @@ class Collector(object):
                     entry['relation'] = self._relation(entry['teamId'])
 
             pos = worldPos
+            entry['positionReadStatus'] = {
+                'status': position_read['status'],
+                'source': position_read['source'],
+                'attempted': position_read['attempted'],
+                'reason': position_read['reason'],
+            }
+            entry['positionReadPolicy'] = {
+                'source': 'ship.getPosition',
+                'policy': position_read['policy'],
+                'fallbackStatus': position_read['fallbackStatus'],
+                'fallbackSource': position_read['fallbackSource'],
+                'attempted': position_read['fallbackStatus'] != 'notSampled',
+            }
             entry['positionSource'] = 'shipOrPlayerApi' if worldPos else None
             mp = mapIndex.get(pid) if pid is not None else None
             if mp is not None:
@@ -2025,6 +2097,17 @@ class Collector(object):
         for row in out:
             if row.get('maxHealth') is not None:
                 nHp += 1
+        sampled_ships = sum(1 for row in out if row.get(
+            'positionReadPolicy', {}).get('attempted'))
+        position_reads = dict(self._positionDiagnostics)
+        position_reads.update({
+            'readPolicy': ('diagnosticExtendedFallback' if fallback_due else
+                           'coreDirectOnly'),
+            'sampledShips': sampled_ships,
+            'notSampledShips': len(out) - sampled_ships,
+            'sampleDue': bool(_get(self, '_diagnosticsEnabled', False) is True and
+                              _get(self, '_diagnosticsSampleDue', False) is True),
+        })
         return out, {
             'totalShips': len(ships),
             'allies': nAlly,
@@ -2034,7 +2117,12 @@ class Collector(object):
             'mapCalib': calibration.get('status'),
             'mapSamples': len(calib),
             'mapCalibration': calibration,
-            'positionReads': dict(self._positionDiagnostics),
+            'positionReads': position_reads,
+            'positionReadPolicy': {
+                'policy': position_reads['readPolicy'],
+                'sampledShips': sampled_ships,
+                'notSampledShips': len(out) - sampled_ships,
+            },
             'uiHealth': nHp,
         }
 

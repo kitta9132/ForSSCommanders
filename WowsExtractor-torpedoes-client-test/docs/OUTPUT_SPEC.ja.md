@@ -1,5 +1,13 @@
 # WowsExtractor 魚雷出力版（WoWSクライアント用mod）
 
+## 0.3.21-position-read-budget
+
+通常の各ships rowでは、同frameで`_build_ships`が既に得たplayerをresolverへ渡し、艦本体の公開`ship.getPosition()`を最大1回だけ試します。成功した直接world座標を最優先し、失敗時も同frameの`dataHub.mapPosition`、既存の較正補助、visibility unknown時の座標保持は維持します。map座標はworld座標や深度ではなく、較正位置の補助Y=0も深度値ではありません。
+
+`ships[].positionReadStatus`は直接位置取得の`status/source/attempted/reason`、`ships[].positionReadPolicy`はfallbackの`policy/fallbackStatus/attempted`を別々に示します。fallbackを試していない状態は`notSampled`であり、missing/unsupportedを意味しません。直接getter失敗は`unknown`で、None・例外・属性欠落等のreasonを保持します。位置値をframe間でcacheしません。
+
+重い互換fallback（position/worldPosition/positionHull、playerShipInfo/playerInfo、shipGameData等）は既定停止です。`position_fallbacks_enabled=true`を指定しても、`collection_enabled=true`、`diagnostics_enabled=true`かつ1Hz等の診断sample due時だけ実行します。診断OFF・非due時に重い再試行は起動しません。fallbackが試されたships数と未試行ships数は`diag.positionReads`に別カウンタで出し、属性候補read件数と未試行を混同しません。過去版でfallback-onlyだった`position/worldPosition`値は、通常tickでは取得されず、position未取得または較正補助のみとなる場合があります。
+
 ## 0.3.20-opt-in-profiling
 
 `profiler_enabled` は既定falseで、`collection_enabled=true`との明示opt-inが両方そろった場合だけ標準timerを固定8 readで初期probeします。collection無効時はtimer read 0回です。`state.performance` はprofiler opt-in時のみ追加されます。5秒window未成立なら`status=notSampled`と`clockStatus=available`を出し、unsupported/disabled/invalid等はclock statusを保持します。window成立時だけ`phases`を含み、各phaseは`count/total/max`のみ（durationはms）。`sampleStartSeconds`/`sampleEndSeconds`はclock自体の秒値です。`timebase.source`と`timebase.basis=assumed`は時計候補と未確認のOS基準を示します。無効なclockで0msレコードは作りません。

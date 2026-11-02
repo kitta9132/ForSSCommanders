@@ -19,9 +19,9 @@ World of Warshipsの潜水艦向け外部2Dマップと、公開ModsAPIを使う
 
 ### 最優先：通常プレイ時のFPS報告
 
-0.3.14導入後「自艦が沈むまでminFPS 25、撃沈後は110まで回復」と報告されています（外部記録ツール未使用）。因果は未確定です。通常プレイでは収集modのロード対象外への退避を推奨します。0.3.20-opt-in-profilingは**source only・未導入**で、collection/diagnostics/profiler既定OFFと診断1Hz制限を維持します。明示opt-in profilerは最大9区間を5秒単位で集計しますが、時計候補はWoWS runtime未確認、FPS未計測・改善未確認です。[事故記録](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_INCIDENT_0.3.14.ja.md)
+0.3.14導入後「自艦が沈むまでminFPS 25、撃沈後は110まで回復」と報告されています（外部記録ツール未使用）。因果は未確定です。通常プレイでは収集modのロード対象外への退避を推奨します。0.3.21-position-read-budgetは**source only・未導入**で、collection/diagnostics/profiler既定OFFを維持し、通常艦位置取得を公開getPosition一回に制限します。重い位置fallbackは専用opt-inかつdiagnostic due時だけです。FPS未計測・改善未確認です。[事故記録](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_INCIDENT_0.3.14.ja.md)
 
-現行ソースは `0.3.20-opt-in-profiling`（未導入）。collection/diagnostics/profilerは既定OFFで、OFF時のprofiler clock read・measure wrapperはありません。導入sourceは9 Python modulesです。opt-in時の計測はgame-thread区間のみで、writer thread/FPS/API内部時間は未計測です。時計のWoWS実機挙動も未確認で、FPS改善を主張しません。詳細と残課題は [TASKS.md](TASKS.md) を参照してください。旧0.3.1ではSteam版build 13357625の訓練戦で、魚雷位置・type、
+現行ソースは `0.3.21-position-read-budget`（未導入）。collection/diagnostics/profilerと位置fallbackは既定OFFです。通常位置coreは艦の公開getPosition一回と既存dataHub map座標を維持し、fallbackは明示opt-inかつdiagnostic due時に限ります。FPS・WoWS API内部時間は未計測で、性能改善を主張しません。詳細と残課題は [TASKS.md](TASKS.md) を参照してください。旧0.3.1ではSteam版build 13357625の訓練戦で、魚雷位置・type、
 ATM由来の誘導/被発見状態、移動履歴による座標較正などを試験しています。
 簡易2Dマップのグリッドとゲーム内位置が概ね一致することをテスターが目視確認しました。
 12対12・別地図・失探時の鮮度などは未検証です。完成版ではありません。

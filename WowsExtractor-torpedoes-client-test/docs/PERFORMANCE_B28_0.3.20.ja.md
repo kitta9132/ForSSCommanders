@@ -37,6 +37,6 @@
 
 この記録は0.3.20のopt-in profiler実動作と、該当条件での負荷偏り（記録時計上`ships`が最大）を示すが、報告されたminFPS 20の原因を確定しない。0.3.14の撃沈前後報告（外部recorderなし、撃沈後minFPS 110）とも条件が異なり、数値を直接比較できない。
 
-次のコード修正候補は`Main.py:_build_ships`を対象に、車両ごとのplayer lookup・position取得・visibility/属性読取りの重複を、安全な既存snapshotの共有で減らせるか静的確認し、offline fixtureで出力同値・例外時unknownを守る範囲に限定して最適化すること。未計測のAPI内部時間や不確かなキャッシュを推測で導入しない。時計についてはruntime適合を確認できる根拠がなければ、profiler値を実時間と扱わず、時計選択・status表現を修正候補として分離する。
+この調査を受けたsource-only 0.3.21-position-read-budgetでは、`_build_ships`が取得したplayerを位置resolverで再利用し、車両単位の重複`getPlayerByVehicleId`をなくした。通常core位置経路は艦本体の`getPosition`一回に絞り、map座標と較正補助は維持する。`position/worldPosition/positionHull`やplayer-info等の重い互換fallbackは既定OFFとし、明示opt-inでもdiagnostics due時だけに限定した。`positionReadStatus`と`positionReadPolicy`を分離して未探索をmissing扱いせず、fallback試行/未試行の件数を集計する。これはB28の属性read反復数を減らすコード上の変更であり、実時間・FPS改善量は未計測である。fallback-onlyで取得できた値が通常tickでは未取得となる契約変更もある。詳細は[0.3.21契約](OUTPUT_SPEC.ja.md)と[調査正本](RESEARCH_SHIP_COLLECTION_B28.ja.md)。
 
 ユーザーから追加の実機測定は求めない。既報のゲーム停止とmod退避先のhash検証済みバックアップを維持し、再導入しない。他modは未変更。

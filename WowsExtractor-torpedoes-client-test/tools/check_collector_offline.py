@@ -110,9 +110,13 @@ def main():
     geo._mapVisibilityDiagnostics = {}
     geo._damage = Obj(remember=lambda *args: None)
     geo._relation = lambda team: 1 if team == 0 else 2
-    geo._get_ship_position = lambda ship, pid, vid: ship.pos
-    own = Obj(id=1, teamId=0, uiId=1, pos=[0., 0., 0.], isAlive=lambda: True)
-    enemy = Obj(id=2, teamId=1, uiId=2, pos=None, isAlive=lambda: True)
+    geo._positionFallbacksEnabled = False
+    geo._diagnosticsEnabled = False
+    geo._diagnosticsSampleDue = False
+    own = Obj(id=1, teamId=0, uiId=1,
+              getPosition=lambda: [0., 0., 0.], isAlive=lambda: True)
+    enemy = Obj(id=2, teamId=1, uiId=2,
+                getPosition=lambda: None, isAlive=lambda: True)
     ns['battle'] = Obj(getAllShips=lambda: [own, enemy],
                        getPlayerByVehicleId=lambda vid: Obj(id=vid, teamId=vid - 1))
     geo._collect_map_positions = lambda avatar_entities=None: {

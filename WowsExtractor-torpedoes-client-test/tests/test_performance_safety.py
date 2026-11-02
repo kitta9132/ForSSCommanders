@@ -37,6 +37,7 @@ def test_config_is_opt_in_and_unknown_values_are_off():
         load(c)
         assert c._collectionEnabled is expected
         assert c._diagnosticsEnabled is False
+        assert c._positionFallbacksEnabled is False
         assert c._diagnosticsInterval == 1.0
         if not expected:
             assert c._performanceProfiler is None
@@ -46,6 +47,12 @@ def test_config_is_opt_in_and_unknown_values_are_off():
     current.update({'collection_enabled': 'true', 'diagnostics_enabled': 'true'})
     load(c)
     assert c._collectionEnabled is True and c._diagnosticsEnabled is True
+    current['position_fallbacks_enabled'] = 'true'
+    load(c)
+    assert c._positionFallbacksEnabled is True
+    current['position_fallbacks_enabled'] = 'TRUE'
+    load(c)
+    assert c._positionFallbacksEnabled is False
 
     c = type('C', (), {})()
     ns = {'_load_mod_config': lambda: (_ for _ in ()).throw(ValueError()),
