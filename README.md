@@ -19,9 +19,9 @@ World of Warshipsの潜水艦向け外部2Dマップと、公開ModsAPIを使う
 
 ### 最優先：通常プレイ時のFPS報告
 
-0.3.14導入後「自艦が沈むまでminFPS 25、撃沈後は110まで回復」と報告されています（外部記録ツール未使用）。mod内部のtick・state書込も戦闘中継続するため、因果は未確定です。通常プレイでは収集modのロード対象外への退避を推奨します。0.3.18-core-avatar-reuseは**source only・未導入**で、既定収集・診断停止と診断1Hz制限を維持し、diagnostic sample内共有に加えてcore avatar collectionを同state内3用途で共有します。FPS未計測・改善未確認で、ゲーム稼働中の変更や追加FPS比較試験は行いません。[事故記録](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_INCIDENT_0.3.14.ja.md)
+0.3.14導入後「自艦が沈むまでminFPS 25、撃沈後は110まで回復」と報告されています（外部記録ツール未使用）。mod内部のtick・state書込も戦闘中継続するため、因果は未確定です。通常プレイでは収集modのロード対象外への退避を推奨します。0.3.19-self-snapshot-reuseは**source only・未導入**で、既定収集・診断停止と診断1Hz制限を維持し、core avatar collection 3用途に加えself info/ship結果を同state内で共有します。FPS未計測・改善未確認で、ゲーム稼働中の変更や追加FPS比較試験は行いません。[事故記録](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_INCIDENT_0.3.14.ja.md)
 
-現行ソースは `0.3.18-core-avatar-reuse`（未導入）。`collection_enabled=false`・`diagnostics_enabled=false`を既定維持し、診断はopt-inかつ既定1Hzです。core avatar collection getter 3→1、24 entity正常fixtureのraw出力同値、partial/truncated statusをoffline確認していますが、FPS改善や実機挙動は未確認です。state/coreの0.1秒経路・24艦処理時間・armament/public_dataは未評価です。詳細と残課題は [TASKS.md](TASKS.md) を参照してください。旧0.3.1ではSteam版build 13357625の訓練戦で、魚雷位置・type、
+現行ソースは `0.3.19-self-snapshot-reuse`（未導入）。`collection_enabled=false`・`diagnostics_enabled=false`を既定維持し、診断はopt-inかつ既定1Hzです。core avatar collection getter 3→1、self info/ship getterを各state 1回、24 entity正常fixtureのraw出力同値をoffline確認対象とし、FPS改善や実機挙動は未確認です。state/coreの0.1秒経路・24艦処理時間・armament/public_dataは未評価です。詳細と残課題は [TASKS.md](TASKS.md) を参照してください。旧0.3.1ではSteam版build 13357625の訓練戦で、魚雷位置・type、
 ATM由来の誘導/被発見状態、移動履歴による座標較正などを試験しています。
 簡易2Dマップのグリッドとゲーム内位置が概ね一致することをテスターが目視確認しました。
 12対12・別地図・失探時の鮮度などは未検証です。完成版ではありません。

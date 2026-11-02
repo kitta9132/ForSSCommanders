@@ -2204,9 +2204,12 @@ class TorpedoTelemetry(object):
         self.battle = battle_api
         self.constants = constants_api
 
-    def systems(self):
+    def systems(self, self_ship=_MISSING):
         """Documented self-ship consumables; never a sonar-ping target timer."""
-        _, ship = _call(self.battle, 'getSelfPlayerShip')
+        if self_ship is _MISSING:
+            _, ship = _call(self.battle, 'getSelfPlayerShip')
+        else:
+            ship = self_ship
         status, items = _call(ship, 'getConsumablesState')
         rows = []
         if status == 'available':
@@ -2266,8 +2269,11 @@ class TorpedoTelemetry(object):
         return out, {'available': status == 'available', 'status': status,
                      'source': 'battle.getAllTorpedoes'}
 
-    def armament(self):
-        _, ship = _call(self.battle, 'getSelfPlayerShip')
+    def armament(self, self_ship=_MISSING):
+        if self_ship is _MISSING:
+            _, ship = _call(self.battle, 'getSelfPlayerShip')
+        else:
+            ship = self_ship
         modules_status, modules = _call(ship, 'getTorpedoesModulesState')
         if ship is None:
             modules_status = 'unknown'

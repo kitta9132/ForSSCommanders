@@ -6,7 +6,7 @@
 
 API_VERSION = 'API_v1.0'
 MOD_NAME = 'WowsExtractor'
-MOD_VERSION = '0.3.18-core-avatar-reuse'
+MOD_VERSION = '0.3.19-self-snapshot-reuse'
 
 # ---------------------------------------------------------------------------
 # WowsExtractor -- in-game data collector for the "8111 for WoWS" project.
@@ -1113,15 +1113,18 @@ class Collector(object):
         return due
 
     # -- relation helper ----------------------------------------------------
-    def _self_team(self):
+    def _self_team(self, self_info=_UNSET):
         """Self team id, memoized for the duration of one snapshot build so we
         don't hit the engine ~24x per frame (once per ship)."""
         if self._selfTeam is _UNSET:
             team = None
-            try:
-                team = battle.getSelfPlayer().teamId
-            except:
-                team = _try(lambda: battle.getSelfPlayerInfo().teamId)
+            if self_info is not _UNSET:
+                team = _try(lambda: self_info.teamId)
+            else:
+                try:
+                    team = battle.getSelfPlayer().teamId
+                except:
+                    team = _try(lambda: battle.getSelfPlayerInfo().teamId)
             self._selfTeam = team
         return self._selfTeam
 
@@ -1358,6 +1361,11 @@ class Collector(object):
 
     def _build_state(self, now):
         self._selfTeam = _UNSET   # recompute self team once for this frame
+        # Capture fresh self API results once per state; None is a captured
+        # unknown, not a request to retry in another consumer.
+        self_info = _try(lambda: battle.getSelfPlayerInfo())
+        self_ship = _try(lambda: battle.getSelfPlayerShip())
+        self_team = self._self_team(self_info)
         diagnostic_enabled = _get(self, '_diagnosticsEnabled', False) is True
         diagnostic_due = diagnostic_enabled and _get(
             self, '_diagnosticsSampleDue', False) is True
@@ -1372,7 +1380,7 @@ class Collector(object):
             'status': avatar_snapshot['status'], 'count': avatar_snapshot['count'],
             'limit': avatar_snapshot['limit'], 'reason': avatar_snapshot['reason']}
         torpedoes, torpedo_status = _try(
-            lambda: self._torpedoes.torpedoes(self._self_team()),
+            lambda: self._torpedoes.torpedoes(self_team),
             ([], {'available': False, 'status': 'unknown',
                    'source': 'battle.getAllTorpedoes'}))
         if diagnostic_due:
@@ -1452,7 +1460,7 @@ class Collector(object):
             torpedo_tooltip_parameter = dict(state)
             submarine_probes = {'selfSubmarineProbe': dict(state),
                                 'waveHitProbe': dict(state)}
-        self_state = self._build_self(ui_hp)
+        self_state = self._build_self(ui_hp, self_info, self_ship)
         if diagnostic_due:
             identity_candidates_state = _try(
                 lambda: safe_identity_candidates(ships, self_state, torpedoes,
@@ -1489,8 +1497,8 @@ class Collector(object):
             'waveHitProbe': submarine_probes['waveHitProbe'],
             'gameClockProbe': game_clock,
             'torpedoArmament': _try(
-                lambda: self._torpedoes.armament(), {'available': False}),
-            'selfSystems': _try(lambda: self._torpedoes.systems(),
+                lambda: self._torpedoes.armament(self_ship), {'available': False}),
+            'selfSystems': _try(lambda: self._torpedoes.systems(self_ship),
                                 {'status': 'unknown'}),
             'damage': self._damage.snapshot(),
             'ballistics': _try(lambda: self._ballistics.snapshot(), {'available': False}),
@@ -1505,8 +1513,9 @@ class Collector(object):
             entities = _try(lambda: dataHub.getEntityCollections('avatar'), []) or []
         return index_avatar_health(entities, CC)
 
-    def _build_self(self, ui_hp=None):
-        info = _try(lambda: battle.getSelfPlayerInfo())
+    def _build_self(self, ui_hp=None, self_info=_UNSET, self_ship=_UNSET):
+        info = (_try(lambda: battle.getSelfPlayerInfo())
+                if self_info is _UNSET else self_info)
         data = {}
         if info is not None:
             data['playerId'] = _try(lambda: info.id)
@@ -1517,7 +1526,8 @@ class Collector(object):
                     v = _try(lambda: gd[k]) if _is_mapping(gd) else _try(lambda: getattr(gd, k))
                     if v is not None:
                         data[k] = v
-        ship = _try(lambda: battle.getSelfPlayerShip())
+        ship = (_try(lambda: battle.getSelfPlayerShip())
+                if self_ship is _UNSET else self_ship)
         if ship is None:
             ship = _try(lambda: battle.getObserverShip())
         if ship is not None:

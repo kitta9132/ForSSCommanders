@@ -621,6 +621,19 @@ def test_module_empty_success_is_not_missing_and_invalid_ammo_is_not_queried():
     assert adapter().armament()['available'] is False
 
 
+def test_armament_optional_ship_context_distinguishes_omitted_from_unknown_none():
+    calls = []
+    a = adapter(getSelfPlayerShip=lambda: calls.append('ship') or Obj(
+        getTorpedoesModulesState=lambda: []))
+    assert a.armament()['modulesStatus'] == 'available'
+    assert calls == ['ship']
+    calls[:] = []
+    explicit_unknown = a.armament(None)
+    assert calls == []
+    assert explicit_unknown['modulesStatus'] == 'unknown'
+    assert explicit_unknown['available'] is False
+
+
 def test_serializer_cycles_nonfinite_private_and_vectors_are_json_safe():
     raw = {'bad': float('nan'), 'vector': Obj(x=1., y=2., z=3.), '_private': 'omit'}
     raw['cycle'] = raw
@@ -838,6 +851,20 @@ def test_self_systems_unsupported_is_not_empty_success():
     out = adapter().systems()
     assert out['consumables']['status'] == 'unsupported'
     assert all(r['status'] == 'unsupported' for r in out['search'].values())
+
+
+def test_systems_optional_ship_context_preserves_direct_call_and_unknown_none():
+    calls = []
+    ship = Obj(getConsumablesState=lambda: [], getRadarInfo=lambda: None,
+        getHydroAcousticSearchInfo=lambda: None,
+        getSubmarineLocatorInfo=lambda: None)
+    a = adapter(getSelfPlayerShip=lambda: calls.append('ship') or ship)
+    assert a.systems()['consumables']['status'] == 'available'
+    assert calls == ['ship']
+    calls[:] = []
+    unknown = a.systems(None)
+    assert calls == []
+    assert unknown['consumables']['status'] == 'unsupported'
 
 
 def test_weapon_probe_component_keys_missing_getter_and_empty_success():

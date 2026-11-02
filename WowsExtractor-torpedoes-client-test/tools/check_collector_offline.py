@@ -42,8 +42,8 @@ def main():
     collector._remember_roster_vehicles = lambda entities: None
     collector._collect_avatar_health = lambda entities: {}
     collector._build_ships = lambda now, hp, entities: ([{'uiId': 5}], {})
-    collector._build_self = lambda hp: {'teamId': 0}
-    collector._self_team = lambda: 0
+    collector._build_self = lambda hp, info=None, ship=None: {'teamId': 0}
+    collector._self_team = lambda info=None: 0
     collector._torpedoes = TorpedoTelemetry(api, Obj())
     collector._damage = Obj(snapshot=lambda: {'inflicted': {}, 'received': {}, 'teamTotal': {}})
     collector._mapCalibration = Obj(clear=lambda: None)
@@ -79,7 +79,8 @@ def main():
     def fail():
         raise RuntimeError('offline injected failure')
 
-    collector._torpedoes = Obj(torpedoes=lambda team: fail(), armament=fail)
+    collector._torpedoes = Obj(torpedoes=lambda team: fail(),
+                               armament=lambda ship=None: fail())
     snap = collector._build_state(2.)
     assert snap['ships'] == [{'uiId': 5}]
     assert snap['torpedoes'] == [] and snap['torpedoStatus']['status'] == 'unknown'

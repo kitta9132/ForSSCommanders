@@ -314,9 +314,9 @@ def test_real_wave_hit_producer_shape_integrates_without_extra_api_calls():
 def test_main_state_assembly_calls_safe_identity_candidates():
     main = (ROOT / 'res_mods/PnFMods/WowsExtractor/Main.py').read_text(
         encoding='utf-8')
-    assert "MOD_VERSION = '0.3.18-core-avatar-reuse'" in main
+    assert "MOD_VERSION = '0.3.19-self-snapshot-reuse'" in main
     assert 'safe_identity_candidates' in main
-    assert "self_state = self._build_self(ui_hp)" in main
+    assert 'self_state = self._build_self(ui_hp, self_info, self_ship)' in main
     assert ("safe_identity_candidates(ships, self_state, torpedoes,\n"
             "                    submarine_probes['waveHitProbe'])") in main
     assert "'identityCandidates': identity_candidates_state" in main

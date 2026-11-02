@@ -146,7 +146,9 @@ def test_diagnostics_off_builds_fresh_disabled_shapes_without_probe_calls():
     ns = {'_UNSET': object(), '_try': lambda fn, default=None: fn(),
           '_get': lambda obj, key, default=None: getattr(obj, key, default),
           'SCHEMA_VERSION': 1, 'WIRE_API_VERSION': '1.0',
-          'dataHub': object(), 'CC': object(),
+           'dataHub': object(), 'CC': object(),
+           'battle': type('Battle', (), {'getSelfPlayerInfo': lambda self: None,
+               'getSelfPlayerShip': lambda self: None})(),
           'ui_torpedo_probe': fail_if_called, 'safe_weapon_hub_probe': fail_if_called,
           'safe_weapon_context_probe': fail_if_called, 'safe_game_clock_probe': fail_if_called,
           'safe_gun_reload_probe': fail_if_called,
@@ -167,12 +169,12 @@ def test_diagnostics_off_builds_fresh_disabled_shapes_without_probe_calls():
     c._remember_roster_vehicles = lambda entities: None
     c._collect_avatar_health = lambda entities: {}
     c._build_ships = lambda now, hp, entities: ([], {})
-    c._self_team = lambda: 1
+    c._self_team = lambda self_info=None: 1
     c._torpedoes = type('T', (), {'torpedoes': lambda self, team: ([], {'available': True}),
-        'armament': lambda self: {}, 'systems': lambda self: {}})()
+        'armament': lambda self, ship=None: {}, 'systems': lambda self, ship=None: {}})()
     c._torpedoMotion = type('T', (), {'update': lambda *args: None})()
     c._mapCalibration = type('M', (), {'world_to_map': lambda *args: None})()
-    c._build_self = lambda hp: {}
+    c._build_self = lambda hp, info=None, ship=None: {}
     c._damage = type('D', (), {'snapshot': lambda self: {}})()
     c._ballistics = type('B', (), {'snapshot': lambda self: {}})()
     snapshot = build(c, 1.)
@@ -317,7 +319,9 @@ def test_build_state_shares_fresh_core_snapshot_even_when_diagnostics_off():
     ns = {'_UNSET': object(), '_try': lambda fn, default=None: fn(),
           '_get': lambda obj, key, default=None: getattr(obj, key, default),
           'SCHEMA_VERSION': 1, 'WIRE_API_VERSION': '1.0',
-          'dataHub': object(), 'CC': object(), 'attach_ui_state': lambda *a: None}
+           'dataHub': object(), 'CC': object(), 'attach_ui_state': lambda *a: None,
+           'battle': type('Battle', (), {'getSelfPlayerInfo': lambda self: None,
+               'getSelfPlayerShip': lambda self: None})()}
     build = method('_build_state', ns)
     c = type('C', (), {})()
     c._active, c._diagnosticsEnabled, c._diagnosticsSampleDue = True, False, False
@@ -329,12 +333,12 @@ def test_build_state_shares_fresh_core_snapshot_even_when_diagnostics_off():
     c._collect_avatar_health = lambda entities: calls.append(('health', entities)) or {}
     c._build_ships = lambda now, hp, entities: (
         calls.append(('ships', entities)) or ([], {}))
-    c._self_team = lambda: 1
+    c._self_team = lambda self_info=None: 1
     c._torpedoes = type('T', (), {'torpedoes': lambda self, team: ([], {'available': True}),
-        'armament': lambda self: {}, 'systems': lambda self: {}})()
+        'armament': lambda self, ship=None: {}, 'systems': lambda self, ship=None: {}})()
     c._torpedoMotion = type('T', (), {'update': lambda *args: None})()
     c._mapCalibration = type('M', (), {'world_to_map': lambda *args: None})()
-    c._build_self = lambda hp: {}
+    c._build_self = lambda hp, info=None, ship=None: {}
     c._damage = type('D', (), {'snapshot': lambda self: {}})()
     c._ballistics = type('B', (), {'snapshot': lambda self: {}})()
     complete = build(c, 1.)
@@ -350,3 +354,105 @@ def test_build_state_shares_fresh_core_snapshot_even_when_diagnostics_off():
     assert partial['diag']['avatarSnapshotStatus'] == {
         'status': 'partial', 'count': 1, 'limit': 256,
         'reason': 'iterationError'}
+
+
+def test_main_state_reuses_actual_self_producers_once_and_never_across_frames():
+    from types import MethodType
+
+    calls = {'info': 0, 'ship': 0, 'observer': 0, 'team': 0,
+             'armament': [], 'systems': []}
+    ship = type('Ship', (), {
+        'getPosition': lambda self: (1, 2, 3),
+        'getTorpedoesModulesState': lambda self: [],
+        'getConsumablesState': lambda self: [],
+        'getRadarInfo': lambda self: None,
+        'getHydroAcousticSearchInfo': lambda self: None,
+        'getSubmarineLocatorInfo': lambda self: None,
+        'health': 800, 'maxHealth': 1000, 'yaw': 0.5})()
+    info = type('Info', (), {'id': 42, 'teamId': 1,
+        'shipGameData': {'health': 800, 'maxHealth': 1000, 'speed': 10}})()
+    observer = type('Observer', (), {'getPosition': lambda self: (9, 9, 9)})()
+    class Battle(object):
+        def getSelfPlayerInfo(self):
+            calls['info'] += 1
+            if calls['info'] >= 3:
+                raise RuntimeError('self info unavailable')
+            return info if calls['info'] == 1 else None
+        def getSelfPlayerShip(self):
+            calls['ship'] += 1
+            if calls['ship'] >= 3:
+                raise RuntimeError('self ship unavailable')
+            return ship if calls['ship'] == 1 else None
+        def getObserverShip(self):
+            calls['observer'] += 1
+            return observer
+        def getSelfPlayer(self):
+            calls['team'] += 1
+            raise AssertionError('must use captured self info')
+        def isObserverMode(self):
+            return calls['ship'] >= 2
+    class Torpedoes(object):
+        def torpedoes(self, self_team):
+            return [], {'available': True, 'status': 'available'}
+        def armament(self, self_ship):
+            calls['armament'].append(self_ship)
+            return {'available': self_ship is not None}
+        def systems(self, self_ship):
+            calls['systems'].append(self_ship)
+            return {'status': 'available' if self_ship is not None else 'unknown'}
+
+    ns = {'_UNSET': object(), '_try': _attempt,
+        '_get': lambda obj, key, default=None: (obj.get(key, default)
+            if isinstance(obj, dict) else getattr(obj, key, default)),
+        '_is_mapping': lambda obj: isinstance(obj, dict),
+        '_vec': lambda value: list(value) if value is not None else None,
+        'apply_ui_health': lambda data, hp: None,
+        'SCHEMA_VERSION': 1, 'WIRE_API_VERSION': '1.0',
+        'battle': Battle(), 'dataHub': object(), 'CC': object(),
+        'attach_ui_state': lambda *args: None}
+    build = method('_build_state', ns)
+    build_self = method('_build_self', ns)
+    self_team = method('_self_team', ns)
+    class Collector(object):
+        pass
+    c = Collector()
+    c._active, c._diagnosticsEnabled, c._diagnosticsSampleDue = True, False, False
+    c._battleId, c._selfTeam = 'test', ns['_UNSET']
+    c._capture_avatar_snapshot = lambda: {'entities': [], 'status': 'complete',
+        'count': 0, 'limit': 256, 'reason': None}
+    c._remember_roster_vehicles = lambda entities: None
+    c._collect_avatar_health = lambda entities: {}
+    c._build_ships = lambda now, hp, entities: ([], {'totalShips': 0})
+    c._torpedoes = Torpedoes()
+    c._torpedoMotion = type('Motion', (), {'update': lambda *args: None})()
+    c._mapCalibration = type('Map', (), {'world_to_map': lambda *args: None})()
+    c._build_self = MethodType(build_self, c)
+    c._self_team = MethodType(self_team, c)
+    c._damage = type('Damage', (), {'snapshot': lambda self: {}})()
+    c._ballistics = type('Ballistics', (), {'snapshot': lambda self: {}})()
+
+    first = build(c, 1.0)
+    assert (calls['info'], calls['ship'], calls['team']) == (1, 1, 0)
+    assert first['self'] == {'playerId': 42, 'teamId': 1, 'health': 800,
+        'maxHealth': 1000, 'speed': 10, 'position': [1, 2, 3],
+        'yaw': 0.5, 'isObserver': False}
+    assert calls['armament'] == [ship] and calls['systems'] == [ship]
+    assert first['torpedoArmament']['available'] is True
+
+    second = build(c, 2.0)
+    assert (calls['info'], calls['ship']) == (2, 2)
+    assert calls['observer'] == 1  # only _build_self fallback; never weapon input
+    assert calls['armament'] == [ship, None]
+    assert calls['systems'] == [ship, None]
+    assert second['self'] == {'position': [9, 9, 9], 'isObserver': True}
+    assert 'teamId' not in second['self']
+    assert second['torpedoArmament']['available'] is False
+    assert second['selfSystems']['status'] == 'unknown'
+
+    third = build(c, 3.0)
+    assert (calls['info'], calls['ship']) == (3, 3)
+    assert calls['armament'] == [ship, None, None]
+    assert calls['systems'] == [ship, None, None]
+    assert calls['observer'] == 2
+    assert 'teamId' not in third['self']
+    assert third['torpedoArmament']['available'] is False

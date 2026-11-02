@@ -60,3 +60,11 @@
 ## 次の進行案
 
 機能追加は引き続き停止し、次は案Aだけを既存API doublesでoffline確認するのが最小。出力同値・例外契約・1回呼出しを満たせた場合に限り、docs以外の変更許可を得てから実装する。案Bとposition fallbackはAPIのsnapshot/鮮度契約が不明なため、コード調査またはoffline doublesで共有の妥当性を示すまでは保留する。実ゲーム実行・attach・負荷生成・FPS比較は対象外。
+
+## 0.3.19 self snapshot reuse追記（2026-11-02）
+
+- 0.3.19では案Bをstate-localな明示contextとして実装した。`_build_state`でself info/shipの結果を各一度取得し、成功値だけでなくNone/例外結果も同じstate内で再利用する。frameを越えるcacheは持たない。
+- `_self_team`にはfresh self infoを渡し、その`teamId`をmemoizeする。info/ship getterが欠落・例外・Noneの場合もunknown扱いを保ち、別getterで再試行しない。既存adapter direct-callの引数省略時は従来の独立getterを維持し、明示Noneは取得済みunknownと区別する。
+- Observer shipは`_build_self`のself shipがNoneの場合の位置/health fallbackに限り、armament/systemsへは渡さない。イベント独立APIは変更しない。
+- Producer-bodyおよびMain連結offlineテストで、通常frameの1 info + 1 ship取得と旧出力同値、次frame fresh取得、None/例外・observer ship fallback時のunknown安全性を検証する。これらはAPI call count/契約検証であり、実ゲーム内部の原子性・FPS・時間測定ではない。
+- 未評価の負荷は`armament`内`getTorpedoesModulesState`全件field抽出、`getSelectedAmmoId`/`getAmmoParams`、`public_data`の最大depth 6かつobject `dir()`全public field列挙、ships/torpedo周辺fallbackおよび24艦処理。次の計測案は、導入/ゲーム実行なしにoffline checkerでcall-countと代表field幅を明示した上で、許可された計時源を確認後、collection/armament/public_data区間とstate全体を分けたhost monotonic測定（ゲームruntime時間の代用とは明記しない）。FPS換算はしない。
