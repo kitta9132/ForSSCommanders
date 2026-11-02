@@ -19,9 +19,9 @@ World of Warshipsの潜水艦向け外部2Dマップと、公開ModsAPIを使う
 
 ### 最優先：通常プレイ時のFPS報告
 
-0.3.14導入後「自艦が沈むまでminFPS 25、撃沈後は110まで回復」と報告されています（外部記録ツール未使用）。mod内部のtick・state書込は別に戦闘中継続するため、因果は未確定です。通常プレイでは収集modのロード対象外への退避を推奨します。0.3.16-diagnostic-schedulingは**source only・未導入**で、既定収集・診断を停止し、opt-in診断の間隔を既定1秒に制限します。FPS未計測・改善未確認で、ゲーム稼働中の変更や追加FPS比較試験は行いません。[事故記録](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_INCIDENT_0.3.14.ja.md)
+0.3.14導入後「自艦が沈むまでminFPS 25、撃沈後は110まで回復」と報告されています（外部記録ツール未使用）。mod内部のtick・state書込も戦闘中継続するため、因果は未確定です。通常プレイでは収集modのロード対象外への退避を推奨します。0.3.17-snapshot-reuseは**source only・未導入**で、既定収集・診断停止と診断1Hz制限を維持し、due一式内の固定名collection取得をsample内共有します。FPS未計測・改善未確認で、ゲーム稼働中の変更や追加FPS比較試験は行いません。[事故記録](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_INCIDENT_0.3.14.ja.md)
 
-現行ソースは `0.3.16-diagnostic-scheduling`（未導入）。`collection_enabled=false`・`diagnostics_enabled=false`を既定維持し、収集を明示有効化しても診断はopt-inです。診断の既定間隔は1秒ですが、state/coreの0.1秒経路・armament/public_data負荷は未評価です。FPS改善確認ではありません。旧開発ソース0.3.14までの内容はID対応候補・魚雷の明示深度候補を含み、詳細と残課題は [TASKS.md](TASKS.md) を参照してください。旧0.3.1ではSteam版build 13357625の訓練戦で、魚雷位置・type、
+現行ソースは `0.3.17-snapshot-reuse`（未導入）。`collection_enabled=false`・`diagnostics_enabled=false`を既定維持し、診断はopt-inかつ既定1Hzです。同一due sample内の同名元getter呼出しが各1回であることをoffline Main統合fixtureで確認しましたが、FPS改善や実機挙動は未確認です。state/coreの0.1秒経路・core 24艦負荷・armament/public_dataは未評価です。詳細と残課題は [TASKS.md](TASKS.md) を参照してください。旧0.3.1ではSteam版build 13357625の訓練戦で、魚雷位置・type、
 ATM由来の誘導/被発見状態、移動履歴による座標較正などを試験しています。
 簡易2Dマップのグリッドとゲーム内位置が概ね一致することをテスターが目視確認しました。
 12対12・別地図・失探時の鮮度などは未検証です。完成版ではありません。

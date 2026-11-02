@@ -6,7 +6,7 @@
 
 API_VERSION = 'API_v1.0'
 MOD_NAME = 'WowsExtractor'
-MOD_VERSION = '0.3.16-diagnostic-scheduling'
+MOD_VERSION = '0.3.17-snapshot-reuse'
 
 # ---------------------------------------------------------------------------
 # WowsExtractor -- in-game data collector for the "8111 for WoWS" project.
@@ -67,13 +67,15 @@ try:
         attach_ui_state, TorpedoMotion, safe_weapon_hub_probe,
         safe_weapon_context_probe, safe_game_clock_probe,
         safe_gun_reload_probe, safe_selected_torpedo_params_probe,
-        safe_torpedo_tooltip_parameter_probe, safe_identity_candidates)
+        safe_torpedo_tooltip_parameter_probe, safe_identity_candidates,
+        shared_diagnostic_snapshot)
 except:
     from torpedo_telemetry import (TorpedoTelemetry, ui_torpedo_probe,
         attach_ui_state, TorpedoMotion, safe_weapon_hub_probe,
         safe_weapon_context_probe, safe_game_clock_probe,
         safe_gun_reload_probe, safe_selected_torpedo_params_probe,
-        safe_torpedo_tooltip_parameter_probe, safe_identity_candidates)
+        safe_torpedo_tooltip_parameter_probe, safe_identity_candidates,
+        shared_diagnostic_snapshot)
 
 try:
     from .submarine_telemetry import safe_submarine_probe
@@ -1338,7 +1340,8 @@ class Collector(object):
             ([], {'available': False, 'status': 'unknown',
                    'source': 'battle.getAllTorpedoes'}))
         if diagnostic_due:
-            probe = _try(lambda: ui_torpedo_probe(dataHub, CC, torpedoes),
+            diagnostic_hub = shared_diagnostic_snapshot(dataHub)
+            probe = _try(lambda: ui_torpedo_probe(diagnostic_hub, CC, torpedoes),
                          {'status': 'unknown', 'source': 'dataHub.torpedo'})
             _try(lambda: attach_ui_state(torpedoes, probe))
         else:
@@ -1359,22 +1362,22 @@ class Collector(object):
         unsampled = {'status': 'notSampled', 'source': 'scheduling',
                      'sampleTs': None}
         if diagnostic_due:
-            weapon_probe = _try(lambda: safe_weapon_hub_probe(dataHub, CC),
+            weapon_probe = _try(lambda: safe_weapon_hub_probe(diagnostic_hub, CC),
                 {'source': 'dataHub weapon UI candidates', 'status': 'unknown',
                  'semantics': 'unverified', 'collections': {}})
-            weapon_context = _try(lambda: safe_weapon_context_probe(dataHub, CC),
+            weapon_context = _try(lambda: safe_weapon_context_probe(diagnostic_hub, CC),
                 {'source': 'dataHub selfVehicle weapon UI context',
                  'status': 'unknown', 'semantics': 'unverified'})
-            game_clock = _try(lambda: safe_game_clock_probe(dataHub, CC),
+            game_clock = _try(lambda: safe_game_clock_probe(diagnostic_hub, CC),
                 {'source': 'dataHub UI game clock candidates',
                  'status': 'unknown', 'semantics': 'unverified', 'candidates': {}})
-            gun_reload = _try(lambda: safe_gun_reload_probe(dataHub, CC),
+            gun_reload = _try(lambda: safe_gun_reload_probe(diagnostic_hub, CC),
                 {'source': 'dataHub UI gun reload candidates', 'status': 'unknown',
                  'semantics': 'unverified', 'collections': {}, 'references': [],
                  'error': 'probeFailed'})
             selected_torpedo_params = _try(
                 lambda: safe_selected_torpedo_params_probe(
-                    dataHub, CC, weapon_context, weapon_probe),
+                    diagnostic_hub, CC, weapon_context, weapon_probe),
                 {'source': 'dataHub selfVehicle shipTTX torpedo candidates',
                  'status': 'unknown', 'semantics': 'unverified',
                  'selection': {'status': 'unknown', 'descriptor': None},
@@ -1382,7 +1385,7 @@ class Collector(object):
                  'fields': {}, 'variants': {}, 'error': 'probeFailed'})
             torpedo_tooltip_parameter = _try(
                 lambda: safe_torpedo_tooltip_parameter_probe(
-                    dataHub, CC, selected_torpedo_params),
+                    diagnostic_hub, CC, selected_torpedo_params),
                 {'source': 'dataHub playerAvatar owner + parameter candidates',
                  'status': 'unknown', 'semantics': 'unverified',
                  'ownerEntityId': {'status': 'unknown'},
@@ -1391,7 +1394,7 @@ class Collector(object):
                     'reason': 'probeFailed', 'fields': {}},
                  'stages': {'owner': 'unknown', 'parameterCollection': 'unknown',
                     'match': 'unknown'}})
-            submarine_probes = _try(lambda: safe_submarine_probe(dataHub, CC, now),
+            submarine_probes = _try(lambda: safe_submarine_probe(diagnostic_hub, CC, now),
                 {'selfSubmarineProbe': {'source': 'dataHub.selfVehicle',
                     'status': 'unknown', 'semantics': 'unverified',
                     'sampleTs': now, 'collection': {}, 'entityIdCandidate': None,

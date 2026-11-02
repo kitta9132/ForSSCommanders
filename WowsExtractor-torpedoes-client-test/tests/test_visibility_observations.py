@@ -7,7 +7,10 @@ import json
 
 SOURCE = (Path(__file__).resolve().parents[1] /
           'res_mods/PnFMods/WowsExtractor/Main.py').read_text(encoding='utf8')
-SOURCE_TREE = ast.parse(SOURCE)
+# Main.py targets the game's Python 2 runtime; normalize its legacy except form
+# only for this Python 3 AST-based offline source inspection.
+SOURCE_TREE = ast.parse(SOURCE.replace('except Exception, e:',
+                                      'except Exception as e:'))
 
 
 def method(name, ns):

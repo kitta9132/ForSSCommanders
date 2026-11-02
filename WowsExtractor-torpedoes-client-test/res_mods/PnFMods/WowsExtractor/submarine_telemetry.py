@@ -178,10 +178,11 @@ def _collection(hub, name, limit, stop_on_second=False):
                                reason='truncated')
                 return result, found[:limit]
     except Exception as error:
-        result.update(status='unknown', complete=False, count=None,
+        result.update(status='partial' if found else 'unknown', complete=False,
+                      count=len(found) if found else None,
                       reason='iterationException', failureStage='enumeration',
                       exceptionType=_safe_exception_type(error))
-        return result, []
+        return result, found
     result.update(status='available', complete=True, count=len(found))
     return result, found
 
@@ -349,8 +350,9 @@ def wave_hit_probe(hub, cc, sample_ts=None):
     result = {'source': 'dataHub.waveHit', 'status': collection['status'],
               'semantics': 'unverified', 'sampleTs': _candidate(sample_ts),
               'collection': collection, 'componentKeyStatus': key_status,
-              'rows': [], 'truncated': collection['truncated'], 'partial': False}
-    if collection['status'] != 'available':
+              'rows': [], 'truncated': collection['truncated'],
+              'partial': collection['status'] == 'partial'}
+    if collection['status'] not in ('available', 'partial'):
         return result
     for entity in entities:
         id_status, entity_id, _ = _read(entity, 'id')

@@ -2,9 +2,9 @@
 
 ## 緊急優先：通常プレイのFPS低下
 
-- [ ] 0.3.14導入後の通常プレイで「自艦撃沈までminFPS 25、撃沈後110まで回復」と報告（外部記録ツール未使用）。記録ツール未使用でもmod内部tick/state書込は継続する。因果未確定。追加FPS比較実機試験は依頼しない。0.3.15で既定収集を停止し、0.3.16-diagnostic-scheduling（source only・未導入）で診断を既定1.0秒間隔に制限、既定収集停止も維持。FPS未計測・改善未確認で、core負荷・armament/public_dataは未評価。通常プレイにはmod退避を推奨。0.3.14 mod退避先はユーザー許可済み、再導入禁止。[性能問題記録](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_INCIDENT_0.3.14.ja.md)。
+- [ ] 0.3.14導入後の通常プレイで「自艦撃沈までminFPS 25、撃沈後110まで回復」と報告（外部記録ツール未使用）。記録ツール未使用でもmod内部tick/state書込は継続する。因果未確定。追加FPS比較実機試験は依頼しない。0.3.15で既定収集を停止し、0.3.16で診断を既定1.0秒間隔に制限、0.3.17-snapshot-reuse（source only・未導入）でdue sample内の同名collection getterを共有。Main offline統合fixtureで同名original calls各1回を確認。FPS未計測・改善未確認で、core 0.1秒経路・core 24艦負荷・armament/public_dataは未評価。通常プレイにはmod退避を推奨。0.3.14 mod退避先はユーザー許可済み、再導入禁止。[性能問題記録](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_INCIDENT_0.3.14.ja.md)。
 
-現在の正本ソース：`WowsExtractor-torpedoes-client-test/`。作業対象は0.3.16-diagnostic-scheduling（source only・未導入、既定収集停止）。0.3.14までの機能状態：UI由来metadata/raw観測、ID対応候補、魚雷明示深度候補。従来の`isOwn`・raw IDは上書きしない。B27の潜水・Battery・二重pingは当該条件で確認済み、同じ試験の再要求は不要。失効条件・ID namespaceの一般契約・区画ID等は未確定。更新：2026-11-02。
+現在の正本ソース：`WowsExtractor-torpedoes-client-test/`。作業対象は0.3.17-snapshot-reuse（source only・未導入、既定収集停止）。同名collection getter共有はoffline Main統合確認済み。FPS未評価、core 24艦負荷・armament/public_dataは未評価。0.3.14までの機能状態・残課題は以下を参照。更新：2026-11-02。
 
 開発目標・収集層の責務は [DEVELOPMENT.md](DEVELOPMENT.md)、AI向け指示・自律進行・Git運用は [.ai/INSTRUCTIONS.md](.ai/INSTRUCTIONS.md) を参照。以下は進捗と残課題。
 

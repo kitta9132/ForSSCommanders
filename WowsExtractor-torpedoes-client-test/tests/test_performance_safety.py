@@ -9,7 +9,9 @@ SOURCE = (Path(__file__).resolve().parents[1] /
 def method(name, ns):
     start = SOURCE.index('    def ' + name + '(')
     end = SOURCE.find('\n    def ', start + 1)
-    exec(textwrap.dedent(SOURCE[start:end if end != -1 else None]), ns)
+    code = SOURCE[start:end if end != -1 else None]
+    code = code.replace('except Exception, e:', 'except Exception as e:')
+    exec(textwrap.dedent(code), ns)
     return ns[name]
 
 
@@ -148,8 +150,9 @@ def test_diagnostics_off_builds_fresh_disabled_shapes_without_probe_calls():
           'safe_gun_reload_probe': fail_if_called,
           'safe_selected_torpedo_params_probe': fail_if_called,
           'safe_torpedo_tooltip_parameter_probe': fail_if_called,
-          'safe_submarine_probe': fail_if_called,
-          'safe_identity_candidates': fail_if_called,
+           'safe_submarine_probe': fail_if_called,
+           'safe_identity_candidates': fail_if_called,
+           'shared_diagnostic_snapshot': fail_if_called,
           'attach_ui_state': fail_if_called}
     build = method('_build_state', ns)
     c = type('C', (), {})()

@@ -29,6 +29,7 @@ def main():
     for path in paths:
         parser.refactor_string(path.read_text(encoding='utf-8'), str(path))
     print('Python 2 grammar parsed:', len(paths), 'modules')
+    print('Required modules:', ', '.join(expected_modules))
     source = str(parser.refactor_string((root / 'Main.py').read_text(), 'Main.py'))
     source = source.replace('gCollector = Collector()', 'gCollector = None')
     ns = {'__name__': 'offline_collector', '__file__': str(root / 'Main.py'), '__package__': None}
@@ -53,10 +54,19 @@ def main():
     collector._diagnosticsEnabled = True
     collector._diagnosticsSampleDue = True
     collector._battleId = 'offline-battle'
-    ns['dataHub'] = Obj(getEntityCollections=lambda name: [])
+    collection_calls = []
+    ns['dataHub'] = Obj(getEntityCollections=lambda name:
+                        collection_calls.append(name) or [])
+    original_data_hub = ns['dataHub']
     ns['CC'] = Obj(selfVehicle='selfVehicle-key', submarine='submarine-key',
                    battery='battery-key', waveHit='waveHit-key')
     snap = collector._build_state(1.)
+    assert ns['dataHub'] is original_data_hub
+    duplicated = sorted(name for name in set(collection_calls)
+                        if collection_calls.count(name) > 1)
+    assert not duplicated, 'diagnostic collection calls were not shared: ' + repr(duplicated)
+    print('Main diagnostic collection API calls:',
+          {name: collection_calls.count(name) for name in sorted(set(collection_calls))})
     assert snap['ships'] == [{'uiId': 5}]
     assert snap['torpedoes'][0]['position'] == [1., -2., 3.]
     assert snap['torpedoes'][0]['type'] == 'future_type'

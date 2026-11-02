@@ -23,6 +23,96 @@ OWNER_FIELDS = ('teamId', 'isObserver', 'isAlive', 'isBot',
 MODULE_FIELDS = ('type', 'currentHP', 'maxHP', 'state', 'critTimer')
 _MISSING = object()
 
+# Fixed diagnostic-only routes. Capture one row beyond the largest consumer
+# limit so each existing consumer can retain its own truncation semantics.
+_DIAGNOSTIC_COLLECTION_LIMITS = {
+    'selfVehicle': 8, 'weaponController': 8, 'timer': 8,
+    'battleTimer': 8, 'battleInfo': 8, 'weaponSlot': 32, 'ammo': 32,
+    'serialLoad': 32, 'gun': 32, 'gunBarrel': 32, 'reloadBar': 32,
+    'playerAvatar': 8, 'parameter': 64, 'torpedo': 64, 'waveHit': 32,
+}
+
+
+class _ReplayRows(object):
+    """Per-call iterator replaying one sample's bounded capture and failure."""
+    def __init__(self, rows, failure):
+        self._rows = rows
+        self._failure = failure
+
+    def __iter__(self):
+        for row in self._rows:
+            yield row
+        if self._failure is not None:
+            raise self._failure
+
+
+class DiagnosticCollectionSnapshot(object):
+    """Transparent facade sharing only fixed named collections for one sample.
+
+    Values/rows remain the game's original objects and are not retained beyond
+    this wrapper. Each collection's getter result and bounded iteration outcome
+    are cached so separate probes observe the same call result and partial rows.
+    """
+    def __init__(self, hub):
+        self._hub = hub
+        self._cache = {}
+        try:
+            getter = getattr(hub, 'getEntityCollections', _MISSING)
+        except Exception as error:
+            getter = _MISSING
+            self._getter_error = error
+        else:
+            self._getter_error = None
+        self._getter = getter
+
+    def __getattr__(self, name):
+        if name != 'getEntityCollections':
+            return getattr(self._hub, name)
+        if self._getter_error is not None:
+            raise self._getter_error
+        if self._getter is _MISSING:
+            # Some game sandboxes do not expose the AttributeError builtin.
+            # Existing probe guards classify a non-callable value as unsupported.
+            return None
+        if not callable(self._getter):
+            return self._getter
+        return self._get_collection
+
+    def _get_collection(self, name):
+        if name not in _DIAGNOSTIC_COLLECTION_LIMITS:
+            return self._getter(name)
+        if name in self._cache:
+            status, value = self._cache[name]
+            if status == 'exception':
+                raise value
+            return value
+        try:
+            entities = self._getter(name)
+        except Exception as error:
+            self._cache[name] = ('exception', error)
+            raise
+        if entities is None:
+            self._cache[name] = ('value', None)
+            return None
+        rows = []
+        failure = None
+        cap = _DIAGNOSTIC_COLLECTION_LIMITS[name] + 1
+        try:
+            for index, entity in enumerate(entities):
+                if index >= cap:
+                    break
+                rows.append(entity)
+        except Exception as error:
+            failure = error
+        replay = _ReplayRows(rows, failure)
+        self._cache[name] = ('value', replay)
+        return replay
+
+
+def shared_diagnostic_snapshot(hub):
+    """Create a fresh, sample-local facade; never call from non-diagnostic paths."""
+    return DiagnosticCollectionSnapshot(hub)
+
 
 def _get(obj, key, default=None):
     try:
@@ -1763,25 +1853,25 @@ def torpedo_tooltip_parameter_probe(hub, components, selected_torpedo):
     owner = out['ownerEntityId']
     getter_status = _getter_status(hub, 'getEntityCollections')
     owner_collection_status = 'unknown'
+    owner_rows = []
     if getter_status != 'available':
         owner_collection_status = 'unsupported'
     else:
         try:
             entities = hub.getEntityCollections('playerAvatar')
             if entities is not None:
-                rows = []
                 truncated = False
                 for index, entity in enumerate(entities):
                     if index >= 8:
                         truncated = True
                         break
-                    rows.append(entity)
+                    owner_rows.append(entity)
                 if truncated:
                     owner_collection_status = 'truncated'
-                elif len(rows) != 1:
-                    owner_collection_status = 'unknown' if not rows else 'multiple'
+                elif len(owner_rows) != 1:
+                    owner_collection_status = 'unknown' if not owner_rows else 'multiple'
                 else:
-                    id_status, entity_id = _probe_read(rows[0], 'id')
+                    id_status, entity_id = _probe_read(owner_rows[0], 'id')
                     if (id_status == 'available' and _valid_id_scalar(entity_id) and
                             (not isinstance(entity_id, STRING_TYPES) or len(entity_id) <= 128)):
                         owner.update(status='available', raw=_candidate_value(entity_id),
@@ -1791,7 +1881,7 @@ def torpedo_tooltip_parameter_probe(hub, components, selected_torpedo):
                         owner_collection_status = (id_status if id_status != 'available'
                             else 'unknown')
         except Exception:
-            owner_collection_status = 'unknown'
+            owner_collection_status = 'partial' if owner_rows else 'unknown'
     out['stages']['owner'] = owner_collection_status
     owner_key_id = _owner_key_scalar(owner.get('raw')) if owner.get('status') == 'available' else None
     param_name = out['parameterName']

@@ -100,7 +100,8 @@ def test_self_vehicle_empty_multiple_and_iteration_failure_never_select_partial(
     assert partial['collection']['reason'] == 'iterationException'
     assert partial['collection']['failureStage'] == 'enumeration'
     assert partial['collection']['exceptionType'] == 'RuntimeError'
-    assert 'partial' not in repr(partial['collection'])
+    assert partial['collection']['status'] == 'partial'
+    assert 'RuntimeError' in repr(partial['collection'])
     assert partial['collection']['complete'] is False
     assert partial['entityIdCandidate'] is None
 
@@ -158,14 +159,15 @@ def test_wavehit_empty_is_available_and_33rd_entity_marks_truncated():
     assert many['rows'][0]['entityIdCandidate'] == 0
 
 
-def test_wavehit_unknown_iterator_discards_partial_rows_and_unknown_component_is_explicit():
+def test_wavehit_partial_iterator_keeps_rows_and_unknown_component_is_explicit():
     class Partial(object):
         def __iter__(self):
             yield wave_entity()
             raise RuntimeError('iteration')
     failed = wave_hit_probe(Hub([], Partial()), components())
-    assert failed['status'] == 'unknown'
-    assert failed['rows'] == []
+    assert failed['status'] == 'partial'
+    assert failed['collection']['status'] == 'partial'
+    assert len(failed['rows']) == 1
     assert failed['collection']['reason'] == 'iterationException'
 
     missing = wave_hit_probe(Hub([], [{'id': 9}]), components())

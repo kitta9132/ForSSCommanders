@@ -1,14 +1,16 @@
 # WowsExtractor 魚雷出力版（WoWSクライアント用mod）
 
-## 0.3.16-diagnostic-scheduling：既定収集停止・診断間隔
+## 0.3.17-snapshot-reuse：既定収集停止・診断sample内collection共有
 
 0.3.14導入後のFPS報告を受けた安全措置として、`collection_enabled` は既定falseです。`config.ini` 不在・読込失敗・不正値も収集停止になり、明示した文字列 `true` のみ有効です。停止中はbattle ship/torpedo API、dataHub収集、Ballistics API、damage/ballistics tracker開始・tick、定期callbackを実行しません。battle lifecycleを維持し、battle shown時のdisabled stateとquit時のinactive stateのみを書きます。stateの`collection`は`{"status":"disabled","source":"config.collection_enabled"}`を示します。外部読取側は通常のtelemetry snapshotが出ないことを許容してください。
 
 収集を明示有効化した場合も `diagnostics_enabled` の既定はfalseです。trueの場合も`diagnostics_interval`（既定1.0秒）で診断一式をまとめてsampleし、非due stateには古いpayloadを再利用せず`status=notSampled`を出します。falseでは`status=disabled`と`source=config.diagnostics_enabled`を出します。`state_interval`とcore収集は従来どおり0.1秒で、core負荷は未評価です。診断の遅延分catch-upは行わず、時計逆行／不正値・戦闘切替でスケジューラ履歴を初期化します。
 
-同一diagnostic sample内の複数probeによるcollection重複読み取りは今回最適化していません。`getEntityCollections` facade、列挙materialization上限、partial/truncated semanticsの変更も未実装です。意味論を崩すリスクを避け、最小の間隔制御のみを実装対象としました。
+診断due時だけsample-local `getEntityCollections` facadeを作り、固定whitelist名の元getter呼出し・戻り値・bounded enumeration結果を同一due sampleの全safe probeで共有します。whitelistはselfVehicle, weaponController, timer, battleTimer, battleInfo, weaponSlot, ammo, serialLoad, gun, gunBarrel, reloadBar, playerAvatar, parameter, torpedo, waveHitです。各名は最大consumer limit+1行をeager captureし、各consumerが従来のlimitでtruncatedを判定します。途中iteration exceptionは取得済み行の後でreplayし、partialを正常完了へ変換しません。getterのNone/exceptionもsample内で再利用します。未指定名や他APIは透過し、新しいgame API呼出しは追加しません。wrapper/row refsはsampleを越えて保持しません。
 
-この変更は同期収集経路の既定停止と診断頻度抑制であり、FPS改善・原因特定を確認したものではありません。通常プレイではmodをロード対象外へ退避することを推奨します。重いarmament/public_dataやcore収集負荷も未評価です。詳細は[性能事故記録](PERFORMANCE_INCIDENT_0.3.14.ja.md)。
+共有は同じdiagnostic sample内のAPI取得を一度にするものであり、複数field readの原値がゲーム上の厳密な同一frame値である保証ではありません。戻されたrow objectは複数consumerに共有されますが、API側の時間的一貫性は保証しません。元APIが返した例外・None・partial/truncated/unknownをconsumerごとに保ち、getter失敗をbackoffする機能はありません。offline Main統合fixtureで同名original getter呼出しが各1回であることを確認しました。FPSは未評価です。
+
+この変更は同期収集経路の既定停止、診断頻度抑制、診断sample内collection getter共有であり、FPS改善・原因特定を確認したものではありません。通常プレイではmodをロード対象外へ退避することを推奨します。core 0.1秒経路・core 24艦負荷と重いarmament/public_dataは未評価です。詳細は[性能事故記録](PERFORMANCE_INCIDENT_0.3.14.ja.md)。
 
 [Tz-WIND/8111_for_wows](https://github.com/Tz-WIND/8111_for_wows) のクライアント側収集modに、公開ModsAPIの魚雷情報出力を追加したものです。
 ベースのコミット: `28470b6ff0c05bac8aa41bd7d986daa6814242e2`。

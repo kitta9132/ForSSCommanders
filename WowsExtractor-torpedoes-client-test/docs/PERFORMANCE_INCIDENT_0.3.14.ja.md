@@ -20,9 +20,9 @@
 - 静的確認ではmodule import/collector生成時にbattle/dataHub/Ballistics収集APIは呼ばず、config用の`utils.getModDir()`参照とevent hook登録を行う。戦闘collection開始時のAPI取得は明示opt-in後に限る。
 - `collection_enabled=true`時の従来core収集負荷（state interval 0.1秒、艦船/自艦/魚雷等）は未評価で、低負荷を保証しない。diagnosticsは別途`diagnostics_enabled=true`時のみ実行。
 - FPS改善や原因特定を、単体テストの成功だけで主張しない。
-- 0.3.16-diagnostic-schedulingは未導入のsource-only変更。diagnostics_enabled時の診断起動を既定1.0秒間隔へ制限するが、FPSは未計測で改善を主張しない。collection_enabled既定false、diagnostics_enabled既定falseを維持する。
-- 0.3.16でもstate/core intervalは0.1秒。core経路、armament/public_dataの負荷は未評価で、通常プレイに安全とは宣言しない。0.3.14 mod退避先はユーザー許可済みだが、再導入しない。
-- 同一sample内のcollection重複読み取り削減、collection facade/部分列挙の最適化は未実装。今回のテストで根拠づけるのは診断sample回数（合成10Hz・2秒で20 tick相当から2 sample）のみで、FPS改善量ではない。
+- 0.3.17-snapshot-reuseは未導入のsource-only変更。0.3.16の既定収集停止・診断1.0秒間隔を維持し、due sample内のfixed-name collection getterを共有する。offline Main統合fixtureで同名original getter呼出し各1回を確認。FPS未計測で改善を主張しない。collection_enabled/diagnostics_enabled既定falseを維持する。
+- 0.3.17でもstate/core intervalは0.1秒。core経路・core 24艦負荷・armament/public_data負荷は未評価で、通常プレイに安全とは宣言しない。0.3.14 mod退避先はユーザー許可済みだが、再導入しない。
+- 同一due sample内のgetter call reductionはoffline Main統合fixtureで確認したが、FPS改善量・API内部frame snapshot・field値の時間的一貫性を保証しない。
 
 ## 調査対象
 
