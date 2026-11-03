@@ -87,6 +87,15 @@ def test_remember_player_uses_shipId_not_player_id_as_vehicle():
     assert tracker.snapshot()['received']['901']['total'] == 500
 
 
+def test_remember_player_values_preserves_id_normalization_and_zero_team():
+    tracker = _tracker(live=lambda _vid: None)
+    assert tracker.remember_player_values('77.9', 537.0, 0)
+    assert tracker.lookup(77) == (537, 0)
+    assert not tracker.remember_player_values(78, False, 1)
+    assert not tracker.remember_player_values('invalid', 538, 1)
+    assert tracker.lookup(78) is None
+
+
 def test_victim_vehicle_entity_id_resolves_through_cache():
     tracker = _tracker(live=lambda _vid: None)
     tracker.remember(77, 901, 1)

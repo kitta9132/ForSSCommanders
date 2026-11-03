@@ -6,7 +6,7 @@
 
 API_VERSION = 'API_v1.0'
 MOD_NAME = 'WowsExtractor'
-MOD_VERSION = '0.3.24-player-read-sharing'
+MOD_VERSION = '0.3.25-player-field-budget'
 
 # ---------------------------------------------------------------------------
 # WowsExtractor -- in-game data collector for the "8111 for WoWS" project.
@@ -1055,6 +1055,114 @@ class Collector(object):
         if vehicle_id is not None and pid is not None:
             self._damage.remember(vehicle_id, pid, team_id)
 
+    def _remember_sampled_player_vehicle(self, player):
+        """Read a roster PlayerInfo once per access path, then serve both users.
+
+        DamageTracker's mapping/attribute precedence differs from the strict
+        ship index reader. Cache item and attribute outcomes separately so
+        both consumers keep their existing fallback rules without retaining
+        the raw PlayerInfo in the returned plain row.
+        """
+        if player is None:
+            return None
+        is_mapping = _is_mapping(player)
+        reads = {}
+
+        def item_value(name):
+            key = ('item', name)
+            if key not in reads:
+                try:
+                    reads[key] = (True, player[name])
+                except:
+                    reads[key] = (False, None)
+            return reads[key]
+
+        def attr_value(name):
+            key = ('attr', name)
+            if key not in reads:
+                try:
+                    reads[key] = (True, getattr(player, name))
+                except:
+                    reads[key] = (False, None)
+            return reads[key]
+
+        def damage_value(names):
+            for name in names:
+                ok, value = item_value(name)
+                if not ok:
+                    ok, value = attr_value(name)
+                if ok and value is not None:
+                    return value
+            return None
+
+        # Match damage_tracker._get_field's item-first semantics, including
+        # its rule that an item value of None advances to the next alias.
+        damage_pid = damage_value(('playerId', 'id'))
+        damage_vehicle = damage_value(('shipId', 'vehicleId', 'vehicleID'))
+        damage_team = damage_value(('teamId',))
+        remembered = None
+        try:
+            remembered = self._damage.remember_player_values(
+                damage_vehicle, damage_pid, damage_team)
+        except:
+            pass
+
+        # Preserve _remember_player_vehicle's legacy fallback, used only when
+        # DamageTracker could not normalize both IDs. Attribute access comes
+        # first here; a mapping-key fallback is used only for a None value.
+        if remembered is False:
+            try:
+                ok, pid = attr_value('id')
+                if not ok:
+                    pid = None
+                if pid is None and is_mapping:
+                    ok, pid = item_value('id')
+                    if not ok:
+                        pid = None
+                ok, vehicle_id = attr_value('shipId')
+                if not ok:
+                    vehicle_id = None
+                if vehicle_id is None and is_mapping:
+                    ok, vehicle_id = item_value('shipId')
+                    if not ok:
+                        vehicle_id = None
+                ok, team_id = attr_value('teamId')
+                if not ok:
+                    team_id = None
+                if team_id is None and is_mapping:
+                    ok, team_id = item_value('teamId')
+                    if not ok:
+                        team_id = None
+                if vehicle_id is not None and pid is not None:
+                    self._damage.remember(vehicle_id, pid, team_id)
+            except:
+                pass
+
+        def strict_value(names):
+            for name in names:
+                if is_mapping:
+                    ok, value = item_value(name)
+                    if not ok or value is None:
+                        ok, value = attr_value(name)
+                else:
+                    ok, value = attr_value(name)
+                if ok and value is not None:
+                    return value
+            return None
+
+        player_id = strict_value(('playerId', 'id'))
+        vehicle_id = strict_value(('shipId', 'vehicleId', 'vehicleID'))
+        vehicle_key = _strict_player_lookup_key(vehicle_id)
+        player_key = _strict_player_lookup_key(player_id)
+        if vehicle_key is None:
+            return None
+        if player_key is None:
+            return vehicle_key, None
+        team_id = strict_value(('teamId',))
+        if team_id is not None and _strict_player_lookup_key(team_id) is None:
+            team_id = None
+        return vehicle_key, {'playerId': player_id, 'teamId': team_id}
+
     def _remember_roster_vehicles(self, avatar_entities=None):
         """Cache vehicleId -> playerId for the whole roster, including ships
         that are already dead or were never in getAllShips() this tick.
@@ -1078,10 +1186,11 @@ class Collector(object):
                     player_sample['status'] = 'partial'
             try:
                 for player in items:
-                    _try(lambda p=player: self._remember_player_vehicle(p))
-                    if not build_player_index:
+                    if build_player_index:
+                        row = self._remember_sampled_player_vehicle(player)
+                    else:
+                        _try(lambda p=player: self._remember_player_vehicle(p))
                         continue
-                    row = _plain_player_row(player)
                     if row is None:
                         continue
                     key, values = row
@@ -2131,7 +2240,7 @@ class Collector(object):
                          'fallbackNotSampledShips')
             self._positionDiagnostics[count_key] = self._positionDiagnostics.get(count_key, 0) + 1
             infos.append((ship, vehId, player, sample_row, pid, player_team,
-                          worldPos, position_read))
+                          ship_team, worldPos, position_read))
             if worldPos and pid is not None:
                 mp = mapIndex.get(pid)
                 if mp is not None and self._mapVisibility.get(pid, {}).get('mapVisible') != False:
@@ -2148,12 +2257,12 @@ class Collector(object):
         nAllyVis = 0
         nEnemy = 0
         nEnemyVis = 0
-        for ship, vehId, player, sample_row, pid, player_team, worldPos, position_read in infos:
+        for ship, vehId, player, sample_row, pid, player_team, ship_team, worldPos, position_read in infos:
             entry = {}
             entry['uiId'] = _get(ship, 'uiId')
             if vehId is not None:
                 entry['vehicleId'] = vehId
-            teamId = _get(ship, 'teamId')
+            teamId = ship_team
             entry['teamId'] = teamId
             entry['relation'] = self._relation(teamId)
             entry['alive'] = _try(lambda: ship.isAlive())

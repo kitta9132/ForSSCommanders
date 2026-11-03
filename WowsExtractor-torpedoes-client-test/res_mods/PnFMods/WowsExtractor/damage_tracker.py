@@ -227,6 +227,19 @@ class DamageTracker(object):
         self.remember(rec[0], rec[1], rec[2])
         return True
 
+    def remember_player_values(self, vehicle_id, player_id, team_id=None):
+        """Remember already-read PlayerInfo values without rereading getters.
+
+        The ID coercion and success condition match ``remember_player``;
+        callers that share a row-local field sample can pass its values here.
+        """
+        pid = _as_id(player_id)
+        vid = _as_id(vehicle_id)
+        if pid is None or vid is None:
+            return False
+        self.remember(vid, pid, team_id)
+        return True
+
     def lookup(self, vehicle_id, resolve=None):
         vid = extract_vehicle_id(vehicle_id)
         if vid is None:

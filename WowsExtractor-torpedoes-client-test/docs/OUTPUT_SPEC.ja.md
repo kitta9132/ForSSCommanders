@@ -1,6 +1,20 @@
 # WowsExtractor 魚雷出力版（WoWSクライアント用mod）
 
-`0.3.24`の`diag.playerReads`は当該ships sampleの`sampleStatus`（players一覧取得のcomplete/partial/unavailable、direct call時notProvided）、`indexHits`、`vehicleLookups`（試行数、成功数ではない）を示します。新しいgame APIや時計読取りは追加せず、実機で共有経路の利用状況を確認するためのカウンターです。ships phaseの個別lookupだけを数え、他phase・イベントのAPI呼出し総数ではありません。
+`0.3.25`は、0.3.24の`diag.playerReads`とindex join契約を維持します。`sampleStatus`（players一覧取得のcomplete/partial/unavailable、direct call時notProvided）、`indexHits`、`vehicleLookups`（試行数、成功数ではない）は引き続きships sample内の個別lookupだけを数え、新しいgame APIや時計読取りは追加しません。
+
+## 0.3.25-player-field-budget
+
+players一覧をstrict indexにも使うstate buildでは、同じraw PlayerInfoについてdamage cacheとstrict indexが読む`playerId`/`id`、`shipId`/`vehicleId`/`vehicleID`、`teamId`をrow-localのaccess sampleで共有します。item accessとattribute accessの結果・例外は別々にmemoizeし、damage側の「item例外時のみattributeへfallback」とstrict側の「mapping itemがNoneならattributeも確認」をそれぞれ維持します。したがって、競合するmapping key／属性、None alias、raising getterでも解決ルールは同一です。値を一つの汎用getterへ強制統一はしません。getterが同一row内で呼出しごとに値を変える場合は最初の観測値を両consumerで共有します。
+
+sampleとmemoized access結果はrow処理中だけに限定し、返すindex rowはstrictに許可したscalar IDとscalar teamId（またはNone）のみです。damage IDは従来どおりdamage trackerの数値正規化を使い、team値はdamage側の既存規則を保ちます。raw PlayerInfoや非scalar IDをindex／JSONへコピーせず、`repr`による変換もしません。`_remember_roster_vehicles()`のindex不要なstart/direct経路と既存`_remember_player_vehicle()` direct callは旧経路のままで、strict index用field readを追加しません。frame間cacheはありません。
+
+`_build_ships`のpass 1で観測した`ship.teamId`をinfosへ保存し、pass 2の出力生成で再読しません。team 0を保持し、player teamがNoneのときのship team fallbackを維持します。この変更によりteamIdの観測時点は従来のpass 2からpass 1へ早まります。index hit/missおよびdiagnostic fallback dueを含め、1 shipあたり最大1回です。
+
+24行のoffline fixtureでは通常のdict PlayerInfoで`playerId`/`shipId`/`teamId`のkey readsが従来144回（3 field × 24 row × 2 consumer）から72回（3 field × 24 row）へ減り、damage cacheとstrict indexの値を維持します。players getterは従来どおり1回、normal full index hitのvehicle lookupは0回です。別fixtureでitem/attribute競合・raising getter時も各access pathをrow内で最大1回とし、damage／strictの別々の選択結果を確認します。teamIdはhit/miss/diagnostic fallback各経路で最大1回、team 0と出力を維持します。FPS、実ゲーム時間、API内部時間は未測定です。source only・未導入です。
+
+## 0.3.24-player-read-sharing
+
+`diag.playerReads`は当該ships sampleの`sampleStatus`（players一覧取得のcomplete/partial/unavailable、direct call時notProvided）、`indexHits`、`vehicleLookups`（試行数、成功数ではない）を示します。新しいgame APIや時計読取りは追加せず、実機で共有経路の利用状況を確認するためのカウンターです。ships phaseの個別lookupだけを数え、他phase・イベントのAPI呼出し総数ではありません。
 
 ## 0.3.24-player-read-sharing
 

@@ -57,17 +57,20 @@ def _roster_reader(battle, cc=None, hub=None):
                  '_plain_player_row'):
         _function(name, ns)
     remember_player = _method('_remember_player_vehicle', ns)
+    remember_sampled = _method('_remember_sampled_player_vehicle', ns)
     remember_roster = _method('_remember_roster_vehicles', ns)
-    return ns, remember_player, remember_roster
+    return ns, remember_player, remember_sampled, remember_roster
 
 
-def _sample_collector(remember_player):
+def _sample_collector(remember_player, remember_sampled):
     class Collector(object):
         pass
     collector = Collector()
     collector._damage = DamageTracker()
     collector._remember_player_vehicle = lambda player: remember_player(
         collector, player)
+    collector._remember_sampled_player_vehicle = lambda player: (
+        remember_sampled(collector, player))
     return collector
 
 
@@ -116,7 +119,7 @@ def _players_info(rows):
 
 
 def test_strict_player_keys_keep_zero_types_and_reject_invalid_ids():
-    ns, _, _ = _roster_reader(object())
+    ns, _, _, _ = _roster_reader(object())
     key = ns['_strict_player_lookup_key']
     assert key(0) == (int, 0)
     assert key(0.0) == (float, 0.0)
@@ -174,8 +177,8 @@ def test_24_ships_share_one_player_list_and_preserve_ship_output():
              'teamId': 0 if index == 0 else (index % 2) + 1}
             for index in range(24)]
     battle = _players_info(rows)
-    ns, remember_player, remember_roster = _roster_reader(battle)
-    collector = _sample_collector(remember_player)
+    ns, remember_player, remember_sampled, remember_roster = _roster_reader(battle)
+    collector = _sample_collector(remember_player, remember_sampled)
     sample = remember_roster(collector, [])
     assert battle.calls == {'info': 1, 'fallback': 0, 'vehicle': 0}
     assert sample['status'] == 'complete'
@@ -201,6 +204,245 @@ def test_24_ships_share_one_player_list_and_preserve_ship_output():
         row['playerId'] for row in rows]
     assert shared[0]['teamId'] == 0
     assert collector._damage.lookup(5000) == (7000, 0)
+
+
+def test_24_roster_rows_read_three_common_fields_once_instead_of_twice():
+    class CountingRow(dict):
+        def __init__(self, *args, **kwargs):
+            dict.__init__(self, *args, **kwargs)
+            self.reads = {}
+
+        def __getitem__(self, name):
+            self.reads[name] = self.reads.get(name, 0) + 1
+            return dict.__getitem__(self, name)
+
+    def rows():
+        return [CountingRow(shipId=5000 + index, playerId=7000 + index,
+                            teamId=0 if index == 0 else (index % 2) + 1)
+                for index in range(24)]
+
+    legacy_rows = rows()
+    legacy_battle = _players_info(legacy_rows)
+    for row in legacy_rows:
+        row.reads.clear()
+    ns, remember_player, remember_sampled, _ = _roster_reader(legacy_battle)
+    legacy_collector = _sample_collector(remember_player, remember_sampled)
+    for row in legacy_rows:
+        remember_player(legacy_collector, row)
+        ns['_plain_player_row'](row)
+    assert sum(sum(row.reads.values()) for row in legacy_rows) == 144
+    assert all(row.reads == {'playerId': 2, 'shipId': 2, 'teamId': 2}
+               for row in legacy_rows)
+
+    sampled_rows = rows()
+    battle = _players_info(sampled_rows)
+    for row in sampled_rows:
+        row.reads.clear()
+    ns, remember_player, remember_sampled, remember_roster = _roster_reader(battle)
+    collector = _sample_collector(remember_player, remember_sampled)
+    sample = remember_roster(collector, [])
+    assert sample['status'] == 'complete'
+    assert len(sample['index']) == 24
+    assert sum(sum(row.reads.values()) for row in sampled_rows) == 72
+    assert all(row.reads == {'playerId': 1, 'shipId': 1, 'teamId': 1}
+               for row in sampled_rows)
+
+
+def test_start_roster_cache_does_not_read_strict_index_fields():
+    class CountingRow(dict):
+        def __init__(self, *args, **kwargs):
+            dict.__init__(self, *args, **kwargs)
+            self.reads = {}
+
+        def __getitem__(self, name):
+            self.reads[name] = self.reads.get(name, 0) + 1
+            return dict.__getitem__(self, name)
+
+    row = CountingRow(shipId=77, playerId=42, teamId=0)
+    battle = _players_info([row])
+    row.reads.clear()
+    ns, remember_player, remember_sampled, remember_roster = _roster_reader(battle)
+    collector = _sample_collector(remember_player, remember_sampled)
+    sample = remember_roster(collector)
+    assert sample['status'] == 'complete' and sample['index'] == {}
+    assert row.reads == {'playerId': 1, 'shipId': 1, 'teamId': 1}
+    assert collector._damage.lookup(77) == (42, 0)
+
+
+def test_mapping_item_and_attribute_conflicts_keep_consumer_specific_rules():
+    class Hybrid(object):
+        def __init__(self):
+            self.item_reads = {}
+            self.attr_reads = {}
+            self.items = {'playerId': None, 'id': 7, 'shipId': None,
+                          'vehicleId': 11, 'teamId': None}
+
+        def keys(self):
+            return self.items.keys()
+
+        def __getitem__(self, name):
+            self.item_reads[name] = self.item_reads.get(name, 0) + 1
+            if name not in self.items:
+                raise KeyError(name)
+            return self.items[name]
+
+        def _attribute(self, name, value):
+            self.attr_reads[name] = self.attr_reads.get(name, 0) + 1
+            return value
+
+        @property
+        def playerId(self):
+            return self._attribute('playerId', 42)
+
+        @property
+        def id(self):
+            return self._attribute('id', 99)
+
+        @property
+        def shipId(self):
+            return self._attribute('shipId', 80)
+
+        @property
+        def vehicleId(self):
+            return self._attribute('vehicleId', 12)
+
+        @property
+        def teamId(self):
+            return self._attribute('teamId', 0)
+
+    row = Hybrid()
+    battle = _players_info([])
+    ns, remember_player, remember_sampled, _ = _roster_reader(battle)
+    collector = _sample_collector(remember_player, remember_sampled)
+    index_row = remember_sampled(collector, row)
+
+    # Damage semantics skip item None and continue through aliases; strict
+    # semantics try the matching attribute when a mapping item is None.
+    assert index_row == ((int, 80), {'playerId': 42, 'teamId': 0})
+    assert collector._damage.lookup(11) == (7, None)
+    assert row.item_reads == {
+        'playerId': 1, 'id': 1, 'shipId': 1, 'vehicleId': 1, 'teamId': 1}
+    assert row.attr_reads == {'playerId': 1, 'shipId': 1, 'teamId': 1}
+
+
+def test_raising_player_accessors_are_memoized_without_losing_alias_fallback():
+    class RaisingMapping(object):
+        def __init__(self):
+            self.item_reads = {}
+            self.attr_reads = {}
+
+        def keys(self):
+            return ()
+
+        def __getitem__(self, name):
+            self.item_reads[name] = self.item_reads.get(name, 0) + 1
+            raise KeyError(name)
+
+        def _read(self, name, value):
+            self.attr_reads[name] = self.attr_reads.get(name, 0) + 1
+            if isinstance(value, Exception):
+                raise value
+            return value
+
+        @property
+        def playerId(self):
+            return self._read('playerId', 42)
+
+        @property
+        def shipId(self):
+            return self._read('shipId', RuntimeError('missing'))
+
+        @property
+        def vehicleId(self):
+            return self._read('vehicleId', AttributeError('missing'))
+
+        @property
+        def vehicleID(self):
+            return self._read('vehicleID', 77)
+
+        @property
+        def teamId(self):
+            return self._read('teamId', 0)
+
+    row = RaisingMapping()
+    battle = _players_info([])
+    ns, remember_player, remember_sampled, _ = _roster_reader(battle)
+    collector = _sample_collector(remember_player, remember_sampled)
+    index_row = remember_sampled(collector, row)
+    assert index_row == ((int, 77), {'playerId': 42, 'teamId': 0})
+    assert collector._damage.lookup(77) == (42, 0)
+    assert row.item_reads == {
+        'playerId': 1, 'shipId': 1, 'vehicleId': 1, 'vehicleID': 1,
+        'teamId': 1}
+    assert row.attr_reads == {
+        'playerId': 1, 'shipId': 1, 'vehicleId': 1, 'vehicleID': 1,
+        'teamId': 1}
+
+
+def test_non_scalar_player_id_is_not_copied_or_stringified_into_index():
+    class UnsafeId(object):
+        def __float__(self):
+            raise ValueError('not numeric')
+
+        def __repr__(self):
+            raise AssertionError('raw ID must not be stringified')
+
+    battle = _players_info([{'shipId': 77, 'playerId': UnsafeId(),
+                             'teamId': 1}])
+    ns, remember_player, remember_sampled, remember_roster = _roster_reader(battle)
+    collector = _sample_collector(remember_player, remember_sampled)
+    sample = remember_roster(collector, [])
+    assert sample['index'] == {}
+    assert sample['seenKeys'] == {(int, 77): True}
+
+
+def test_ship_team_id_is_read_once_for_hit_miss_and_diagnostic_fallback():
+    class TeamShip(object):
+        def __init__(self):
+            self.team_reads = 0
+            self._Ship__id = 77
+            self.uiId = 1
+
+        @property
+        def teamId(self):
+            self.team_reads += 1
+            return 0
+
+        def getPosition(self):
+            return (1, 2, 3)
+
+        def isAlive(self):
+            return True
+
+    sample = {'status': 'complete', 'index': {
+        (int, 77): {'playerId': 42, 'teamId': 0}}}
+    for mode in ('hit', 'miss', 'diagnosticFallback'):
+        battle = _players_info([])
+        ship = TeamShip()
+        battle.getAllShips = lambda ship=ship: [ship]
+        lookups = []
+
+        def lookup(vehicle_id):
+            lookups.append(vehicle_id)
+            return {'id': 42, 'teamId': 0}
+
+        battle.getPlayerByVehicleId = lookup
+        builder = _ship_builder(battle)
+        if mode == 'miss':
+            players_sample = {'status': 'partial', 'index': {}}
+        else:
+            players_sample = sample
+        if mode == 'diagnosticFallback':
+            builder._positionFallbacksEnabled = True
+            builder._diagnosticsEnabled = True
+            builder._diagnosticsSampleDue = True
+
+        output, _ = builder._build_ships(
+            1.0, players_sample=players_sample)
+        assert ship.team_reads == 1
+        assert output[0]['teamId'] == 0
+        assert output[0]['playerId'] == 42
+        assert lookups == ([] if mode == 'hit' else [77])
 
 
 def test_partial_duplicate_and_invalid_rows_fall_back_without_false_joins():
@@ -262,8 +504,8 @@ def test_partial_duplicate_and_invalid_rows_fall_back_without_false_joins():
     ships.append(Obj(_Ship__id=None, uiId=7, teamId=None,
                      getPosition=lambda: (1, 2, 3), isAlive=lambda: True))
     battle = Battle()
-    ns, remember_player, remember_roster = _roster_reader(battle)
-    collector = _sample_collector(remember_player)
+    ns, remember_player, remember_sampled, remember_roster = _roster_reader(battle)
+    collector = _sample_collector(remember_player, remember_sampled)
     sample = remember_roster(collector, [])
     assert sample['status'] == 'partial'
     assert sample['index'][(int, 10)] == {'playerId': 0, 'teamId': 0}
@@ -303,8 +545,8 @@ def test_player_getter_fallback_empty_none_and_next_frame_are_distinct():
             return self.fallback
 
     empty_battle = Battle([], [{'shipId': 1, 'playerId': 2, 'teamId': 3}])
-    ns, remember_player, remember_roster = _roster_reader(empty_battle)
-    collector = _sample_collector(remember_player)
+    ns, remember_player, remember_sampled, remember_roster = _roster_reader(empty_battle)
+    collector = _sample_collector(remember_player, remember_sampled)
     empty = remember_roster(collector, [])
     assert empty['status'] == 'complete' and empty['index'] == {}
     assert calls == ['info']  # successful empty list does not trigger fallback
@@ -312,16 +554,16 @@ def test_player_getter_fallback_empty_none_and_next_frame_are_distinct():
     calls[:] = []
     fallback_row = {'shipId': 1, 'playerId': 2, 'teamId': 3}
     fallback_battle = Battle(RuntimeError('info failed'), [fallback_row])
-    ns, remember_player, remember_roster = _roster_reader(fallback_battle)
-    collector = _sample_collector(remember_player)
+    ns, remember_player, remember_sampled, remember_roster = _roster_reader(fallback_battle)
+    collector = _sample_collector(remember_player, remember_sampled)
     fallback = remember_roster(collector, [])
     assert fallback['index'][(int, 1)]['playerId'] == 2
     assert calls == ['info', 'fallback']
 
     calls[:] = []
     unavailable_battle = Battle(None, RuntimeError('fallback failed'))
-    ns, remember_player, remember_roster = _roster_reader(unavailable_battle)
-    collector = _sample_collector(remember_player)
+    ns, remember_player, remember_sampled, remember_roster = _roster_reader(unavailable_battle)
+    collector = _sample_collector(remember_player, remember_sampled)
     unavailable = remember_roster(collector, [])
     assert unavailable['status'] == 'unavailable'
     assert unavailable['index'] == {}
