@@ -2,6 +2,7 @@
 
 ## 緊急優先：通常プレイのFPS低下
 
+- B36開始処理の読み取り専用レビュー完了：battle-start準備、ballistics/roster初期化、force meta build/atomic write、profiler初期probeは現行cycle計測外。記録最大10.47msだけでmod起因を除外できない。必要時の限定opt-in startup集計は未実装候補として残し、次の実戦負荷評価は魚雷ありの取得・motion・同期write増分を優先する。追加テストは現時点で依頼していない。
 - B36（2026-11-03）：0.3.24・24人roster訓練戦、開始数秒min10→その後min50～60/max160～180・平均約120と報告。state艦数は最大20であり24隻同時収集ではない。全7,919行でplayer共有hit・個別lookup0・map/playerId保持。cycle平均7.153ms／最大10.469ms、初窓最大8.286msで開始min10の原因は未説明。停止・13ファイルhash照合退避済み。追加実機なしで開始時の無計測経路を調査中。FPS問題完全解消や24隻同時負荷確認とは扱わない。[B36詳細](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_B36_0.3.24.ja.md)。
 - B35（2026-11-03）：0.3.24・6対6・5Hz、minFPS約75・カクつきなし。全2,288艦行のplayer共有hit、個別lookup0、map/playerId全行保持。記録時計上ships平均0.583ms／cycle4.823ms（B33は7.438／11.898ms）。12隻で共有の実利用と区間短縮を確認、FPS因果・24隻効果は未確定。停止・13ファイルhash照合退避済み。1対1・6対6を通過したので同設定の24隻短時間確認を次段階として準備し、悪化時即中止・通常戦には進まない。[B35詳細](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_B35_0.3.24.ja.md)。
 - B34（2026-11-03）：0.3.24・1対1・5Hz、minFPS約80・カクつきなし。全293艦行でplayer共有hit、個別vehicle lookup0、map/playerId全行保持。記録時計上ships平均0.172ms、cycle2.615ms（B32は1.317/3.753ms）。共有実動作と区間短縮を確認、FPS因果・多数艦効果は未確定。停止・13ファイルhash照合退避後、6対6比較を準備。24隻はまだ行わない。[B34詳細](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_B34_0.3.24.ja.md)。

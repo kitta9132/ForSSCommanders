@@ -33,3 +33,11 @@ available16窓、notSampled385件。time.clock / basis assumed、syncEncodeWrite
 - player共有は多数艦でも利用されている。一方、開始直後のmin10は未解決の観測であり、正常扱いして打ち切らない。
 - 現行cycle計測の前にlifecycle初期化・meta探索／生成／書込み等があり、記録の始まりとユーザーが言う「最初の数秒」を独立に同期できていない。初期処理、ゲーム読み込み・描画、他mod／外部記録の寄与は未確定。
 - 追加の実機再現や通常戦は今は依頼しない。既存sourceと記録で開始時の計測範囲を調査し、必要なら明示opt-inの限定初期計測を設計する。魚雷多数時・診断ON・24隻同時stateの負荷は未検証として残す。
+
+## 開始処理の追加レビュー
+
+Luna xhighによる読み取り専用レビューで計測境界を照合した。`_on_battle_start`の設定読込み・reset・player/roster参照・arena探索、`_start_collection`のballistics初期化・roster再取得・force meta生成／atomic write・tick登録はstate cycle計測外。毎tickのmeta処理もcycle開始前だが、arena探索は現行0.5秒gateに従う。profiler初期化の固定8 clock probeもphase計測外。
+
+最初のstate ts、time.clockの窓境界、ユーザーの「最初の数秒」は同期点がなく相互変換しない。notSampledは0msではない。B36のsyncEncodeWrite表示に誤分類の証拠はなく、state submitが初回meta書込みまで含むわけではない。ゲーム読み込み・描画・GPU・第三者mod・外部記録は引き続き未計測。
+
+必要な場合の最小追加案は、既定OFFでbattle lifecycleあたり固定回数のstartup集計を行うこと。候補区間はbattle-start準備、ballistics/roster、force meta build/write、初回tick前処理。API単位・毎tickの詳細ログは作らず、時計未使用不可を0msへ置換しない。まだ実装・実機依頼はしていない。直近の実戦負荷の不確実性としては魚雷ありの取得・motion・同期write増分を優先し、起動時原因の解決済み扱いはしない。
