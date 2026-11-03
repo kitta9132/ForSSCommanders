@@ -2,6 +2,7 @@
 
 ## 緊急優先：通常プレイのFPS低下
 
+- B37（2026-11-03）：0.3.26・6対6・5Hz、未発射→魚雷最大6本（owner1）。記録時計上torpedoes平均0.020→0.260ms、cycle5.146→5.633ms（全0/全6本窓別集計）。FPS/体感は未報告、多数本数への外挿不可。avatar map/health各12件は取れたが**全738 stateでplayerId対応0・unmatchable12**、識別付き観測として未完成。既存shipsは全8,789行map/playerId保持・indexhit、個別lookup0。停止・13files保全退避済み、識別子取得と実機/fixture差を調査中。開始直後drop追跡なし。[B37詳細](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_B37_0.3.26.ja.md)。
 - B36の24対20：avatarは全401 stateでcomplete/count24だがshipsに出現したplayerは20人、未出現4人は両team1/3・全Battleship。全stateで入力len由来totalShipsと出力件数一致、collector/writer/recorderの行フィルターなし。取得経路差まで確認、API上流で未列挙の理由は未確定。0.3.26で既存shipsを変えず、captured avatarの同frame map/health/API presenceを独立出力するsource-only観測を追加。offline 24 avatar/20 API ships fixtureではmap24/20/0 variantsを確認したが、B36の実位置・HPは未確認で実機取得成功とは扱わない。rosterからalive/位置を推測補完しない。[取得範囲調査](WowsExtractor-torpedoes-client-test/docs/RESEARCH_B36_SHIP_COVERAGE.ja.md)／[出力仕様](WowsExtractor-torpedoes-client-test/docs/OUTPUT_SPEC.ja.md)。
 - 残負荷候補の読取り専用レビュー完了：同一PlayerInfoのdamage登録／strict indexでの再読とship.teamIdの2-pass再読を0.3.25-player-field-budgetで最小実装。24行fixtureの通常3 field readsは144→72、ship.teamIdは全経路で最大1回。個別時間・FPS効果は未測定で、体感できる改善の根拠とはしない。avatar全3.935msを削減可能とは扱わない。優先は24対20の取得範囲調査、開始直後の低下は追わない。[残負荷候補](WowsExtractor-torpedoes-client-test/docs/RESEARCH_REMAINING_CORE_COST_0.3.24.ja.md)。
 - ユーザー指示（2026-11-03）：**開始直後のFPS低下はこれ以上追わない。startup計測追加は進めない。** 優先対象をB36のroster24対ships最大20の取得範囲調査へ変更。既存記録・collector/reader経路からAPI返却時点の範囲差まで絞り、上流理由は未確定。0.3.26はcaptured avatar rowで観測範囲を分離するsource-only実装。追加実機は依頼せず、次回の魚雷あり実機負荷評価にavatar coverageとplayer budgetをまとめる。
