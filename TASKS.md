@@ -2,6 +2,7 @@
 
 ## 緊急優先：通常プレイのFPS低下
 
+- B40（2026-11-04解析）：0.3.28・6対6、8:22全発射完了／7:30退出、minFPS60・カクつきなし。depth probe147 due sampleで262魚雷行を取得、全行raw0.14・exactUiId、unit null。独立取得の実機可用性確認済み、意味・単位・別深度は未確認。cycle平均5.775ms／最大21.938msを記録したがdepth起因とは断定しない。停止・13fileshash照合退避完了。同じ浮上発射の再試験不要。[B40深度候補](WowsExtractor-torpedoes-client-test/docs/VALIDATION_B40_0.3.28_TORPEDO_DEPTH.ja.md)。
 - B39後のnamespace調査完了：GUI Components.xmlではAvatar.idがInteger PK、playerId propertyなし。観戦・combat log・context menuでもこのGUI IDをplayerId名で使う根拠あり。ただしModsAPIとの一般対応契約は見つからず、候補一致をconfirmed joinへ昇格しない。定義にないplayerIdを探すための実機再試験は行わない。現行0.3.27の独立観測＋candidate契約を維持。[namespace調査](WowsExtractor-torpedoes-client-test/docs/RESEARCH_AVATAR_ID_NAMESPACE.ja.md)。
 - B39（2026-11-03）：0.3.27、minFPS60～70・カクつきなし。roster/avatar12対APIships最大9。候補avatar.idは全12件available、ships内9件とは型値一致、安定168 stateでは未一致3件すべてでmap/raw health取得を確認。strictplayerIdは依然unknownのまま、候補一致を確定joinへ昇格しない。cycle平均5.119ms・最大6.806ms。停止・13fileshash照合退避完了。範囲差の追加実機再現は当面不要、次は既存定義でnamespace根拠を確認。[B39詳細](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_B39_0.3.27.ja.md)。
 - B37（2026-11-03）：0.3.26・6対6・5Hz、未発射→魚雷最大6本（owner1）。記録時計上torpedoes平均0.020→0.260ms、cycle5.146→5.633ms（全0/全6本窓別集計）。FPS/体感は未報告、多数本数への外挿不可。avatar map/health各12件は取れたが**全738 stateでplayerId対応0・unmatchable12**、識別付き観測として未完成。既存shipsは全8,789行map/playerId保持・indexhit、個別lookup0。停止・13files保全退避済み、識別子取得と実機/fixture差を調査中。開始直後drop追跡なし。[B37詳細](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_B37_0.3.26.ja.md)。
@@ -85,7 +86,7 @@
 ## P1：潜水艦固有情報（取得経路調査→mod）
 
 - [△] 0.3.11で`selfSubmarineProbe`と`waveHitProbe`を追加。B23は両probeが列挙例外だった一方、同じ2,622 active frameすべてで既存`weaponContextProbe.collections.selfVehicle`は完全なsingletonとしてavailable。0.3.12で列挙を`for ... in enumerate(...)`へ変更し、制限builtins fixtureを含むoffline回帰を追加。B24の206 active frameでは両collectionが正常取得され、selfVehicle singletonと各Submarine/Battery raw fieldがavailable、WaveHitはcompleteな正常空collection。B23の原因は依然未確定。B27ではUndineの2,233 active samplesとWaveHit 439 snapshotsをraw照合し、depth/Battery/WaveHitのUI用途根拠を静的資料で別metadata化（0.3.13）。depthのmはUI hint、enum名はUI label、`lifeTime`はUIの秒countdown入力に限り、サーバー状態一般は確定しない。同じ潜水試験の再要求は不要。B27記録：[潜水艦](WowsExtractor-torpedoes-client-test/docs/VALIDATION_0.3.12_B27_SUBMARINE.ja.md)／[WaveHit](WowsExtractor-torpedoes-client-test/docs/VALIDATION_0.3.12_B27_WAVEHIT.ja.md)、[UI根拠](WowsExtractor-torpedoes-client-test/docs/RESEARCH_SUBMARINE_STATE_SEMANTICS.ja.md)。
-- [△] 対象艦・魚雷の深度および深度差。0.3.28で魚雷`dataHub.torpedo.depth`をheavy diagnostics非依存の専用opt-in・最小1秒・最大64 entityでsampleし、complete collectionかつAPI/UI双方のIDが型厳密・一意の場合だけ`uiState.depth`へ伝播する実装を追加（source only・未導入）。B37はdepth sampling OFFで、実機Python取得・値・意味は未確認。`position.y`・地図から補ったy=0は代用しない。unitはnull、対象艦深度・深度差も未取得。次回は通常の魚雷発射記録へdepth取得可否の確認だけ相乗りする。
+- [△] 対象艦・魚雷の深度および深度差。0.3.28の独立1Hz `dataHub.torpedo.depth`候補はB40で262行raw0.14を取得し、一意UI/API ID対応時だけ`uiState.depth`へ付与。unitはnull。`position.y`・地図補助y=0は代用しない。別深度での変化、単位、対象艦深度・深度差は未確定。同じ浮上発射試験は繰り返さない。
 - [△] ping対象艦・命中区画・一重／二重状態・命中／更新／失効時刻・効果残時間。B27では6:42の二重ping報告と`hitCount=1→2`、`maxLifeTime=25→50`が整合。439 snapshotで1 row、1,794 snapshotは正常空。UIが直接countdown表示する`lifeTime`には秒hintを付けたが、期限・失効条件、対象ID namespace、命中区画、`maxLifeTime`単位は未確定。[B27 WaveHit記録](WowsExtractor-torpedoes-client-test/docs/VALIDATION_0.3.12_B27_WAVEHIT.ja.md)。
 - [ ] 魚雷の誘導先ID、誘導停止距離／地点／理由。最寄り艦を確定対象にしない。
 - [ ] 魚雷の消滅理由（命中・射程切れ等）。一覧からの消失とは区別する。
