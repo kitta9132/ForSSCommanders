@@ -183,9 +183,14 @@ def test_main_build_ships_24_direct_getters_and_vehicle_lookups_are_one_each():
         def remember(self, *args):
             pass
     class Calibration(object):
+        def __init__(self):
+            self.observe_calls = 0
+            self.snapshot_calls = 0
         def observe(self, *args):
-            pass
+            self.observe_calls += 1
+            return {'status': 'unknown', 'observeBatch': self.observe_calls}
         def snapshot(self):
+            self.snapshot_calls += 1
             return {'status': 'unknown'}
     def collect_maps(collector, avatar_entities=None):
         calls['maps'] += 1
@@ -219,6 +224,9 @@ def test_main_build_ships_24_direct_getters_and_vehicle_lookups_are_one_each():
     rows, diag = c._build_ships(1.0)
     assert len(rows) == 24
     assert calls == {'vehicle': 24, 'direct': 24, 'info': 0, 'maps': 1}
+    assert c._mapCalibration.observe_calls == 1
+    assert c._mapCalibration.snapshot_calls == 0
+    assert diag['mapCalibration'] == {'status': 'unknown', 'observeBatch': 1}
     assert diag['positionReadPolicy'] == {
         'policy': 'coreDirectOnly', 'sampledShips': 0, 'notSampledShips': 24}
     assert rows[0]['positionReadStatus']['status'] == 'unknown'
@@ -245,3 +253,6 @@ def test_main_build_ships_24_direct_getters_and_vehicle_lookups_are_one_each():
     assert rows_due[0]['position'] == [4, 5, 6]
     assert diag_due['positionReads']['sampledShips'] == 1
     assert diag_due['positionReads']['notSampledShips'] == 23
+    assert c._mapCalibration.observe_calls == 3
+    assert c._mapCalibration.snapshot_calls == 0
+    assert diag_due['mapCalibration'] == {'status': 'unknown', 'observeBatch': 3}

@@ -3,6 +3,15 @@ import json
 import math
 
 
+def test_observe_returns_the_same_diagnostics_as_snapshot():
+    calibration = M.MapCalibration()
+    for index in range(5):
+        returned = calibration.observe(
+            [(.1 + index * .15, .2 + index * .1,
+              100.0 + index * 20.0, -50.0 + index * 15.0)], index + 1.0)
+        assert returned == calibration.snapshot()
+
+
 def test_extreme_finite_world_coordinates_are_ignored():
     calibration = M.MapCalibration()
     calibration.observe([(.1, .1, 1e308, -1e308), (.2, .2, -1e308, 1e308)], 1.)

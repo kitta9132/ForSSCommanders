@@ -1,5 +1,15 @@
 # WowsExtractor 魚雷出力版（WoWSクライアント用mod）
 
+## 0.3.22-cadence-budget
+
+`state_interval`の既定を0.2秒（約5Hz）へ変更しました。`collection_enabled=true`時のstate取得・行構築・JSON書込みは、引き続き1つのsnapshotとして同じdueで実行し、群別周期やframe間の位置cacheは導入していません。`state_interval`を明示的に`0.1`にした場合は従来の約10Hz互換で、取得範囲・出力項目は変わりません。collection/diagnostics/profiler/position fallbackの既定OFFも維持します。
+
+`_refresh_meta`のarena ID探索は、state間隔とは独立した`META_RETRY_INTERVAL`（0.5秒）のgateで実行します。metaがreadyでもbattleIdがfallbackなら初期`META_RETRY_SECONDS`（12秒）の期限内は再探索し、遅れてarena IDを取得した場合はmetaを書き直して`battleId`と一致させます。force/戦闘開始時は即時探索します。探索期限の計時はmeta書込み時刻`_lastMetaWrite`と別属性で管理し、build/write失敗時も次の探索まで0.5秒待ちます（catch-upなし）。ゲーム時計の逆行では探索期限を再開放し、非finite時は探索せず、0固定時は同じ時刻で毎frame再探索しません。新しい時計APIは追加していません。
+
+`_build_ships`は`MapCalibration.observe()`が返す同一batchのdiagnostics snapshotを直接使用し、直後の`snapshot()`再構築を削除しました。取得対象・較正sample・24艦あたりの直接位置取得回数は変えていません。
+
+未確認・残る制約：FPS改善は未計測・未確認です。5Hz化により設定上の観測間隔は0.2秒となり、フレーム待ち・処理遅延でさらに延び得ます。従来より短命状態を取り逃がしやすく、表示遅延も増え得ます。`state.json`は非原子的上書きのため、torn readから回復するまでの時間窓も次回の正常な書込みまで続きます（既定間隔は約0.1秒から約0.2秒へ変更）。diagnosticsの設定intervalは1秒で、due評価はstate構築時だけです。実行頻度は診断間隔とstate cadenceの両方に制限されます。魚雷motionは`0 < dt <= 1.0`の差分だけを採用するため、5Hzの通常の更新間隔は範囲内ですが、処理停止やさらに低頻度化して1秒を超えると速度派生が利用不能になります。較正のdrift判定はbatch数基準のため、5Hz化で検出までの実時間は遅くなり得ます。モジュールは既存9個のままで、新しいmoduleはありません。
+
 ## 0.3.21-position-read-budget
 
 通常の各ships rowでは、同frameで`_build_ships`が既に得たplayerをresolverへ渡し、艦本体の公開`ship.getPosition()`を最大1回だけ試します。成功した直接world座標を最優先し、失敗時も同frameの`dataHub.mapPosition`、既存の較正補助、visibility unknown時の座標保持は維持します。map座標はworld座標や深度ではなく、較正位置の補助Y=0も深度値ではありません。
@@ -18,7 +28,7 @@
 
 0.3.14導入後のFPS報告を受けた安全措置として、`collection_enabled` は既定falseです。`config.ini` 不在・読込失敗・不正値も収集停止になり、明示した文字列 `true` のみ有効です。停止中はbattle ship/torpedo API、dataHub収集、Ballistics API、damage/ballistics tracker開始・tick、定期callbackを実行しません。battle lifecycleを維持し、battle shown時のdisabled stateとquit時のinactive stateのみを書きます。stateの`collection`は`{"status":"disabled","source":"config.collection_enabled"}`を示します。外部読取側は通常のtelemetry snapshotが出ないことを許容してください。
 
-収集を明示有効化した場合も `diagnostics_enabled` の既定はfalseです。trueの場合も`diagnostics_interval`（既定1.0秒）で診断一式をまとめてsampleし、非due stateには古いpayloadを再利用せず`status=notSampled`を出します。falseでは`status=disabled`と`source=config.diagnostics_enabled`を出します。`state_interval`とcore収集は従来どおり0.1秒で、core負荷は未評価です。診断の遅延分catch-upは行わず、時計逆行／不正値・戦闘切替でスケジューラ履歴を初期化します。
+収集を明示有効化した場合も `diagnostics_enabled` の既定はfalseです。trueの場合も`diagnostics_interval`（既定1.0秒）で診断一式をまとめてsampleし、非due stateには古いpayloadを再利用せず`status=notSampled`を出します。falseでは`status=disabled`と`source=config.diagnostics_enabled`を出します。0.3.17時点の`state_interval`とcore収集は0.1秒で、core負荷は未評価でした（0.3.22で既定0.2秒へ変更、明示0.1は互換維持）。診断の遅延分catch-upは行わず、時計逆行／不正値・戦闘切替でスケジューラ履歴を初期化します。
 
 診断due時だけsample-local `getEntityCollections` facadeを作り、固定whitelist名の元getter呼出し・戻り値・bounded enumeration結果を同一due sampleの全safe probeで共有します。whitelistはselfVehicle, weaponController, timer, battleTimer, battleInfo, weaponSlot, ammo, serialLoad, gun, gunBarrel, reloadBar, playerAvatar, parameter, torpedo, waveHitです。各名は最大consumer limit+1行をeager captureし、各consumerが従来のlimitでtruncatedを判定します。途中iteration exceptionは取得済み行の後でreplayし、partialを正常完了へ変換しません。getterのNone/exceptionもsample内で再利用します。未指定名や他APIは透過し、新しいgame API呼出しは追加しません。wrapper/row refsはsampleを越えて保持しません。
 

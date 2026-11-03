@@ -43,7 +43,8 @@
 | stateは止まったがactive=true | クラッシュ、mod停止、書き込み失敗の可能性。更新停止と戦闘終了は別扱い |
 | 起動時に前の戦闘のstateが残る | 次の戦闘までファイルが残ることがある。更新日時・battleId・tsを確認 |
 | 新しい戦闘の最初だけmetaとstateが違う | 別ファイル・別時刻で書かれる。battleIdで照合して更新を待つ |
-| 重くなった | `state_interval=0.2`にし次の戦闘で確認。async不可なら同期書き込みに戻る。特定のFPS改善は保証しない |
+| 重くなった | 既定は`state_interval=0.2`（約5Hz）。`0.1`を明示すると10Hzへ戻るが負荷も増える。async不可なら同期書き込みに戻る。特定のFPS改善は保証しない |
+| 遅れてarena IDが出た | meta再探索は0.5秒間隔・初期12秒まで。期限後のlate IDは自動反映しない。battleIdとmetaを照合する |
 | 記録ツールで0件 | `--mod-dir`が展開元でなく導入先か、JSONが生成済みか、schema/activeが正常か |
 | 記録ツールでFileExistsError | 出力JSONLが存在する。別名を指定する |
 | 旧サーバーでtorpedoesがunsupported | 元サーバーは今回変更していない。`state.json`を直接読む |

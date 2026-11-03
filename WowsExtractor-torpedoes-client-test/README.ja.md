@@ -1,13 +1,13 @@
 # WowsExtractor 魚雷出力版：実機テスト用パッケージ
 
-作成日：2026-11-02（日本時間）
-modバージョン：`0.3.21-position-read-budget` / ModsAPI：`API_v1.0`（source only・未導入）
+作成日：2026-11-03（日本時間）
+modバージョン：`0.3.22-cadence-budget` / ModsAPI：`API_v1.0`（source only・未導入）
 
 ## 最優先：性能報告と安全設定
 
-0.3.14導入後「自艦が沈むまでminFPS 25、撃沈後110まで回復」と報告されています。外部記録ツールは未使用とのことですが、mod内部のtick・state書込は別途戦闘中継続します。因果は未確定です。0.3.21はsource only・未導入です。`collection_enabled = false`、`diagnostics_enabled = false`、`profiler_enabled = false`、`position_fallbacks_enabled = false`の既定を維持します。coreでは艦本体の`getPosition`を一回だけ読み、同frame player lookupを位置処理で再実行しません。重い互換fallbackは専用opt-inかつdiagnostic due時だけです。過去fallback-only経路の位置が通常tickで未取得になり得ます。FPS改善・実機安全確認済みとは主張しません。writer thread時間、FPS、API内部時間は未計測です。通常プレイには収集modのロード対象外への退避を推奨します。詳細：[性能事故記録](docs/PERFORMANCE_INCIDENT_0.3.14.ja.md)／[B28調査](docs/RESEARCH_SHIP_COLLECTION_B28.ja.md)
+0.3.14導入後「自艦が沈むまでminFPS 25、撃沈後110まで回復」と報告されています。外部記録ツールは未使用とのことですが、mod内部のtick・state書込は別途戦闘中継続します。因果は未確定です。0.3.22-cadence-budgetはsource only・未導入です。`collection_enabled = false`、`diagnostics_enabled = false`、`profiler_enabled = false`、`position_fallbacks_enabled = false`の既定を維持します。state既定を0.2秒（約5Hz）へ下げ、0.1明示時は10Hz互換を維持します。全snapshotは一体のままで、群別周期・位置のframe間cacheはありません。metaのarena ID探索は0.5秒gateへ制限し、late IDの昇格とmeta書込みは期限内で維持します。coreでは艦本体の`getPosition`を一回だけ読み、較正は`observe()`の戻りsnapshotを再利用します。重い互換fallbackは専用opt-inかつdiagnostic due時だけです。5Hz化で観測遅延・torn read回復窓・診断実行上限・較正driftの実時間検出が悪化し得ます。FPS改善・実機安全確認済みとは主張しません。writer thread時間、FPS、API内部時間は未計測です。通常プレイには収集modのロード対象外への退避を推奨します。詳細：[性能事故記録](docs/PERFORMANCE_INCIDENT_0.3.14.ja.md)／[周期調査](docs/RESEARCH_COLLECTION_CADENCE_B31.ja.md)
 
-`config.ini` がない場合・読み込みに失敗した場合も収集停止です。明示的に `collection_enabled = true` のときだけ通常収集を開始します。重いUI/dataHub probeはさらに `diagnostics_enabled = true`、profilerは独立して `profiler_enabled = true` が必要です（どちらもcollection必須）。収集停止中はprofiler初期化clock callも0回で、probe/API poll・定期tickを行わず、戦闘開始時のdisabled stateと終了stateだけを書きます。core収集（0.1秒）およびarmament/public_dataの負荷は未評価です。
+`config.ini` がない場合・読み込みに失敗した場合も収集停止です。明示的に `collection_enabled = true` のときだけ通常収集を開始します。重いUI/dataHub probeはさらに `diagnostics_enabled = true`、profilerは独立して `profiler_enabled = true` が必要です（どちらもcollection必須）。収集停止中はprofiler初期化clock callも0回で、probe/API poll・定期tickを行わず、戦闘開始時のdisabled stateと終了stateだけを書きます。core収集（既定0.2秒）およびarmament/public_dataの負荷は未評価です。
 
 0.3.7は0.3.6のraw診断を維持し、成功したnamed collectionから完全な単一rowの場合だけweapon／clockの通常観測を別fieldに追加します。0/複数row、partial、truncated、field不明はunknownです。B11では5 collectionすべて単一row、controller `selectedWeapon` 0→2（active開始+21.335秒）、`battleTime` 0→37、`duration` 10を観測し、ユーザー画面報告9:40の選択・数値・操作順との整合を当該試験条件で確認しました。一般条件・サーバー情報としては未保証です。clock残時間は別collectionの同一snapshot観測からのUI式推定で、unit・意味は未検証です。0.3.3配布物・生成物は変更していません。[B11記録](docs/VALIDATION_0.3.6_B11_ROUTES.ja.md)を参照。
 

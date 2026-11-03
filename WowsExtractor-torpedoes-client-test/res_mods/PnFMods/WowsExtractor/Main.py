@@ -6,7 +6,7 @@
 
 API_VERSION = 'API_v1.0'
 MOD_NAME = 'WowsExtractor'
-MOD_VERSION = '0.3.21-position-read-budget'
+MOD_VERSION = '0.3.22-cadence-budget'
 
 # ---------------------------------------------------------------------------
 # WowsExtractor -- in-game data collector for the "8111 for WoWS" project.
@@ -142,8 +142,9 @@ try:
 except:
     CC = None
 
-STATE_INTERVAL = 0.1          # default seconds between state.json writes (~10 Hz); see config.ini
+STATE_INTERVAL = 0.2          # default seconds between state.json writes (~5 Hz); see config.ini
 META_RETRY_INTERVAL = 0.5     # battleInfo/map can be late in very small battles
+                              # (also gates the arena-id promotion probe)
 META_RETRY_SECONDS = 12.0
 SCHEMA_VERSION = 1
 # Version of the JSON contract written to disk. Distinct from API_VERSION above,
@@ -427,7 +428,8 @@ def _write_file(path, text):
 
     Used for the high-frequency state.json. A reader that catches a half-written
     file just parses to None and keeps its last good snapshot (the server does
-    exactly this), and the next write ~0.1s later heals it -- so we trade
+    exactly this), and the next write one state interval later (0.2s by default)
+    heals it -- so we trade
     strict atomicity for far fewer syscalls and no per-tick "new file" that
     on-access antivirus would re-scan."""
     try:
@@ -759,6 +761,8 @@ class Collector(object):
         self._lastMetaWrite = 0.0
         self._metaRetryUntil = 0.0
         self._metaReady = False
+        self._metaProbeDue = None     # next arena-id probe time (game clock)
+        self._metaProbeLastNow = None # last clock value, for rollback detection
         self._load_config()
         self._damage = DamageTracker(resolve=self._live_vehicle_player)
         self._ballistics = BallisticsTracker()
@@ -856,6 +860,8 @@ class Collector(object):
         self._lastMetaWrite = 0.0
         self._metaRetryUntil = 0.0
         self._metaReady = False
+        self._metaProbeDue = None
+        self._metaProbeLastNow = None
         if self._collectionEnabled:
             self._selfPlayerId = _try(lambda: battle.getSelfPlayerInfo().id)
             self._remember_player_vehicle(_try(lambda: battle.getSelfPlayerInfo()))
@@ -924,6 +930,8 @@ class Collector(object):
         self._active = False
         self._battleStarted = False
         self._battleShown = False
+        self._metaProbeDue = None
+        self._metaProbeLastNow = None
         self._mapCalibration.clear()
         self._torpedoMotion.clear()
         self._stop_tick()
@@ -1224,22 +1232,58 @@ class Collector(object):
             return
         if now is None:
             now = _now()
-        within_retry = (not self._metaRetryUntil
-                        or now <= self._metaRetryUntil)
+        clock_ok = False
+        now_value = 0.0
+        try:
+            now_value = float(now)
+            clock_ok = (now_value == now_value and
+                        now_value != float('inf') and
+                        now_value != -float('inf'))
+        except Exception:
+            clock_ok = False
+        if clock_ok:
+            previous = _get(self, '_metaProbeLastNow')
+            if previous is not None and now_value < previous:
+                # A backwards clock must not leave a stale future deadline.
+                self._metaProbeDue = None
+            self._metaProbeLastNow = now_value
+        elif not force:
+            # Without a usable game clock we cannot schedule a retry; never fall
+            # back to probing every frame.
+            return
+
+        probe_due = (force or _get(self, '_metaProbeDue') is None or
+                     (clock_ok and now_value >= _get(self, '_metaProbeDue')))
+        if probe_due:
+            # Spend the retry budget before doing any work. A failed build/write
+            # or a slow probe still waits the full interval (no catch-up).
+            if clock_ok:
+                self._metaProbeDue = now_value + META_RETRY_INTERVAL
+            else:
+                self._metaProbeDue = None
+
+        within_retry = force or (not _get(self, '_metaRetryUntil')) or (
+            clock_ok and now_value <= self._metaRetryUntil)
         promoted = False
-        if force or (within_retry and not self._battleIdentity.is_arena):
+        if probe_due and within_retry and (
+                force or not self._battleIdentity.is_arena):
             promoted = self._promote_battle_id()
         if self._metaReady and not force and not promoted:
+            return
+        if not force and not probe_due:
             return
         if (not force) and not within_retry and not promoted:
             return
         if (not force) and not promoted \
-                and (now - self._lastMetaWrite) < META_RETRY_INTERVAL:
+                and (now_value - self._lastMetaWrite) < META_RETRY_INTERVAL:
             return
-        meta = self._build_meta()
+        try:
+            meta = self._build_meta()
+        except Exception:
+            return
         if not _atomic_write(self._metaFile, json_dumps(meta)):
             return
-        self._lastMetaWrite = now
+        self._lastMetaWrite = now_value
         self._metaReady = self._meta_ready_for_clients(meta)
         if force or self._metaReady:
             logInfo('meta.json written ({} players, ready={})'.format(
@@ -1950,8 +1994,9 @@ class Collector(object):
                     calib.append((mp[0], mp[1], worldPos[0], worldPos[2]))
         # Accumulate spatially distinct samples across frames, including self.
         # The adapter validates geometry/holdout errors before accepting a fit.
-        self._mapCalibration.observe(calib, now)
-        calibration = self._mapCalibration.snapshot()
+        # observe() already returns the diagnostics snapshot for this batch; do
+        # not rebuild the same plain-data snapshot a second time.
+        calibration = self._mapCalibration.observe(calib, now)
 
         # -- pass 2: build per-ship entries --------------------------------------
         out = []

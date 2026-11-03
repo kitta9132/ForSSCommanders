@@ -213,9 +213,9 @@ def test_ship_api_visibility_is_a_separate_diagnostic_source():
             pass
     class Calibration(object):
         def observe(self, *args):
-            pass
-        def snapshot(self):
             return {'status': 'unknown'}
+        def snapshot(self):
+            raise AssertionError('observe() must return the batch snapshot')
     def collect_map_positions(collector):
         collector._mapVisibility = {10: {'mapVisible': 0},
                                     11: {'mapVisible': 1}}

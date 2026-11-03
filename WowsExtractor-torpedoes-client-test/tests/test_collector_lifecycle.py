@@ -24,6 +24,7 @@ def harness():
     ns = {'_now': lambda: 100., 'META_RETRY_SECONDS': 12.,
           'META_RETRY_INTERVAL': 1., 'SCHEMA_VERSION': 1,
           'WIRE_API_VERSION': '1.0', 'logInfo': calls.append,
+          '_get': lambda obj, key, default=None: getattr(obj, key, default),
           '_try': lambda fn: fn(), 'json_dumps': lambda data: '{}',
           'battle': Obj(getSelfPlayerInfo=lambda: Obj(id=1)),
           'callbacks': Obj(perTick=lambda fn: calls.append('schedule') or 7)}
@@ -82,6 +83,19 @@ def test_missing_meta_path_does_not_write_or_report_success(harness):
     c, calls, _ = harness
     c._refresh_meta(force=True)
     assert not calls
+
+
+def test_battle_start_and_quit_reset_the_meta_probe_schedule(harness):
+    c, _calls, _ns = harness
+    c._metaProbeDue = 99.0
+    c._metaProbeLastNow = 98.0
+    c._on_battle_quit()
+    assert c._metaProbeDue is None and c._metaProbeLastNow is None
+
+    c._metaProbeDue = 99.0
+    c._metaProbeLastNow = 98.0
+    c._on_battle_start()
+    assert c._metaProbeDue is None and c._metaProbeLastNow is None
 
 
 def test_failed_meta_write_remains_retryable_and_does_not_report_success(harness):
