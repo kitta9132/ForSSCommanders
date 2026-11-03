@@ -202,6 +202,9 @@ def test_main_build_ships_24_direct_getters_and_vehicle_lookups_are_one_each():
           getattr(obj, key, default), '_vec': lambda raw: list(raw) if
           isinstance(raw, (list, tuple)) and len(raw) == 3 else None,
           '_try': _attempt, '_is_mapping': lambda obj: isinstance(obj, dict),
+          '_strict_player_lookup_key': lambda value: (
+              None if value is None or isinstance(value, bool)
+              else (type(value), value)),
           '_map_norm_xy': lambda *args: None,
           '_visibility_raw': lambda value: value,
           '_visibility_observation': lambda *args: {}, 'long': int,

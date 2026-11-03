@@ -6,7 +6,7 @@
 
 API_VERSION = 'API_v1.0'
 MOD_NAME = 'WowsExtractor'
-MOD_VERSION = '0.3.23-avatar-read-sharing'
+MOD_VERSION = '0.3.24-player-read-sharing'
 
 # ---------------------------------------------------------------------------
 # WowsExtractor -- in-game data collector for the "8111 for WoWS" project.
@@ -299,6 +299,61 @@ try:
 except NameError:  # pragma: no cover - python3 safety, not used in game
     _STRING_TYPES = (str,)
     _INT_TYPES = (int,)
+
+
+def _strict_player_lookup_key(value):
+    """Make a type-preserving key for a plain player/vehicle ID."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, _STRING_TYPES):
+        if not value or not value.strip():
+            return None
+    elif isinstance(value, _INT_TYPES):
+        pass
+    elif isinstance(value, float):
+        if value != value or value in (float('inf'), -float('inf')):
+            return None
+    else:
+        return None
+    try:
+        hash(value)
+    except Exception:
+        return None
+    return (type(value), value)
+
+
+def _player_field(player, name):
+    """Read one PlayerInfo field without coercing or retaining its object."""
+    if _is_mapping(player):
+        value = _try(lambda: player[name])
+        if value is not None:
+            return value
+    return _get(player, name)
+
+
+def _plain_player_row(player):
+    """Return (strict vehicle key, plain playerId/teamId) for a roster row."""
+    if player is None:
+        return None
+    player_id = _player_field(player, 'playerId')
+    if player_id is None:
+        player_id = _player_field(player, 'id')
+    vehicle_id = _player_field(player, 'shipId')
+    if vehicle_id is None:
+        vehicle_id = _player_field(player, 'vehicleId')
+    if vehicle_id is None:
+        vehicle_id = _player_field(player, 'vehicleID')
+    vehicle_key = _strict_player_lookup_key(vehicle_id)
+    player_key = _strict_player_lookup_key(player_id)
+    if vehicle_key is None:
+        return None
+    if player_key is None:
+        return vehicle_key, None
+    team_id = _player_field(player, 'teamId')
+    if team_id is not None and _strict_player_lookup_key(team_id) is None:
+        team_id = None
+    return vehicle_key, {'playerId': player_id, 'teamId': team_id}
+
 
 _ESCAPE = {
     '"': '\\"', '\\': '\\\\', '\b': '\\b', '\f': '\\f',
@@ -1005,22 +1060,50 @@ class Collector(object):
         that are already dead or were never in getAllShips() this tick.
 
         PlayerInfo.shipId survives destruction; getPlayerByVehicleId does not.
+        The returned strict plain index is local to this state build only.
         """
+        build_player_index = avatar_entities is not None
         players = _try(lambda: battle.getPlayersInfo())
         if players is None:
             players = _try(lambda: battle.getPlayers())
+        player_sample = {'status': 'unavailable', 'index': {},
+                         'seenKeys': {}, 'duplicateKeys': {}}
         if players is not None:
+            player_sample['status'] = 'complete'
             items = players
             if _is_mapping(players):
-                items = _try(lambda: list(players.values()), []) or []
-            for player in items or []:
-                self._remember_player_vehicle(player)
+                items = _try(lambda: players.values())
+                if items is None:
+                    items = ()
+                    player_sample['status'] = 'partial'
+            try:
+                for player in items:
+                    _try(lambda p=player: self._remember_player_vehicle(p))
+                    if not build_player_index:
+                        continue
+                    row = _plain_player_row(player)
+                    if row is None:
+                        continue
+                    key, values = row
+                    if key in player_sample['duplicateKeys']:
+                        continue
+                    if key in player_sample['seenKeys']:
+                        # Even identical duplicates are ambiguous for this join.
+                        player_sample['index'].pop(key, None)
+                        player_sample['duplicateKeys'][key] = True
+                        continue
+                    player_sample['seenKeys'][key] = True
+                    if values is not None:
+                        player_sample['index'][key] = values
+            except Exception:
+                # Prefix rows remain usable, but this sample is explicitly partial.
+                player_sample['status'] = 'partial'
         if CC is None:
-            return
+            return player_sample
         av_key = _get(CC, 'avatar')
         veh_key = _get(CC, 'vehicle')
         if av_key is None:
-            return
+            return player_sample
         if avatar_entities is None:
             avatar_entities = _try(
                 lambda: dataHub.getEntityCollections('avatar'), []) or []
@@ -1032,13 +1115,14 @@ class Collector(object):
                 rec = roster_ids_from_avatar(row.get('avatar'), row.get('vehicle'))
                 if rec is not None:
                     self._damage.remember(rec[0], rec[1], rec[2])
-            return
+            return player_sample
         for entity in avatar_entities or []:
             avatar = _try(lambda e=entity, k=av_key: e[k])
             vehicle = _try(lambda e=entity, k=veh_key: e[k]) if veh_key is not None else None
             rec = roster_ids_from_avatar(avatar, vehicle)
             if rec is not None:
                 self._damage.remember(rec[0], rec[1], rec[2])
+        return player_sample
 
     def _on_damages(self, victimId, damages):
         if not self._collectionEnabled or not self._active:
@@ -1486,16 +1570,17 @@ class Collector(object):
         avatar_phase = profiler.begin('avatar') if profiler is not None else None
         avatar_snapshot = self._capture_avatar_snapshot()
         avatar_entities = avatar_snapshot['entities']
-        self._remember_roster_vehicles(avatar_entities)
+        players_sample = self._remember_roster_vehicles(avatar_entities)
         # Incomplete snapshots cannot safely assert UI alive/dead from absence.
         ui_hp = self._collect_avatar_health(
             avatar_entities if avatar_snapshot['status'] == 'complete' else [])
         if profiler is not None:
             profiler.finish(avatar_phase)
         ships, diag = (profiler.measure(
-            'ships', self._build_ships, now, ui_hp, avatar_entities)
+            'ships', self._build_ships, now, ui_hp, avatar_entities,
+            players_sample)
             if profiler is not None else
-            self._build_ships(now, ui_hp, avatar_entities))
+            self._build_ships(now, ui_hp, avatar_entities, players_sample))
         diag['avatarSnapshotStatus'] = {
             'status': avatar_snapshot['status'], 'count': avatar_snapshot['count'],
             'limit': avatar_snapshot['limit'], 'reason': avatar_snapshot['reason']}
@@ -1989,8 +2074,14 @@ class Collector(object):
     def _map_to_world(self, mx, my):
         return self._mapCalibration.map_to_world(mx, my)
 
-    def _build_ships(self, now, ui_hp=None, avatar_entities=None):
+    def _build_ships(self, now, ui_hp=None, avatar_entities=None,
+                     players_sample=_UNSET):
         self._positionDiagnostics = {}
+        player_reads = {
+            'source': 'sampleLocalPlayersIndex',
+            'sampleStatus': (players_sample.get('status', 'unknown')
+                             if isinstance(players_sample, dict) else 'notProvided'),
+            'indexHits': 0, 'vehicleLookups': 0}
         ships = _try(lambda: battle.getAllShips(), []) or []
         mapIndex = self._collect_map_positions(avatar_entities)   # playerId -> (mapX, mapY, mapYaw)
         fallback_due = (_get(self, '_positionFallbacksEnabled', False) is True and
@@ -2006,18 +2097,41 @@ class Collector(object):
                 vehId = _get(ship, _name)
                 if vehId is not None:
                     break
-            player = _try(lambda: battle.getPlayerByVehicleId(vehId)) if vehId is not None else None
-            pid = _get(player, 'id') if player is not None else None
+            player = None
+            sample_row = None
+            player_key = (_strict_player_lookup_key(vehId)
+                          if vehId is not None else None)
+            if (not fallback_due and players_sample is not _UNSET and
+                    isinstance(players_sample, dict) and player_key is not None):
+                sample_row = players_sample.get('index', {}).get(player_key)
+            if sample_row is not None:
+                player_reads['indexHits'] += 1
+                pid = sample_row.get('playerId')
+                player_team = sample_row.get('teamId')
+            else:
+                if vehId is not None:
+                    player_reads['vehicleLookups'] += 1
+                player = (_try(lambda: battle.getPlayerByVehicleId(vehId))
+                          if vehId is not None else None)
+                pid = _get(player, 'id') if player is not None else None
+                if pid is None and player is not None and _is_mapping(player):
+                    pid = _try(lambda: player['id'])
+                player_team = _get(player, 'teamId') if player is not None else None
+                if (player_team is None and player is not None and
+                        _is_mapping(player)):
+                    player_team = _try(lambda: player['teamId'])
+            ship_team = _get(ship, 'teamId')
             if vehId is not None and pid is not None:
                 self._damage.remember(
-                    vehId, pid, _get(player, 'teamId') or _get(ship, 'teamId'))
+                    vehId, pid, ship_team if player_team is None else player_team)
             worldPos, position_read = self._get_ship_position(
                 ship, pid, vehId, player=player, allow_fallback=fallback_due)
             fallback_attempted = position_read['fallbackStatus'] != 'notSampled'
             count_key = ('fallbackSampledShips' if fallback_attempted else
                          'fallbackNotSampledShips')
             self._positionDiagnostics[count_key] = self._positionDiagnostics.get(count_key, 0) + 1
-            infos.append((ship, vehId, player, pid, worldPos, position_read))
+            infos.append((ship, vehId, player, sample_row, pid, player_team,
+                          worldPos, position_read))
             if worldPos and pid is not None:
                 mp = mapIndex.get(pid)
                 if mp is not None and self._mapVisibility.get(pid, {}).get('mapVisible') != False:
@@ -2034,7 +2148,7 @@ class Collector(object):
         nAllyVis = 0
         nEnemy = 0
         nEnemyVis = 0
-        for ship, vehId, player, pid, worldPos, position_read in infos:
+        for ship, vehId, player, sample_row, pid, player_team, worldPos, position_read in infos:
             entry = {}
             entry['uiId'] = _get(ship, 'uiId')
             if vehId is not None:
@@ -2097,10 +2211,10 @@ class Collector(object):
             }
             entry['visible'] = map_visible
             entry['visibleSource'] = 'dataHub.visibility.mapVisible' if map_visible is not None else None
-            if player is not None:
+            if player is not None or sample_row is not None:
                 entry['playerId'] = pid
                 if entry.get('teamId') is None:
-                    entry['teamId'] = _get(player, 'teamId')
+                    entry['teamId'] = player_team
                     entry['relation'] = self._relation(entry['teamId'])
 
             pos = worldPos
@@ -2185,6 +2299,7 @@ class Collector(object):
         })
         return out, {
             'totalShips': len(ships),
+            'playerReads': player_reads,
             'allies': nAlly,
             'alliesVisible': nAllyVis,
             'enemies': nEnemy,

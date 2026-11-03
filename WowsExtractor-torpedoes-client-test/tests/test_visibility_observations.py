@@ -34,9 +34,11 @@ def source_function(name, ns):
 
 
 def visibility_ns(**values):
-    ns = {'_is_mapping': lambda obj: isinstance(obj, dict), 'long': int,
+    ns = {'_UNSET': object(),
+          '_is_mapping': lambda obj: isinstance(obj, dict), 'long': int,
           '_INT_TYPES': (int,), '_STRING_TYPES': (str,)}
-    for name in ('_visibility_type', '_visibility_raw', '_visibility_observation'):
+    for name in ('_visibility_type', '_visibility_raw', '_visibility_observation',
+                 '_strict_player_lookup_key'):
         source_function(name, ns)
     ns.update(values)
     return ns

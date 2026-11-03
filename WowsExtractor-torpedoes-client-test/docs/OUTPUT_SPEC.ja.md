@@ -1,5 +1,19 @@
 # WowsExtractor 魚雷出力版（WoWSクライアント用mod）
 
+`0.3.24`の`diag.playerReads`は当該ships sampleの`sampleStatus`（players一覧取得のcomplete/partial/unavailable、direct call時notProvided）、`indexHits`、`vehicleLookups`（試行数、成功数ではない）を示します。新しいgame APIや時計読取りは追加せず、実機で共有経路の利用状況を確認するためのカウンターです。ships phaseの個別lookupだけを数え、他phase・イベントのAPI呼出し総数ではありません。
+
+## 0.3.24-player-read-sharing
+
+各state buildの`_remember_roster_vehicles`が既存どおり`getPlayersInfo()`を先に1回呼び、戻り値が`None`の場合だけ`getPlayers()`を1回試します。この同じ列挙から、車両IDをkey、`playerId`/`teamId`だけを値とするframe-local plain indexを作り、`_build_ships`へ渡します。追加のplayers getterはありません。`_build_ships`への第4引数はoptional sentinel付きで、旧direct callやイベント経路は従来どおりです。
+
+index joinは型と値がともに完全一致するscalar IDだけを許可し、bool、None、空文字、非finite値、非scalarを拒否します。`0`は有効で、boolと整数0、文字列と整数の相互join・型変換はしません。vehicle IDが重複した場合（同じplayer情報の重複を含む）はそのkeyをambiguousとして索引から外します。playerIdが不正・欠落のrowもhitに使いません。teamIdがNoneならship側teamIdを使い、teamId=0は保持します。ID namespaceの推測joinはしません。
+
+厳密な一意hitは通常core frameで個別`getPlayerByVehicleId`を省略します。index miss、不正な非None ship ID、重複key、一覧のNone/例外は従来lookupへ戻します。ship ID自体がNoneの場合は従来条件どおりlookupを呼ばず、identity unknownのままです。取得済みplayers列挙が途中例外になった場合は`status=partial`のstate-local contextとし、列挙済みのvalid rowだけhitに使います。取得成功の空listと取得不能はcontext上で区別し、partialを完全列挙と偽装しません。context/player objectはCollectorや次stateへ保存せず、damage trackerの既存cacheを艦の現在player identityとして使いません。
+
+`position_fallbacks_enabled=true`かつdiagnostics sample dueの場合は、player objectを使う既存の診断fallbackを保持するため、一覧hitでも従来の`getPlayerByVehicleId`を実行します。これによりplain rowを「player object既知なし」と誤認してplayer position探索を打ち切りません。非due core frameだけが最適化対象です。ship.getPosition、self/observer、HP、visibility、mapPositionのgetter・raw coverage、次frameへの位置持越しは変更しません。Torpedo identity adapterは従来どおり同snapshotの`ships[].playerId`等をstrict candidateとして読むだけで、namespace推測やisOwn上書きをしません。
+
+24艦のoffline producer fixtureでは`getPlayersInfo()` 1回、全row hit時の`getPlayerByVehicleId` 24→0回を確認し、出力行は従来個別lookupの成功値と同値でした。部分missはmiss分のみ個別lookupし、重複/invalid/type mismatchもlookupへ戻します。これはAPI呼出し予算のoffline根拠であり、FPS・WoWS API内部時間・実機性能の改善を意味しません。source only・未導入です。
+
 ## 0.3.23-avatar-read-sharing
 
 同一state build内のavatar collectionは従来どおり1回だけ取得します。この版はcollection getter回数を減らしたのではなく、その同じcaptured rowsに対するavatar/vehicle/healthのcomponent・ID property読取りを、roster・health・map positionの3用途で共有する変更です。captureは`complete`/`partial`/`truncated`のstatusとcount/limit/reasonを維持し、新しいJSON fieldは追加していません。

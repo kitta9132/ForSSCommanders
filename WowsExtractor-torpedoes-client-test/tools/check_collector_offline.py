@@ -42,7 +42,7 @@ def main():
     collector = ns['Collector'].__new__(ns['Collector'])
     collector._remember_roster_vehicles = lambda entities: None
     collector._collect_avatar_health = lambda entities: {}
-    collector._build_ships = lambda now, hp, entities: ([{'uiId': 5}], {})
+    collector._build_ships = lambda now, hp, entities, players: ([{'uiId': 5}], {})
     collector._build_self = lambda hp, info=None, ship=None: {'teamId': 0}
     collector._self_team = lambda info=None: 0
     collector._torpedoes = TorpedoTelemetry(api, Obj())

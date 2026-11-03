@@ -250,7 +250,7 @@ def test_diagnostics_off_builds_fresh_disabled_shapes_without_probe_calls():
         'count': 0, 'limit': 256, 'reason': None}
     c._remember_roster_vehicles = lambda entities: None
     c._collect_avatar_health = lambda entities: {}
-    c._build_ships = lambda now, hp, entities: ([], {})
+    c._build_ships = lambda now, hp, entities, players: ([], {})
     c._self_team = lambda self_info=None: 1
     c._torpedoes = type('T', (), {'torpedoes': lambda self, team: ([], {'available': True}),
         'armament': lambda self, ship=None: {}, 'systems': lambda self, ship=None: {}})()
@@ -423,10 +423,12 @@ def test_build_state_shares_fresh_core_snapshot_even_when_diagnostics_off():
     captured = {'entities': rows, 'status': 'complete',
         'count': 24, 'limit': 256, 'reason': None}
     c._capture_avatar_snapshot = lambda: captured
-    c._remember_roster_vehicles = lambda entities: calls.append(('roster', entities))
+    player_sample = {'status': 'complete', 'index': {}}
+    c._remember_roster_vehicles = lambda entities: (
+        calls.append(('roster', entities)) or player_sample)
     c._collect_avatar_health = lambda entities: calls.append(('health', entities)) or {}
-    c._build_ships = lambda now, hp, entities: (
-        calls.append(('ships', entities)) or ([], {}))
+    c._build_ships = lambda now, hp, entities, players: (
+        calls.append(('ships', entities, players)) or ([], {}))
     c._self_team = lambda self_info=None: 1
     c._torpedoes = type('T', (), {'torpedoes': lambda self, team: ([], {'available': True}),
         'armament': lambda self, ship=None: {}, 'systems': lambda self, ship=None: {}})()
@@ -437,9 +439,9 @@ def test_build_state_shares_fresh_core_snapshot_even_when_diagnostics_off():
     c._ballistics = type('B', (), {'snapshot': lambda self: {}})()
     complete = build(c, 1.)
     assert 'performance' not in complete
-    assert [name for name, _ in calls] == ['roster', 'health', 'ships']
-    assert all(entities is rows for _, entities in calls)
-    assert calls[1][1] is calls[0][1]
+    assert [row[0] for row in calls] == ['roster', 'health', 'ships']
+    assert calls[0][1] is rows and calls[1][1] is rows and calls[2][1] is rows
+    assert calls[2][2] is player_sample
     assert complete['diag']['avatarSnapshotStatus']['status'] == 'complete'
     calls[:] = []
     captured.update({'entities': rows[:1], 'status': 'partial', 'count': 1,
@@ -517,7 +519,7 @@ def test_main_state_reuses_actual_self_producers_once_and_never_across_frames():
         'count': 0, 'limit': 256, 'reason': None}
     c._remember_roster_vehicles = lambda entities: None
     c._collect_avatar_health = lambda entities: {}
-    c._build_ships = lambda now, hp, entities: ([], {'totalShips': 0})
+    c._build_ships = lambda now, hp, entities, players: ([], {'totalShips': 0})
     c._torpedoes = Torpedoes()
     c._torpedoMotion = type('Motion', (), {'update': lambda *args: None})()
     c._mapCalibration = type('Map', (), {'world_to_map': lambda *args: None})()

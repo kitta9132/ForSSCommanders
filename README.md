@@ -19,9 +19,9 @@ World of Warshipsの潜水艦向け外部2Dマップと、公開ModsAPIを使う
 
 ### 最優先：通常プレイ時のFPS報告
 
-0.3.14導入後「自艦が沈むまでminFPS 25、撃沈後は110まで回復」と報告されています（外部記録ツール未使用）。因果は未確定です。通常プレイでは収集modのロード対象外への退避を推奨します。0.3.23-avatar-read-sharingは**source only・未導入**で、collection/diagnostics/profiler既定OFFを維持し、state既定0.2秒（約5Hz）・meta 0.5秒gate・較正observe戻り値再利用も据え置きます。同一frame avatarのroster/health/map読取りをcapture内plain-data sampleで共有し、24行offline fixtureの読取りは456→336回ですが、FPS・実ゲーム時間は未計測・改善未確認です。[事故記録](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_INCIDENT_0.3.14.ja.md)
+0.3.14導入後「自艦が沈むまでminFPS 25、撃沈後は110まで回復」と報告されています（外部記録ツール未使用）。因果は未確定です。通常プレイでは収集modのロード対象外への退避を推奨します。0.3.24-player-read-sharingは**source only・未導入**で、collection/diagnostics/profiler既定OFFを維持し、state既定0.2秒（約5Hz）・meta 0.5秒gate・較正observe戻り値再利用も据え置きます。0.3.23のavatar読取り共有に加え、同一stateのplayers一覧から厳密一致する24艦のplayer情報を再利用するfixtureでは、`getPlayerByVehicleId`が24→0回でした。これはFPS・実ゲーム時間の改善根拠ではありません。[事故記録](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_INCIDENT_0.3.14.ja.md)
 
-現行ソースは `0.3.23-avatar-read-sharing`（未導入）。collection/diagnostics/profilerと位置fallbackは既定OFFです。state既定は0.2秒（約5Hz、0.1明示で10Hz互換）、全snapshot一体・群別周期なしです。meta再探索は0.5秒間隔・期限内のみで、late arena IDの昇格とmeta書込みを維持します。avatar collection getterは従来どおり1回で、そのcaptured rowsに対するavatar/vehicle/health属性読取りだけを同一state内で共有します。出力項目・取得coverageは変わりません。FPS・WoWS API内部時間は未計測で、性能改善を主張しません。5Hz化の観測遅延倍化、torn read回復窓、diagnostics実行上限、魚雷motion 1秒上限、較正driftの実時間遅延は[出力仕様](WowsExtractor-torpedoes-client-test/docs/OUTPUT_SPEC.ja.md)に明記しています。詳細と残課題は [TASKS.md](TASKS.md) を参照してください。旧0.3.1ではSteam版build 13357625の訓練戦で、魚雷位置・type、
+現行ソースは `0.3.24-player-read-sharing`（未導入）。collection/diagnostics/profilerと位置fallbackは既定OFFです。state既定は0.2秒（約5Hz、0.1明示で10Hz互換）、全snapshot一体・群別周期なしです。meta再探索は0.5秒間隔・期限内のみで、late arena IDの昇格とmeta書込みを維持します。同じstate内で取得済みのplayers一覧から厳密かつ一意に対応できた艦は`getPlayerByVehicleId`を省略し、miss・不正ID・重複・一覧取得失敗では従来lookupへ戻します。partial一覧は列挙済みの有効行だけを使い、完全取得とは扱いません。通常の24艦fixtureでは個別lookupを24→0回に削減しましたが、FPS・WoWS API内部時間は未計測で、性能改善を主張しません。5Hz化の観測遅延倍化、torn read回復窓、diagnostics実行上限、魚雷motion 1秒上限、較正driftの実時間遅延は[出力仕様](WowsExtractor-torpedoes-client-test/docs/OUTPUT_SPEC.ja.md)に明記しています。詳細と残課題は [TASKS.md](TASKS.md) を参照してください。旧0.3.1ではSteam版build 13357625の訓練戦で、魚雷位置・type、
 ATM由来の誘導/被発見状態、移動履歴による座標較正などを試験しています。
 簡易2Dマップのグリッドとゲーム内位置が概ね一致することをテスターが目視確認しました。
 12対12・別地図・失探時の鮮度などは未検証です。完成版ではありません。
