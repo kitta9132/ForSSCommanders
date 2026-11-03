@@ -74,4 +74,8 @@ GUI根拠が確認できたためprobe実装へ進んだが、Python取得実績
 - [RESEARCH_SELECTED_TORPEDO_PARAMS.ja.md](RESEARCH_SELECTED_TORPEDO_PARAMS.ja.md)：TTX候補のroute、descriptor/variant選択、raw値の扱い。
 - [VALIDATION_0.3.9_B15_TTX.ja.md](VALIDATION_0.3.9_B15_TTX.ja.md)：Undine、75/9画面一致、`ammoParams={}`の実機記録。
 - [P1_CODE_RESEARCH.ja.md](P1_CODE_RESEARCH.ja.md) L54-L60、L77-L104：現行魚雷運動・観測累積値とP1優先順。
-- [res_mods/PnFMods/WowsExtractor/torpedo_telemetry.py](../res_mods/PnFMods/WowsExtractor/torpedo_telemetry.py)：現行whitelist/API候補。今回変更なし。
+- [res_mods/PnFMods/WowsExtractor/torpedo_telemetry.py](../res_mods/PnFMods/WowsExtractor/torpedo_telemetry.py)：現行whitelist/API候補。0.3.28では専用depth-only samplerを追加したが、残射程／残存寿命のfieldや推定経路は追加していない。
+
+## 2026-11-03追記
+
+0.3.28の魚雷depth samplerは、残射程／寿命sourceの発見を意味しない。既存GUI `Components.xml` の `Torpedo` component固定property（id/ownerID/shotID/depth/type）だけをdepth用候補として読む。`ownerShip`、誘導先、born/lifetime、remaining rangeの新fieldは追加していない。選択TTX `speed/maxDist`、観測累積距離／時間、WaveHit timerから魚雷の残量を推定しない。depthのPython実機取得・unitも未確認。発射元・guidance候補と現行診断範囲は[RESEARCH_SUBMARINE_SYSTEMS.ja.md](RESEARCH_SUBMARINE_SYSTEMS.ja.md)を参照。

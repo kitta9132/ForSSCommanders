@@ -6,7 +6,7 @@
 
 API_VERSION = 'API_v1.0'
 MOD_NAME = 'WowsExtractor'
-MOD_VERSION = '0.3.27-avatar-id-candidates'
+MOD_VERSION = '0.3.28-torpedo-depth-sampling'
 
 # ---------------------------------------------------------------------------
 # WowsExtractor -- in-game data collector for the "8111 for WoWS" project.
@@ -72,14 +72,16 @@ try:
         safe_weapon_context_probe, safe_game_clock_probe,
         safe_gun_reload_probe, safe_selected_torpedo_params_probe,
         safe_torpedo_tooltip_parameter_probe, safe_identity_candidates,
-        shared_diagnostic_snapshot)
+        shared_diagnostic_snapshot, ui_torpedo_probe_without_depth,
+        ui_torpedo_depth_probe, attach_ui_depth_state)
 except:
     from torpedo_telemetry import (TorpedoTelemetry, ui_torpedo_probe,
         attach_ui_state, TorpedoMotion, safe_weapon_hub_probe,
         safe_weapon_context_probe, safe_game_clock_probe,
         safe_gun_reload_probe, safe_selected_torpedo_params_probe,
         safe_torpedo_tooltip_parameter_probe, safe_identity_candidates,
-        shared_diagnostic_snapshot)
+        shared_diagnostic_snapshot, ui_torpedo_probe_without_depth,
+        ui_torpedo_depth_probe, attach_ui_depth_state)
 
 try:
     from .submarine_telemetry import safe_submarine_probe
@@ -896,6 +898,11 @@ class Collector(object):
         self._stateInterval = STATE_INTERVAL
         self._collectionEnabled = False
         self._diagnosticsEnabled = False
+        self._torpedoDepthSamplingEnabled = False
+        self._torpedoDepthSamplingInterval = 1.0
+        self._torpedoDepthSamplingNextDue = None
+        self._torpedoDepthSamplingLastNow = None
+        self._torpedoDepthSamplingDue = False
         self._profilerEnabled = False
         self._positionFallbacksEnabled = False
         self._performanceProfiler = None
@@ -970,6 +977,23 @@ class Collector(object):
         self._profilerEnabled = profiler_enabled
         self._diagnosticsInterval = max(
             _cfg_float(cfg, 'diagnostics_interval', 1.0), 0.1)
+        self._torpedoDepthSamplingEnabled = (
+            self._collectionEnabled and
+            cfg.get('torpedo_depth_sampling_enabled') == 'true')
+        depth_interval = _cfg_float(
+            cfg, 'torpedo_depth_sampling_interval', 1.0)
+        try:
+            depth_interval = float(depth_interval)
+            if (depth_interval != depth_interval or
+                    depth_interval == float('inf') or
+                    depth_interval == -float('inf')):
+                depth_interval = 1.0
+        except Exception:
+            depth_interval = 1.0
+        self._torpedoDepthSamplingInterval = max(depth_interval, 1.0)
+        self._torpedoDepthSamplingNextDue = None
+        self._torpedoDepthSamplingLastNow = None
+        self._torpedoDepthSamplingDue = False
         self._diagnosticsNextDue = None
         self._diagnosticsLastSampleTs = None
         self._diagnosticsLastNow = None
@@ -1003,6 +1027,9 @@ class Collector(object):
         self._diagnosticsNextDue = None
         self._diagnosticsLastSampleTs = None
         self._diagnosticsLastNow = None
+        self._torpedoDepthSamplingNextDue = None
+        self._torpedoDepthSamplingLastNow = None
+        self._torpedoDepthSamplingDue = False
         self._lastMetaWrite = 0.0
         self._metaRetryUntil = 0.0
         self._metaReady = False
@@ -1388,6 +1415,9 @@ class Collector(object):
             self._diagnosticsNextDue = None
             self._diagnosticsLastSampleTs = None
             self._diagnosticsLastNow = None
+            self._torpedoDepthSamplingNextDue = None
+            self._torpedoDepthSamplingLastNow = None
+            self._torpedoDepthSamplingDue = False
             if previous_now is not None and clock_ok:
                 self._lastWrite = 0.0
         self._refresh_meta(now)
@@ -1397,6 +1427,7 @@ class Collector(object):
         measure_profiler = (profiler if profiler is not None and
                             profiler.status == 'available' else None)
         self._diagnosticsSampleDue = self._diagnostics_due(now)
+        self._torpedoDepthSamplingDue = self._torpedo_depth_sampling_due(now)
         self._lastWrite = now
         cycle = (measure_profiler.begin('state_cycle_total')
                  if measure_profiler is not None else None)
@@ -1432,6 +1463,40 @@ class Collector(object):
             if measure_profiler is not None:
                 measure_profiler.finish(cycle, cycle_completed)
             self._diagnosticsSampleDue = False
+            self._torpedoDepthSamplingDue = False
+
+    def _torpedo_depth_sampling_due(self, now):
+        """Schedule the independent depth-only probe without catch-up samples."""
+        if not _get(self, '_torpedoDepthSamplingEnabled', False):
+            self._torpedoDepthSamplingNextDue = None
+            self._torpedoDepthSamplingLastNow = None
+            return False
+        try:
+            now = float(now)
+            if now != now or now == float('inf') or now == -float('inf'):
+                self._torpedoDepthSamplingNextDue = None
+                self._torpedoDepthSamplingLastNow = None
+                return False
+        except Exception:
+            self._torpedoDepthSamplingNextDue = None
+            self._torpedoDepthSamplingLastNow = None
+            return False
+        previous = self._torpedoDepthSamplingLastNow
+        if previous is not None and now < previous:
+            self._torpedoDepthSamplingNextDue = None
+        self._torpedoDepthSamplingLastNow = now
+        due = (self._torpedoDepthSamplingNextDue is None or
+               now >= self._torpedoDepthSamplingNextDue)
+        if due:
+            interval = _get(self, '_torpedoDepthSamplingInterval', 1.0)
+            try:
+                interval = max(float(interval), 1.0)
+            except Exception:
+                interval = 1.0
+            if interval != interval or interval == float('inf') or interval == -float('inf'):
+                interval = 1.0
+            self._torpedoDepthSamplingNextDue = now + interval
+        return due
 
     def _diagnostics_due(self, now):
         """Schedule one complete diagnostics sample; never replay missed periods."""
@@ -1767,6 +1832,10 @@ class Collector(object):
         diagnostic_enabled = _get(self, '_diagnosticsEnabled', False) is True
         diagnostic_due = diagnostic_enabled and _get(
             self, '_diagnosticsSampleDue', False) is True
+        depth_sampling_enabled = _get(
+            self, '_torpedoDepthSamplingEnabled', False) is True
+        depth_sampling_due = depth_sampling_enabled and _get(
+            self, '_torpedoDepthSamplingDue', False) is True
         avatar_phase = profiler.begin('avatar') if profiler is not None else None
         avatar_snapshot = self._capture_avatar_snapshot()
         avatar_entities = avatar_snapshot['entities']
@@ -1806,16 +1875,45 @@ class Collector(object):
             lambda: self._torpedoes.torpedoes(self_team),
             ([], {'available': False, 'status': 'unknown',
                    'source': 'battle.getAllTorpedoes'}))
+        diagnostic_hub = None
+        if diagnostic_due or depth_sampling_due:
+            diagnostic_hub = _try(
+                lambda: shared_diagnostic_snapshot(dataHub), None)
         if diagnostic_due:
-            diagnostic_hub = shared_diagnostic_snapshot(dataHub)
-            probe = _try(lambda: ui_torpedo_probe(diagnostic_hub, CC, torpedoes),
-                         {'status': 'unknown', 'source': 'dataHub.torpedo'})
+            probe = _try(lambda: ui_torpedo_probe_without_depth(
+                              diagnostic_hub, CC, torpedoes),
+                          {'status': 'unknown', 'source': 'dataHub.torpedo'})
             _try(lambda: attach_ui_state(torpedoes, probe))
         else:
             probe = ({'status': 'notSampled', 'source': 'scheduling',
                       'sampleTs': None, 'rows': []} if diagnostic_enabled else
                      {'status': 'disabled', 'source': 'config.diagnostics_enabled',
                       'rows': []})
+        if depth_sampling_due:
+            depth_probe = _try(lambda: ui_torpedo_depth_probe(
+                                   diagnostic_hub, CC),
+                {'source': 'dataHub.torpedo.depth', 'status': 'unknown',
+                 'semantics': 'unverified', 'rows': [],
+                 'collection': {'status': 'unknown', 'count': 0,
+                     'limit': 64, 'truncated': False, 'partial': False,
+                     'reason': 'probeFailed'}})
+            _try(lambda: attach_ui_depth_state(
+                torpedoes, depth_probe, torpedo_status.get('status')))
+            depth_probe['sampleTs'] = now
+            depth_probe['intervalSeconds'] = _get(
+                self, '_torpedoDepthSamplingInterval', 1.0)
+        else:
+            depth_probe = {
+                'source': 'dataHub.torpedo.depth',
+                'status': ('notSampled' if depth_sampling_enabled else 'disabled'),
+                'producer': 'unknown', 'semantics': 'unverified',
+                'sampleTs': None,
+                'intervalSeconds': _get(self, '_torpedoDepthSamplingInterval', 1.0),
+                'collection': {'status': ('notSampled' if depth_sampling_enabled
+                                           else 'disabled'),
+                    'count': 0, 'limit': 64, 'truncated': False,
+                    'partial': False, 'reason': None},
+                'componentKeyStatus': 'notSampled', 'rows': []}
         _try(lambda: self._torpedoMotion.update(
             torpedoes, now, torpedo_status.get('available', False)))
         for torpedo in torpedoes:
@@ -1930,6 +2028,7 @@ class Collector(object):
             'identityCandidates': identity_candidates_state,
             'torpedoStatus': torpedo_status,
             'uiTorpedoProbe': probe,
+            'torpedoDepthProbe': depth_probe,
             'weaponHubProbe': weapon_probe,
             'gunReloadProbe': gun_reload,
             'weaponContextProbe': weapon_context,

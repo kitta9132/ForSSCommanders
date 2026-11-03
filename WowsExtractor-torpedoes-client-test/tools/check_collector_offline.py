@@ -57,21 +57,30 @@ def main():
     collector._battleId = 'offline-battle'
     collection_calls = []
     ns['dataHub'] = Obj(getEntityCollections=lambda name:
-                        collection_calls.append(name) or [])
+        collection_calls.append(name) or ([{'id': 1, 't': {'depth': -2.5},
+                                            'm': {}}]
+                                          if name == 'torpedo' else []))
     original_data_hub = ns['dataHub']
     ns['CC'] = Obj(selfVehicle='selfVehicle-key', submarine='submarine-key',
-                   battery='battery-key', waveHit='waveHit-key')
+                   battery='battery-key', waveHit='waveHit-key', torpedo='t',
+                   mods_DataComponent='m')
+    collector._torpedoDepthSamplingEnabled = True
+    collector._torpedoDepthSamplingDue = True
+    collector._torpedoDepthSamplingInterval = 1.0
     snap = collector._build_state(1.)
     assert ns['dataHub'] is original_data_hub
     duplicated = sorted(name for name in set(collection_calls)
                         if collection_calls.count(name) > 1)
     assert not duplicated, 'diagnostic collection calls were not shared: ' + repr(duplicated)
     assert collection_calls.count('avatar') == 1, collection_calls
+    assert collection_calls.count('torpedo') == 1, collection_calls
     print('Main diagnostic collection API calls:',
           {name: collection_calls.count(name) for name in sorted(set(collection_calls))})
     assert snap['ships'] == [{'uiId': 5}]
     assert snap['torpedoes'][0]['position'] == [1., -2., 3.]
     assert snap['torpedoes'][0]['type'] == 'future_type'
+    assert snap['torpedoDepthProbe']['sampleTs'] == 1.
+    assert snap['torpedoes'][0]['uiState']['depth']['raw'] == -2.5
     assert snap['selfSystems']['consumables']['status'] == 'unsupported'
     assert snap['selfSubmarineProbe']['sampleTs'] == 1.
     assert snap['waveHitProbe']['sampleTs'] == 1.

@@ -314,13 +314,13 @@ B27のWaveHit rowでは `source.field` を `waveHitProbe.rows[].fields.targetID`
 ### 6.2 現在のUI path
 
 - 同抽出物の `gui/unbound2/pc/battle/markers/torpedo_marker.unbound` と `gui/unbound2/pc/battle/minimap/markers/torpedo_marker.unbound` は、`torpedoComponent.type` とrelationからアイコンを選ぶだけで、`depth` を読んでいない。
-- 現行collectorの `torpedo_telemetry.py::ui_torpedo_probe` は `dataHub.getEntityCollections('torpedo')` のentityから `CC.torpedo.depth` を読み、`rows[].depth` として `source/status/type/raw/unit=unknown/semantics=unverified` を出す。
-- `attach_ui_state` は `uiId` の一意exact一致があるときだけ `torpedoes[].uiState.depth` へコピーする。欠測・readError・重複・非一致では `unknown` を維持し、前frameの値や `position.y` で補完しない。
-- testsにはdepthのfinite/nonbool、missing/readError、duplicate uiId、frame再利用なしのunit testがある。ただし実機のdepth値・単位を確認した記録ではない。
+- 0.3.27までのcollectorでは `torpedo_telemetry.py::ui_torpedo_probe` が `dataHub.getEntityCollections('torpedo')` のentityから `CC.torpedo.depth` を読み、`rows[].depth` として候補を出した。0.3.28ではMainのheavy-diagnostic経路をdepth-free helperへ切り替え、専用 `ui_torpedo_depth_probe` が独立scheduler due時だけ同じ固定fieldを読む。単独呼出しの既存 `ui_torpedo_probe(hub, components, api_rows)` signature/動作は維持。
+- 0.3.28の `attach_ui_depth_state` はAPI row `uiId`とGUI entity IDの両側がscalar・Python型と値がstrict一致・一意で、UI collectionが完全かつAPI一覧取得availableの場合にだけ、同じstate sampleの `torpedoes[].uiState.depth` へコピーする。partial/truncated、重複、型差、欠測、readError、非一致ではraw depthをAPI rowへ結合せず、最終観測値の再利用や `position.y` 補完もしない。
+- offline testsはdepthのfinite/nonbool、0、missing/None/readError/nonFinite、strict scalar identity、両側duplicate、partial/truncated、65件でのbounded iteration、hidden `iter`/`next`/`enumerate`/`AttributeError`/`TypeError` builtin耐性、heavy diagnostics同時dueのcollection getter共有を確認する。実機のdepth値・単位を確認した記録ではない。
 
 ### 6.3 今回の記録での扱い
 
-- B10/B12/B14の魚雷行2,014行には `uiState.depth` キーがない（0/2,014）。これらはdepth probe追加前のversion。
+- B10/B12/B14の魚雷行2,014行には `uiState.depth` キーがない（0/2,014）。これらはdepth probe追加前のversion。B37も0.3.26で専用depth sampling OFFのため、今回のdepth候補の実機値を示さない。
 - B27は魚雷rowがない。したがって、この再検証資料に実機の魚雷depth値は存在しない。
 - `position.y` をdepthとして扱わない。今回のID namespace検証にもdepthを混ぜない。魚雷depthは別次診断候補として、原典と現在UI pathの確認だけを維持する。ソース編集はしない。
 

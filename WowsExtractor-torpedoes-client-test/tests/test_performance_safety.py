@@ -7,6 +7,9 @@ from performance_profiler import PerformanceProfiler
 from ui_health import (
     AvatarRows, index_avatar_health, index_avatar_health_sample)
 from damage_tracker import roster_ids_from_avatar
+from torpedo_telemetry import (shared_diagnostic_snapshot,
+                               ui_torpedo_depth_probe,
+                               attach_ui_depth_state)
 
 
 SOURCE = (Path(__file__).resolve().parents[1] /
@@ -61,6 +64,8 @@ def test_config_is_opt_in_and_unknown_values_are_off():
         load(c)
         assert c._collectionEnabled is expected
         assert c._diagnosticsEnabled is False
+        assert c._torpedoDepthSamplingEnabled is False
+        assert c._torpedoDepthSamplingInterval == 1.0
         assert c._positionFallbacksEnabled is False
         assert c._diagnosticsInterval == 1.0
         if not expected:
@@ -77,6 +82,70 @@ def test_config_is_opt_in_and_unknown_values_are_off():
     current['position_fallbacks_enabled'] = 'TRUE'
     load(c)
     assert c._positionFallbacksEnabled is False
+
+
+def test_depth_sampler_can_run_without_heavy_diagnostics_and_joins_current_rows():
+    calls = []
+    entities = [{'id': 7, 't': {'depth': 13.25}}]
+    hub = type('Hub', (), {'getEntityCollections': lambda self, name:
+        calls.append(name) or entities})()
+    ns = {
+        '_UNSET': object(), '_try': lambda fn, default=None: fn(),
+        '_get': lambda obj, key, default=None: getattr(obj, key, default),
+        'SCHEMA_VERSION': 1, 'WIRE_API_VERSION': '1.0',
+        'dataHub': hub, 'CC': type('CC', (), {'torpedo': 't'})(),
+        'battle': type('Battle', (), {
+            'getSelfPlayerInfo': lambda self: None,
+            'getSelfPlayerShip': lambda self: None})(),
+        'shared_diagnostic_snapshot': shared_diagnostic_snapshot,
+        'ui_torpedo_depth_probe': ui_torpedo_depth_probe,
+        'attach_ui_depth_state': attach_ui_depth_state,
+        'safe_weapon_hub_probe': lambda *args: (_ for _ in ()).throw(
+            AssertionError('heavy diagnostics called')),
+    }
+    build = method('_build_state', ns)
+    c = type('Collector', (), {})()
+    c._active = True
+    c._diagnosticsEnabled = False
+    c._diagnosticsSampleDue = False
+    c._torpedoDepthSamplingEnabled = True
+    c._torpedoDepthSamplingDue = True
+    c._torpedoDepthSamplingInterval = 1.0
+    c._battleId = 'b'
+    c._selfTeam = None
+    c._capture_avatar_snapshot = lambda: {'entities': [], 'status': 'complete',
+        'count': 0, 'limit': 256, 'reason': None}
+    c._build_avatar_observations = _fixture_avatar_observations
+    c._remember_roster_vehicles = lambda entities: None
+    c._collect_avatar_health = lambda entities: {}
+    c._build_ships = lambda now, hp, entities, players: ([], {})
+    c._self_team = lambda self_info=None: 1
+    c._torpedoes = type('Torpedoes', (), {
+        'torpedoes': lambda self, team: ([{'uiId': 7,
+            'position': [1., 999., 2.]}], {'available': True, 'status': 'available'}),
+        'armament': lambda self, ship=None: {},
+        'systems': lambda self, ship=None: {}})()
+    c._torpedoMotion = type('Motion', (), {'update': lambda *args: None})()
+    c._mapCalibration = type('Map', (), {'world_to_map': lambda *args: None})()
+    c._build_self = lambda hp, info=None, ship=None: {}
+    c._damage = type('Damage', (), {'snapshot': lambda self: {}})()
+    c._ballistics = type('Ballistics', (), {'snapshot': lambda self: {}})()
+
+    snapshot = build(c, 2.0)
+    assert calls == ['torpedo']
+    assert snapshot['uiTorpedoProbe']['status'] == 'disabled'
+    assert snapshot['torpedoDepthProbe']['status'] == 'available'
+    assert snapshot['torpedoDepthProbe']['sampleTs'] == 2.0
+    assert snapshot['torpedoes'][0]['uiState']['depth']['raw'] == 13.25
+    assert snapshot['torpedoes'][0]['uiState']['depth']['unit'] is None
+    assert snapshot['torpedoes'][0]['position'][1] == 999.0
+
+    c._torpedoDepthSamplingDue = False
+    later = build(c, 2.2)
+    assert calls == ['torpedo']
+    assert later['torpedoDepthProbe']['status'] == 'notSampled'
+    assert later['torpedoDepthProbe']['sampleTs'] is None
+    assert 'uiState' not in later['torpedoes'][0]
 
     c = type('C', (), {})()
     ns = {'_load_mod_config': lambda: (_ for _ in ()).throw(ValueError()),
@@ -129,6 +198,9 @@ def test_main_tick_keeps_collection_alive_when_profiler_clock_fails(monkeypatch)
     c._diagnosticsLastNow = None
     c._diagnosticsNextDue = c._diagnosticsLastSampleTs = None
     c._diagnostics_due = lambda now: False
+    c._torpedoDepthSamplingEnabled = False
+    c._torpedoDepthSamplingDue = False
+    c._torpedo_depth_sampling_due = lambda now: False
     c._refresh_meta = lambda now: None
     c._stateInterval, c._lastWrite = .1, 0.0
     c._performanceProfiler, c._profilerEnabled = profiler, True

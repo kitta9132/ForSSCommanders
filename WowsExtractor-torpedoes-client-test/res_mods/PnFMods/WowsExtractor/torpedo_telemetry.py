@@ -201,7 +201,7 @@ def _call(obj, name, *args):
         return 'unknown', None
 
 
-def ui_torpedo_probe(hub, components, api_rows):
+def _ui_torpedo_probe(hub, components, api_rows, include_depth):
     """Read-only diagnostic, not an authoritative homing/identity adapter.
 
     Collection spelling comes from ATM UI markup; Python availability is untested.
@@ -236,22 +236,23 @@ def ui_torpedo_probe(hub, components, api_rows):
                         ('unknown' if component is _MISSING else 'available'))
                     row['uiType'] = (None if component is _MISSING else
                                      public_data(_get(component, 'type')))
-                    depth_status, depth_value = _ttx_read(component, 'depth') \
-                        if component is not _MISSING and component is not None \
-                        else ('unknown', None)
-                    depth = {'source': 'dataHub.torpedo.depth',
-                             'status': depth_status, 'type': None, 'raw': None,
-                             'unit': 'unknown', 'semantics': 'unverified'}
-                    if depth_status == 'available':
-                        depth['type'] = type(depth_value).__name__
-                        if isinstance(depth_value, bool) or not isinstance(
-                                depth_value, NUMBER_TYPES):
-                            depth['status'] = 'nonNumeric'
-                        elif not _finite(depth_value):
-                            depth['status'] = 'nonFinite'
-                        else:
-                            depth['raw'] = depth_value
-                    row['depth'] = depth
+                    if include_depth:
+                        depth_status, depth_value = _ttx_read(component, 'depth') \
+                            if component is not _MISSING and component is not None \
+                            else ('unknown', None)
+                        depth = {'source': 'dataHub.torpedo.depth',
+                                 'status': depth_status, 'type': None, 'raw': None,
+                                 'unit': None, 'semantics': 'unverified'}
+                        if depth_status == 'available':
+                            depth['type'] = type(depth_value).__name__
+                            if isinstance(depth_value, bool) or not isinstance(
+                                    depth_value, NUMBER_TYPES):
+                                depth['status'] = 'nonNumeric'
+                            elif not _finite(depth_value):
+                                depth['status'] = 'nonFinite'
+                            else:
+                                depth['raw'] = depth_value
+                        row['depth'] = depth
                 else:
                     data = (_MISSING if component is _MISSING else
                             _get(component, 'data', _MISSING))
@@ -287,6 +288,224 @@ def ui_torpedo_probe(hub, components, api_rows):
     return out
 
 
+def ui_torpedo_probe(hub, components, api_rows):
+    """Backward-compatible full UI diagnostic, including its depth candidate."""
+    return _ui_torpedo_probe(hub, components, api_rows, True)
+
+
+def ui_torpedo_probe_without_depth(hub, components, api_rows):
+    """Read legacy UI fields without polling depth outside its own cadence."""
+    return _ui_torpedo_probe(hub, components, api_rows, False)
+
+
+TORPEDO_DEPTH_PROBE_LIMIT = 64
+
+
+def _depth_id(value):
+    """Return a strict, bounded scalar UI identity key or None."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, NUMBER_TYPES):
+        if not _finite(value):
+            return None
+    elif isinstance(value, STRING_TYPES):
+        if len(value) > 128:
+            return None
+    else:
+        return None
+    return (type(value), value)
+
+
+def _depth_id_read(entity):
+    """Read only the fixed entity id scalar; never serialize arbitrary objects."""
+    try:
+        if isinstance(entity, dict):
+            if 'id' not in entity:
+                return 'missing', None
+            value = entity['id']
+        else:
+            value = getattr(entity, 'id')
+    except Exception as error:
+        try:
+            missing = error.__class__.__name__ in ('AttributeError', 'KeyError')
+        except Exception:
+            missing = False
+        return ('missing' if missing else 'readError'), None
+    if value is None:
+        return 'none', None
+    key = _depth_id(value)
+    if key is None:
+        return ('nonFinite' if isinstance(value, NUMBER_TYPES) and
+                not isinstance(value, bool) and not _finite(value) else
+                'nonScalar'), None
+    return 'available', value
+
+
+def _depth_component(entity, key, key_status):
+    if key is None:
+        return ('unsupported' if key_status == 'unsupported' else
+                'componentKeyUnknown'), None
+    try:
+        component = entity[key]
+    except Exception as error:
+        try:
+            missing = error.__class__.__name__ in ('AttributeError', 'KeyError')
+        except Exception:
+            missing = False
+        return ('missing' if missing else 'readError'), None
+    return ('none', None) if component is None else ('available', component)
+
+
+def _depth_field(component, component_status):
+    result = {'source': 'dataHub.torpedo.depth', 'status': 'unknown',
+              'type': None, 'raw': None, 'unit': None,
+              'semantics': 'unverified'}
+    if component_status != 'available':
+        result['status'] = {
+            'unsupported': 'unsupported', 'missing': 'componentMissing',
+            'none': 'componentNone', 'readError': 'componentReadError',
+            'componentKeyUnknown': 'unknown'
+        }.get(component_status, 'unknown')
+        return result
+    try:
+        if isinstance(component, dict):
+            if 'depth' not in component:
+                result['status'] = 'missing'
+                return result
+            value = component['depth']
+        else:
+            value = getattr(component, 'depth')
+    except Exception as error:
+        try:
+            missing = error.__class__.__name__ == 'AttributeError'
+        except Exception:
+            missing = False
+        result['status'] = 'missing' if missing else 'readError'
+        return result
+    if value is None:
+        result['status'] = 'none'
+        return result
+    result['type'] = type(value).__name__
+    if isinstance(value, bool) or not isinstance(value, NUMBER_TYPES):
+        result['status'] = 'nonNumeric'
+    elif not _finite(value):
+        result['status'] = 'nonFinite'
+    else:
+        result['status'] = 'available'
+        result['raw'] = value
+    return result
+
+
+def ui_torpedo_depth_probe(hub, components):
+    """Bounded, fixed-field depth-only probe; no API join or frame cache."""
+    out = {'source': 'dataHub.torpedo.depth', 'producer': 'unknown',
+           'status': 'unknown', 'semantics': 'unverified',
+           'componentKeyStatus': 'unknown',
+           'collection': {'status': 'unknown', 'count': 0,
+                          'limit': TORPEDO_DEPTH_PROBE_LIMIT,
+                          'truncated': False, 'partial': False,
+                          'reason': None},
+           'rows': []}
+    key_status, key = _probe_component_key(components, 'torpedo')
+    out['componentKeyStatus'] = key_status
+    status, entities = _call(hub, 'getEntityCollections', 'torpedo')
+    collection = out['collection']
+    collection['status'] = status
+    out['status'] = status
+    if status != 'available':
+        return out
+    index = 0
+    try:
+        for entity in entities:
+            if index >= TORPEDO_DEPTH_PROBE_LIMIT:
+                collection['status'] = 'truncated'
+                collection['truncated'] = True
+                collection['reason'] = 'rowLimit'
+                out['status'] = 'truncated'
+                break
+            entity_id_status, entity_id = _depth_id_read(entity)
+            component_status, component = _depth_component(
+                entity, key, key_status)
+            out['rows'].append({
+                'entityIdStatus': entity_id_status,
+                'entityIdCandidate': entity_id,
+                'depth': _depth_field(component, component_status),
+                'apiMatchStatus': 'unknown'})
+            index += 1
+    except Exception:
+        collection['status'] = 'partial' if out['rows'] else 'unknown'
+        collection['partial'] = bool(out['rows'])
+        collection['reason'] = 'iterationError'
+        out['status'] = collection['status']
+    collection['count'] = len(out['rows'])
+    return out
+
+
+def attach_ui_depth_state(rows, probe, api_status='available'):
+    """Attach depth only for complete, strict-type, unique same-sample IDs."""
+    rows = rows or []
+    candidates = probe.get('rows', []) if isinstance(probe, dict) else []
+    collection = probe.get('collection', {}) if isinstance(probe, dict) else {}
+    collection_status = collection.get('status')
+    if collection_status != 'available':
+        for item in candidates:
+            item['apiMatchStatus'] = 'collectionIncomplete'
+        return
+    if api_status != 'available':
+        for item in candidates:
+            item['apiMatchStatus'] = 'apiUnavailable'
+        return
+    try:
+        if len(rows) > TORPEDO_DEPTH_PROBE_LIMIT:
+            for item in candidates:
+                item['apiMatchStatus'] = 'apiRowLimit'
+            return
+    except Exception:
+        for item in candidates:
+            item['apiMatchStatus'] = 'apiUnknown'
+        return
+
+    api_index, api_counts = {}, {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        key = _depth_id(row.get('uiId'))
+        if key is None:
+            continue
+        api_counts[key] = api_counts.get(key, 0) + 1
+        api_index[key] = row
+    ui_counts = {}
+    for item in candidates:
+        key = (_depth_id(item.get('entityIdCandidate'))
+               if item.get('entityIdStatus') == 'available' else None)
+        if key is None:
+            item['apiMatchStatus'] = 'unknown'
+            continue
+        ui_counts[key] = ui_counts.get(key, 0) + 1
+    for item in candidates:
+        key = (_depth_id(item.get('entityIdCandidate'))
+               if item.get('entityIdStatus') == 'available' else None)
+        if key is None:
+            continue
+        if ui_counts.get(key, 0) != 1:
+            item['apiMatchStatus'] = 'ambiguousUiId'
+        elif api_counts.get(key, 0) > 1:
+            item['apiMatchStatus'] = 'ambiguousApiUiId'
+        elif api_counts.get(key, 0) == 0:
+            item['apiMatchStatus'] = 'unmatched'
+        else:
+            item['apiMatchStatus'] = 'exactUiId'
+            row = api_index.get(key)
+            if row is None:
+                continue
+            state = row.get('uiState')
+            if not isinstance(state, dict):
+                state = {'source': 'dataHub.torpedo', 'producer': 'unknown'}
+                row['uiState'] = state
+            state['matchStatus'] = 'exactUiId'
+            state['depth'] = item['depth']
+
+
 def attach_ui_state(rows, probe):
     """Join only unambiguous exact UI identifiers observed on this build."""
     index = {}
@@ -307,7 +526,7 @@ def attach_ui_state(rows, probe):
                   'isSpotted': None, 'spottedStatus': 'unknown', 'uiType': None,
                   'depth': {'source': 'dataHub.torpedo.depth',
                             'status': 'unknown', 'type': None, 'raw': None,
-                            'unit': 'unknown', 'semantics': 'unverified'}}
+                            'unit': None, 'semantics': 'unverified'}}
         if item is not None:
             for name in ('isHoming', 'homingStatus', 'isSpotted', 'spottedStatus', 'uiType'):
                 state[name] = item.get(name, state[name])

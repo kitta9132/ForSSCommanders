@@ -6,6 +6,8 @@
 
 `0.3.27-avatar-id-candidates`は、B37で実機取得できなかったstrict `avatar.playerId`の代替joinを行わず、既存sample済みの`avatar.id`をnamespace付きの未確定candidateとして別出力します。same-snapshotのships playerIdとの厳密scalar一致は匿名countだけで記録し、confirmed coverageとは分離します。
 
+`0.3.28-torpedo-depth-sampling`は既存core魚雷行とowner/guidance契約を変えず、depth候補だけを専用opt-inの1Hz以下sampleに分離します。出力契約は本書後半の「魚雷の明示深度候補」節を参照してください。
+
 ## 0.3.27-avatar-id-candidates
 
 ```json
@@ -315,6 +317,7 @@ ATM由来の誘導・被発見状態はuiStateに分離し、type文字列から
 | `torpedoStatus` | オブジェクト | 今回の魚雷一覧取得の状態 |
 | `torpedoArmament` | オブジェクト | 自艦の魚雷発射管と選択弾の情報 |
 | `uiTorpedoProbe` | オブジェクト | UI魚雷の読み取り診断。終了フレームでは省略 |
+| `torpedoDepthProbe` | オブジェクト | 専用opt-inの魚雷depth候補sample。disabled/notSampledを含み、過去値を再利用しない |
 | `weaponHubProbe` | オブジェクト | UI由来の装填候補を読むread-only診断。終了フレームでは省略 |
 | `gunReloadProbe` | オブジェクト | gun/reloadBar/gunBarrel UI候補のread-only診断。終了フレームでは省略 |
 | `weaponContextProbe` | オブジェクト | selfVehicle/controller context候補。終了フレームでは省略 |
@@ -528,8 +531,15 @@ metaは戦闘表示時に書き、遅れて到着する地図情報等のため�
 候補別statusは厳密なbool判定で、`available`（bool値。falseを含む）、`missing`、`none`、`readError`、`nonBoolean`、`componentMissing`、`componentReadError`、`ccKeyMissing`。したがって数値0/1は候補診断では `nonBoolean` だが、有限数値として互換フィールド `visibility.raw` に残り、旧 `visible` 投影では0/1をfalse/trueとして扱う。`type`は `bool/int/float/string/NoneType/object` の限定ラベル。`raw`は有限な数値・bool・128文字以内の文字列だけを複製し、それ以外はnull。非有限数は `nonBoolean` と `reason=nonFiniteNumber` で診断し、JSON rawへ出さない。通常互換フィールド `visibility.raw`／`shipApi` は有限数値/boolのみを従来形式で維持する。
 
 `dataHubCandidates` と `shipApiCandidates` はそれぞれ別取得経路で、API候補をdataHub値の代用にはしない。旧 `visibility.status` は互換raw値のいずれかが出力されたことを表すだけで、候補の意味や発見状態を確定しない。mapVisible由来の `visible` 投影と座標出力は変更しない。診断値が取得できても発見状態の意味は未検証。新フィールドのゲーム実機取得は未確認。
-# 魚雷の明示深度候補（0.3.14、未導入）
+# 魚雷の明示深度候補（0.3.28-torpedo-depth-sampling、source only）
 
-`uiTorpedoProbe.rows[].depth` に `source=dataHub.torpedo.depth`、`status`、`type`、`raw`、`unit=unknown`、`semantics=unverified` を追加。既存の一意なUI ID対応が成立した場合のみ `torpedoes[].uiState.depth` に渡します。有限な数値だけを採用し、0も保持します。欠落・None・読取失敗・非数値・非有限値を区別し、不一致・重複時はunknownです。`position[1]`による代用や前フレーム値の持越しは行いません。実機での取得可否・単位は未確認です。
+`torpedo_depth_sampling_enabled=true`で、`collection_enabled=true`かつ`diagnostics_enabled=false`でも専用samplerが動作します。設定例は`res_mods/PnFMods/WowsExtractor/config.example.ini`を参照してください。interval既定値は1.0秒、invalid値は1.0秒、最小値も1.0秒です。due判定は通常state構築ごとに行うため、実行間隔はこのintervalと`state_interval`（既定0.2秒）の双方で制約されます。遅延分のcatch-upはありません。collectionが無効ならsamplerは有効にならず追加dataHub API callは0回です。
 
-0.3.14はこのdepth候補と`identityCandidates`を同時に含む**未導入**ソース版です。0.3.13の`interpretations`（Submarine/Battery/WaveHitのraw・metadata）は変更しません。魚雷depthの専用実機試験は追加せず、次回の通常魚雷発射時に同じ記録へ相乗りして確認します。単位・基準面・`position.y`との関係は未確定のままです。
+- due時だけ`dataHub.getEntityCollections('torpedo')`から`CC.torpedo` componentの固定`id`／`depth`候補を最大64 entity読みます。65個目はtruncation検出だけに使い、そのentityのcomponent/fieldは読まず、元collectionが巨大でも最大65件でiterationを止めます。ゲームentity objectはsample-localで、frame間へ保持しません。任意`dir()`／`repr()`、owner/player ID、距離、`position.y`、前frame値による補完はありません。
+- 同じstate sampleで従来のheavy diagnosticsもdueの場合、同じ`DiagnosticCollectionSnapshot`を使い、`getEntityCollections('torpedo')` getter／元collection iterationを重複させません。専用samplerはheavy `safe_*` probe群を起動しません。heavy diagnosticsの既存scheduler/設定とは独立です。
+- `torpedoDepthProbe.status`と`collection.status`は`disabled`／`notSampled`／`unsupported`／`unknown`／`available`／`partial`／`truncated`を区別します。partialでは列挙済みraw rowsを残しますが、全体の一意性を保証できないためAPI行へjoinしません。`sampleTs`はdue sample時だけ設定し、それ以外はnull。非due stateではrows空、depth未付与で、前回値を再利用しません。
+- `rows[]`は`entityIdStatus`／`entityIdCandidate`、`depth`、`apiMatchStatus`を持ちます。`depth`は`source=dataHub.torpedo.depth`、`status`、`type`、`raw`、`unit=null`、`semantics=unverified`です。有限numeric（bool除外）のrawだけを保持し、0もそのまま保持します。欠落／None／readError／nonNumeric／nonFiniteとcomponent欠測を分離します。ローカルGUI抽出`Components.xml`の`Torpedo.depth:Number sync=false`は候補名の根拠のみで、現在buildのPython/dataHub可用性・値の意味・単位の根拠ではありません。
+- `torpedoes[].uiState.depth`への付与は同じstate内のAPI rowsとGUI rowsの両側で、IDがscalarかつ同じPython型・値で、各側一意、GUI collection complete (`available`)、API列挙availableの場合だけです。API rowsが64件を超える場合も一意性確認を打ち切り付与しません。`1`と`"1"`、bool/int、float/intは一致させません。重複・型違い・不一致・API unavailable・partial/truncatedでは付与しません。owner／playerID名前空間の推測joinは禁止です。
+- `uiTorpedoProbe`の既存公開関数signatureは維持します。Mainのheavy diagnostic経路ではdepthを読まないdepth-free helperを使い、独立samplerが有効なdue sampleでだけdepthを読みます。単独呼出しの既存`ui_torpedo_probe` helperは後方互換のため従来のcandidate fieldを出せますが、Mainでは使いません。
+
+B37ではdepth専用sampleがOFFだったため取得実績はありません。0.3.28はsource only・未導入であり、次回は通常の魚雷発射記録に同乗するdepth候補の取得可否確認だけが必要です。単位・基準面・`position.y`との関係、対象艦深度・深度差は未確定です。新moduleは追加せず既存9 module構成を維持します。

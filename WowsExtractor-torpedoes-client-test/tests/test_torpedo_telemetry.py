@@ -10,6 +10,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'res_mods',
                               'PnFMods', 'WowsExtractor'))
 from torpedo_telemetry import TorpedoTelemetry, public_data, vector, ui_torpedo_probe
 from torpedo_telemetry import attach_ui_state, TorpedoMotion
+from torpedo_telemetry import (ui_torpedo_depth_probe,
+                               attach_ui_depth_state,
+                               ui_torpedo_probe_without_depth)
+import torpedo_telemetry
 from torpedo_telemetry import weapon_hub_probe, safe_weapon_hub_probe
 from torpedo_telemetry import (weapon_context_probe, safe_weapon_context_probe,
                                game_clock_probe, safe_game_clock_probe)
@@ -737,7 +741,7 @@ def test_torpedo_depth_is_a_finite_nonbool_raw_candidate(depth, expected_status,
     assert candidate['source'] == 'dataHub.torpedo.depth'
     assert candidate['status'] == expected_status
     assert candidate['raw'] == expected_raw
-    assert candidate['unit'] == 'unknown'
+    assert candidate['unit'] is None
     rows = [{'uiId': 7, 'position': [1.0, 123.0, 3.0]}]
     attach_ui_state(rows, probe)
     assert rows[0]['uiState']['depth'] == candidate
@@ -761,6 +765,143 @@ def test_torpedo_depth_missing_and_access_error_keep_distinct_reasons():
         candidate = probe['rows'][0]['depth']
         assert candidate['status'] == expected
         assert candidate['raw'] is None
+
+
+def test_depth_only_probe_keeps_finite_values_and_attaches_strict_unique_ids():
+    calls = []
+    entities = [{'id': 7, 't': {'depth': 0}},
+                {'id': '8', 't': {'depth': -12.5}}]
+    probe = ui_torpedo_depth_probe(
+        Obj(getEntityCollections=lambda name: calls.append(name) or entities),
+        {'torpedo': 't'})
+    assert calls == ['torpedo']
+    assert probe['status'] == 'available'
+    assert probe['collection'] == {
+        'status': 'available', 'count': 2, 'limit': 64,
+        'truncated': False, 'partial': False, 'reason': None}
+    assert probe['rows'][0]['depth'] == {
+        'source': 'dataHub.torpedo.depth', 'status': 'available',
+        'type': 'int', 'raw': 0, 'unit': None, 'semantics': 'unverified'}
+    api_rows = [{'uiId': 7, 'position': [1., 777., 3.]},
+                {'uiId': '8', 'position': [1., 888., 3.]}]
+    attach_ui_depth_state(api_rows, probe, 'available')
+    assert [row['uiState']['depth']['raw'] for row in api_rows] == [0, -12.5]
+    assert all(row['uiState']['matchStatus'] == 'exactUiId' for row in api_rows)
+    assert all(item['apiMatchStatus'] == 'exactUiId' for item in probe['rows'])
+    assert api_rows[0]['uiState']['depth']['raw'] != api_rows[0]['position'][1]
+    json.dumps({'probe': probe, 'torpedoes': api_rows}, allow_nan=False)
+
+
+def test_depth_probe_field_statuses_include_none_missing_read_error_and_nonfinite():
+    class BrokenDepth(object):
+        @property
+        def depth(self):
+            raise RuntimeError('unreadable')
+
+    components = [
+        {'id': 1, 't': {'depth': None}},
+        {'id': 2, 't': {}},
+        {'id': 3, 't': BrokenDepth()},
+        {'id': 4, 't': {'depth': float('nan')}},
+        {'id': 5, 't': {'depth': False}},
+    ]
+    probe = ui_torpedo_depth_probe(
+        Obj(getEntityCollections=lambda name: components), {'torpedo': 't'})
+    assert [row['depth']['status'] for row in probe['rows']] == [
+        'none', 'missing', 'readError', 'nonFinite', 'nonNumeric']
+    assert all(row['depth']['unit'] is None for row in probe['rows'])
+    assert all(row['depth']['raw'] is None for row in probe['rows'])
+
+
+def test_depth_probe_requires_type_exact_unique_ids_and_complete_collections():
+    def sample(entities):
+        return ui_torpedo_depth_probe(
+            Obj(getEntityCollections=lambda name: entities), {'torpedo': 't'})
+
+    probe = sample([{'id': 1, 't': {'depth': 4.}},
+                    {'id': 3, 't': {'depth': 5.}},
+                    {'id': 3, 't': {'depth': 6.}}])
+    api_rows = [{'uiId': '1'}, {'uiId': 3}]
+    attach_ui_depth_state(api_rows, probe, 'available')
+    assert 'uiState' not in api_rows[0]  # str/int is never coerced
+    assert 'uiState' not in api_rows[1]  # duplicate GUI IDs are ambiguous
+    assert probe['rows'][0]['apiMatchStatus'] == 'unmatched'
+    assert probe['rows'][1]['apiMatchStatus'] == 'ambiguousUiId'
+
+    duplicate_api = [{'uiId': 2}, {'uiId': 2}]
+    duplicate_probe = sample([{'id': 2, 't': {'depth': 9.}}])
+    attach_ui_depth_state(duplicate_api, duplicate_probe, 'available')
+    assert all('uiState' not in row for row in duplicate_api)
+    assert duplicate_probe['rows'][0]['apiMatchStatus'] == 'ambiguousApiUiId'
+
+    limited_api = [{'uiId': index} for index in range(65)]
+    limited_probe = sample([{'id': 1, 't': {'depth': 9.}}])
+    attach_ui_depth_state(limited_api, limited_probe, 'available')
+    assert all('uiState' not in row for row in limited_api)
+    assert limited_probe['rows'][0]['apiMatchStatus'] == 'apiRowLimit'
+
+    def partial_rows():
+        yield {'id': 10, 't': {'depth': 12.}}
+        raise RuntimeError('partial collection')
+    partial = sample(partial_rows())
+    assert partial['status'] == 'partial'
+    assert partial['collection']['partial'] is True
+    partial_api = [{'uiId': 10}]
+    attach_ui_depth_state(partial_api, partial, 'available')
+    assert 'uiState' not in partial_api[0]
+    assert partial['rows'][0]['apiMatchStatus'] == 'collectionIncomplete'
+
+
+def test_depth_probe_bounds_large_iterables_and_does_not_depend_on_hidden_builtins():
+    consumed = []
+    def large_collection():
+        index = 0
+        while index < 100000:
+            consumed.append(index)
+            yield {'id': index, 't': {'depth': index}}
+            index += 1
+    probe = ui_torpedo_depth_probe(
+        Obj(getEntityCollections=lambda name: large_collection()), {'torpedo': 't'})
+    assert probe['status'] == 'truncated'
+    assert probe['collection']['truncated'] is True
+    assert probe['collection']['count'] == 64
+    assert len(consumed) == 65  # 64 rows plus one bounded truncation check
+
+    original = torpedo_telemetry.__dict__['__builtins__']
+    restricted = dict(original)
+    for name in ('iter', 'next', 'enumerate', 'AttributeError', 'TypeError'):
+        restricted.pop(name, None)
+    torpedo_telemetry.__dict__['__builtins__'] = restricted
+    try:
+        limited = ui_torpedo_depth_probe(
+            Obj(getEntityCollections=lambda name: [{'id': 4,
+                't': {'depth': 1.25}}]), {'torpedo': 't'})
+        api_rows = [{'uiId': 4}]
+        attach_ui_depth_state(api_rows, limited, 'available')
+        assert api_rows[0]['uiState']['depth']['raw'] == 1.25
+    finally:
+        torpedo_telemetry.__dict__['__builtins__'] = original
+
+
+def test_legacy_ui_probe_signature_stays_usable_and_depth_free_path_skips_field_read():
+    class CountedDepth(object):
+        def __init__(self):
+            self.reads = 0
+
+        @property
+        def depth(self):
+            self.reads += 1
+            return 1.5
+
+    component = CountedDepth()
+    hub = Obj(getEntityCollections=lambda name: [{'id': 1, 't': component}])
+    keys = Obj(torpedo='t')
+    without_depth = ui_torpedo_probe_without_depth(hub, keys, [])
+    assert component.reads == 0
+    assert 'depth' not in without_depth['rows'][0]
+    legacy = ui_torpedo_probe(hub, keys, [])
+    assert component.reads == 1
+    assert legacy['rows'][0]['depth']['raw'] == 1.5
 
 
 def test_torpedo_depth_join_requires_unique_ui_id_and_does_not_reuse_frames():

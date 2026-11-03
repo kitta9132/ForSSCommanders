@@ -68,3 +68,22 @@ TTX（静的諸元）との区別：`structs/ttx.xml` L137-L147はPingerTTXのre
 2. **P1高**：Undineで深度／batteryとping対象・重複・タイマーを時系列照合。現行Pythonに不足しているため診断導入後の試験が必要。
 3. **P1中**：魚雷明示`depth`、誘導先・停止、命中区画、魚雷消滅理由は一次根拠の探索を継続。現時点では未知扱いを維持。
 4. **P1中**：Minotaurで既存公開APIの消耗品／search fieldsの実機値、state・単位・endTime基準を照合。自艦以外へ取得範囲を広げない。
+
+## 2026-11-03追記：0.3.28魚雷depth sampling
+
+本書冒頭の0.3.4時点の調査状態に対する実装追記。ゲーム起動・実機取得は行わず、ローカルGUI抽出物をread-onlyで再確認し、ソースのみを変更した。
+
+- GUI根拠はローカル `../mino-smoke/research/extracted/gui/data/Components.xml` の `<component name="Torpedo">`（L2277-L2286）。`id:String pk=true`、`ownerID:Integer sync=false`、`shotID:Integer sync=false`、`depth:Number sync=false`、`type:String`。これは候補名の存在根拠で、Python/dataHub公開性・同期・取得値・単位・意味は保証しない。
+- 0.3.28は `torpedo_depth_sampling_enabled` 専用opt-in（collection必須、diagnostics非依存）、interval既定/invalid/minimum 1秒で `CC.torpedo.depth` のみを最大64 entity sampleする。iterationは65件目をtruncation検出に使って停止。既存のheavy `uiTorpedoProbe`経路ではdepthを読まない。heavy diagnosticsも同sample dueならsample-local `DiagnosticCollectionSnapshot`によりtorpedo collection getter／元collection iterationを共有する。
+- 同一state内のAPI `uiId`とGUI entity `id`のstrict型・scalar値一致を、両側一意かつcollection complete時に限定して `uiState.depth`へ付ける。partial/truncated/unknown/重複/不一致では付与しない。rawは有限numeric（bool除外）のみ、unitはnull。過去値・position.y・ownerID/ownerId/playerId推測joinは禁止。
+- B37（0.3.26）はdepth sampler OFFで、今回の実機depth証拠には使えない。次の確認は通常の魚雷発射recordにdepth取得可否だけ相乗りし、潜水深度操作・ping試験を追加要求しない。Python実機可用性、値の意味・単位、FPS影響は未確認。
+
+### 魚雷戦テレメトリの取得棚卸し（0.3.28 source）
+
+| 項目 | 現在の経路・根拠 | 判定／不足 |
+|---|---|---|
+| 魚雷個体と位置 | core `TorpedoTelemetry.torpedoes()` は公式ModsAPI `getAllTorpedoes()`から`uiId/ownerId/ownerTeamId/ownerType/shotId/type`と`position`を直接読む。B37で魚雷最大6本を含む1,306魚雷rowを記録。 | 直接取得あり。`position.y`は深度へ読み替えない。`shotId`共有範囲・uiId再利用・全条件の取得完全性は未確定。 |
+| 発射元／owner | `ownerId`は `getAllTorpedoes()` rowの公開field。次段で同じ値を `getTorpedoOwnerById(ownerId)`へ渡し、戻りobjectから固定 `OWNER_FIELDS` を読む。現行collectorに`ownerShip` field readや`ownerShip` joinはない。`isOwn`は返却ownerの`isPlayer`が厳密boolの場合だけ出力し、それ以外null。ownerTeamIdは自艦teamとのrelation候補で、自艦owner確定ではない。 | ownerId/ownerTeamId/ownerTypeは過去実機取得済み（0.3.1記録374/374行）。owner API objectの一部fieldはnull。ownerIdとplayerId/vehicleId/GUI `ownerID` namespaceの一般契約は未確認で推測joinしない。GUI `Components.xml` の`ownerID:Integer sync=false`は`ownerShip`の根拠ではない。 |
+| 誘導状態／誘導先 | `diagnostics_enabled`時の既存UI diagnosticが`CC.mods_DataComponent.data.isHoming/isSpotted`候補を最大64 rows調べる。通常core魚雷行へコピーするのは一意UI-ID候補が一致した場合だけ。B01系のATM条件に限る取得記録は既存`ACQUISITION_STATUS`等を参照。 | `isHoming/isSpotted`はUI/ATM診断候補で、diagnostics OFFではsampleされない。typeからhomingを推定しない。誘導先ID、停止距離／地点／理由はGUI Torpedo component（`id/ownerID/shotID/depth/type`）と現行APIに候補なし。最寄り艦joinは禁止。 |
+| 明示魚雷depth | 0.3.28の独立opt-in `dataHub.torpedo.depth` fixed-field probe。GUI抽出 `Torpedo.depth:Number sync=false` が候補名の根拠。 | 実機Python取得・値・意味・unitは未確認。unit=null。B37はprobe OFF。 |
+| 残射程／残存寿命 | 現行coreには直接fieldなし。`TorpedoMotion.observedDistance/Age`はcollector観測開始後の派生区間値。選択TTXのspeed/maxDistは静的性能候補。local GUI `Torpedo`定義にもborn/lifetime/remaining-range fieldなし。 | 直接取得経路は未発見・取得不能とは断定しない。TTX maxDist−observedDistance、速度×経過時間、WaveHit.lifeTime等で魚雷残量を推定しない。詳細は[残射程・寿命調査](RESEARCH_TORPEDO_RANGE_LIFETIME.ja.md)。 |
