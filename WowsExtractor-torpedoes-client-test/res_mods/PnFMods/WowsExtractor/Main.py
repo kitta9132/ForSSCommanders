@@ -6,7 +6,7 @@
 
 API_VERSION = 'API_v1.0'
 MOD_NAME = 'WowsExtractor'
-MOD_VERSION = '0.3.25-player-field-budget'
+MOD_VERSION = '0.3.26-avatar-observations'
 
 # ---------------------------------------------------------------------------
 # WowsExtractor -- in-game data collector for the "8111 for WoWS" project.
@@ -59,11 +59,11 @@ except:
 
 try:
     from .ui_health import (
-        AvatarRows, apply_ui_health, index_avatar_health,
+        AvatarRows, apply_ui_health, index_avatar_health, normalize_ui_health,
         index_avatar_health_sample)
 except:
     from ui_health import (
-        AvatarRows, apply_ui_health, index_avatar_health,
+        AvatarRows, apply_ui_health, index_avatar_health, normalize_ui_health,
         index_avatar_health_sample)
 
 try:
@@ -229,6 +229,77 @@ def _visibility_raw(value):
     if isinstance(value, _STRING_TYPES) and len(value) <= 128:
         return value
     return None
+
+
+def _observation_scalar(value):
+    """Copy only JSON-safe finite scalar values into avatar observations."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, _INT_TYPES):
+        return value
+    if isinstance(value, float):
+        if value != value or value in (float('inf'), -float('inf')):
+            return None
+        return value
+    if isinstance(value, _STRING_TYPES):
+        return value
+    return None
+
+
+def _observation_exception_name(error):
+    """Read only the exception class name, without repr/stringifying it."""
+    try:
+        return error.__class__.__name__
+    except Exception:
+        return ''
+
+
+def _observation_field(obj, name):
+    """Read one attribute/mapping field and label missing, None and failures."""
+    if obj is None:
+        return None, 'componentMissing'
+    if _is_mapping(obj):
+        try:
+            value = obj.get(name, _UNSET)
+        except Exception:
+            return None, 'readError'
+        if value is _UNSET:
+            return None, 'missing'
+    else:
+        try:
+            value = getattr(obj, name)
+        except Exception as error:
+            status = ('missing' if _observation_exception_name(error) ==
+                      'AttributeError' else 'readError')
+            return None, status
+    if value is None:
+        return None, 'none'
+    return value, 'available'
+
+
+def _empty_avatar_observations(status, source, reason=None):
+    return {
+        'status': status,
+        'source': source,
+        'sampleTs': None,
+        'rows': [],
+        'coverage': {
+            'sampledEntityCount': 0,
+            'inputStatus': status,
+            'inputComplete': False,
+            'inputAvailability': ('notSampled' if status in ('disabled', 'notSampled')
+                                  else 'unknown'),
+            'reason': reason,
+            'distinctPlayerIdCount': 0,
+            'apiMatchedCount': 0,
+            'missingInApiCount': 0,
+            'apiPresenceUnknownCount': 0,
+            'unmatchableIdCount': 0,
+            'duplicateIdConflictCount': 0,
+            'mapPositionAvailableCount': 0,
+            'healthRawAvailableCount': 0,
+        },
+    }
 
 
 def _visibility_observation(source, status, value=None, reason=None):
@@ -972,7 +1043,9 @@ class Collector(object):
                 'apiVersion': WIRE_API_VERSION, 'battleId': self._battleId,
                 'active': True, 'collection': {'status': 'disabled',
                     'source': 'config.collection_enabled'}, 'ts': _now(),
-                'ships': [], 'self': None, 'torpedoes': [], 'damage': {}})
+                'ships': [], 'self': None, 'torpedoes': [], 'damage': {},
+                'avatarObservations': _empty_avatar_observations(
+                    'disabled', 'config.collection_enabled')})
             logInfo('collection disabled by config')
             return
         self._ballistics.start()
@@ -1006,6 +1079,8 @@ class Collector(object):
                     'torpedoes': [],
                     'torpedoStatus': {'available': False, 'status': 'unknown'},
                     'torpedoArmament': {'available': False},
+                    'avatarObservations': _empty_avatar_observations(
+                        'notSampled', 'lifecycle', 'battleEnded'),
                     'damage': self._damage.snapshot()}
             if not self._collectionEnabled:
                 snap['collection'] = {'status': 'disabled',
@@ -1680,16 +1755,33 @@ class Collector(object):
         avatar_snapshot = self._capture_avatar_snapshot()
         avatar_entities = avatar_snapshot['entities']
         players_sample = self._remember_roster_vehicles(avatar_entities)
-        # Incomplete snapshots cannot safely assert UI alive/dead from absence.
-        ui_hp = self._collect_avatar_health(
-            avatar_entities if avatar_snapshot['status'] == 'complete' else [])
+        # Partial captures expose raw health only for captured entities. Their
+        # incomplete health index remains empty, so absence cannot assert life.
+        if avatar_snapshot['status'] == 'complete':
+            ui_hp = self._collect_avatar_health(avatar_entities)
+        else:
+            sample_health = getattr(avatar_entities, 'sample_health', None)
+            if sample_health is not None:
+                _try(lambda: sample_health(CC))
+            ui_hp = self._collect_avatar_health([])
         if profiler is not None:
             profiler.finish(avatar_phase)
-        ships, diag = (profiler.measure(
-            'ships', self._build_ships, now, ui_hp, avatar_entities,
-            players_sample)
-            if profiler is not None else
-            self._build_ships(now, ui_hp, avatar_entities, players_sample))
+
+        if profiler is not None:
+            def build_ships_and_avatar_observations():
+                built_ships, built_diag = self._build_ships(
+                    now, ui_hp, avatar_entities, players_sample)
+                observations = self._build_avatar_observations(
+                    avatar_snapshot, now, built_ships)
+                return built_ships, built_diag, observations
+
+            ships, diag, avatar_observations = profiler.measure(
+                'ships', build_ships_and_avatar_observations)
+        else:
+            ships, diag = self._build_ships(
+                now, ui_hp, avatar_entities, players_sample)
+            avatar_observations = self._build_avatar_observations(
+                avatar_snapshot, now, ships)
         diag['avatarSnapshotStatus'] = {
             'status': avatar_snapshot['status'], 'count': avatar_snapshot['count'],
             'limit': avatar_snapshot['limit'], 'reason': avatar_snapshot['reason']}
@@ -1817,6 +1909,7 @@ class Collector(object):
             'ts': now,
             'self': self_state,
             'ships': ships,
+            'avatarObservations': avatar_observations,
             'torpedoes': torpedoes,
             'identityCandidates': identity_candidates_state,
             'torpedoStatus': torpedo_status,
@@ -1834,6 +1927,161 @@ class Collector(object):
             'damage': self._damage.snapshot(),
             'ballistics': _try(lambda: self._ballistics.snapshot(), {'available': False}),
             'diag': diag,
+        }
+
+    def _build_avatar_observations(self, avatar_snapshot, now, ships):
+        """Report only current captured-avatar fields, separate from API ships."""
+        entities = avatar_snapshot.get('entities', []) or []
+        input_status = avatar_snapshot.get('status', 'unknown')
+        input_complete = input_status == 'complete'
+        sample_reader = getattr(entities, 'sample_ids', None)
+        sample = _try(lambda: sample_reader(CC)) if sample_reader is not None else None
+        sample_rows = sample.get('rows', []) if isinstance(sample, dict) else []
+
+        ship_counts = {}
+        for ship in ships or []:
+            player_id = ship.get('playerId') if isinstance(ship, dict) else None
+            key = _strict_player_lookup_key(player_id)
+            if key is None:
+                continue
+            ship_counts[key] = ship_counts.get(key, 0) + 1
+
+        observation_ids = {}
+        row_ids = []
+        for index in range(len(entities)):
+            row = sample_rows[index] if index < len(sample_rows) else {}
+            avatar = row.get('avatar') if isinstance(row, dict) else None
+            # avatar.id is deliberately a separate namespace and is never a
+            # fallback for this observation-to-ships join.
+            player_id = avatar.get('playerId') if isinstance(avatar, dict) else None
+            key = _strict_player_lookup_key(player_id)
+            safe_id = _observation_scalar(player_id) if key is not None else None
+            if safe_id is None:
+                key = None
+            row_ids.append((key, safe_id, row))
+            if key is not None:
+                observation_ids[key] = observation_ids.get(key, 0) + 1
+
+        conflicts = set(key for key, count in observation_ids.items() if count > 1)
+        conflicts.update(key for key, count in ship_counts.items() if count > 1)
+        out_rows = []
+        matched = missing = unknown = unmatchable = 0
+        map_available = health_available = 0
+        for key, player_id, sampled in row_ids:
+            row = {}
+            if key is None:
+                row['playerIdStatus'] = 'unknown'
+                row['apiPresence'] = {'status': 'unknown', 'source': 'state.ships',
+                                      'reason': 'unmatchablePlayerId'}
+                unmatchable += 1
+                unknown += 1
+            else:
+                row['playerId'] = player_id
+                row['playerIdStatus'] = 'available'
+                if key in conflicts:
+                    row['apiPresence'] = {'status': 'unknown', 'source': 'state.ships',
+                                          'reason': 'duplicateIdConflict'}
+                    unknown += 1
+                elif key in ship_counts:
+                    row['apiPresence'] = {'status': 'matched', 'source': 'state.ships'}
+                    matched += 1
+                elif input_complete:
+                    row['apiPresence'] = {'status': 'missingInApi',
+                                          'source': 'state.ships'}
+                    missing += 1
+                else:
+                    row['apiPresence'] = {'status': 'unknown', 'source': 'state.ships',
+                                          'reason': 'inputIncomplete'}
+                    unknown += 1
+
+            map_sample = sampled.get('mapPosition') if isinstance(sampled, dict) else None
+            if isinstance(map_sample, dict):
+                map_row = dict(map_sample)
+            else:
+                map_row = {
+                    'status': 'unknown', 'source': 'dataHub.mapPosition',
+                    'componentStatus': 'ccKeyMissing' if CC is None else 'notSampled',
+                    'reason': 'ccUnavailable' if CC is None else 'notSampled',
+                    'freshness': 'unknown',
+                    'raw': [None, None], 'nx': None, 'ny': None,
+                }
+            if map_row.get('status') == 'available':
+                map_available += 1
+            row['mapPosition'] = map_row
+
+            health_sample = sampled.get('health') if isinstance(sampled, dict) else None
+            health_observation = (sampled.get('healthObservation')
+                                 if isinstance(sampled, dict) else None)
+            if isinstance(health_sample, dict):
+                raw = {name: _observation_scalar(health_sample.get(name))
+                       for name in ('value', 'max', 'isAlive')}
+                health_observation = (health_observation
+                                      if isinstance(health_observation, dict) else {})
+                field_status = dict(health_observation.get('fieldStatus', {}))
+                component_status = health_observation.get('componentStatus', 'unknown')
+                for name in raw:
+                    if health_sample.get(name) is not None and raw[name] is None:
+                        field_status[name] = 'unsafeScalar'
+                has_raw = any(raw[name] is not None for name in raw)
+                safe_normalized = None
+                normalizable = all(
+                    health_sample.get(name) is None or raw[name] is not None
+                    for name in ('value', 'max', 'isAlive'))
+                normalized = (normalize_ui_health(
+                    health_sample.get('value'), health_sample.get('max'),
+                    health_sample.get('isAlive')) if normalizable else None)
+                if isinstance(normalized, dict):
+                    safe_normalized = {}
+                    for name, value in normalized.items():
+                        safe_value = _observation_scalar(value)
+                        if safe_value is not None:
+                            safe_normalized[name] = safe_value
+                    if not safe_normalized:
+                        safe_normalized = None
+                health_status = 'available' if has_raw else 'unknown'
+            else:
+                raw = {'value': None, 'max': None, 'isAlive': None}
+                field_status = {'value': 'notSampled', 'max': 'notSampled',
+                                'isAlive': 'notSampled'}
+                component_status = 'ccKeyMissing' if CC is None else 'notSampled'
+                safe_normalized = None
+                health_status = 'unknown'
+            if health_status == 'available':
+                health_available += 1
+            row['health'] = {
+                'status': health_status,
+                'source': 'dataHub.avatar.health',
+                'componentStatus': component_status,
+                'fieldStatus': field_status,
+                'raw': raw,
+                'normalized': safe_normalized,
+            }
+            out_rows.append(row)
+
+        return {
+            'status': input_status,
+            'source': 'dataHub.getEntityCollections(avatar)',
+            'sampleTs': _observation_scalar(now),
+            'rows': out_rows,
+            'coverage': {
+                'sampledEntityCount': len(entities),
+                'inputStatus': input_status,
+                'inputComplete': input_complete,
+                'inputAvailability': ('unavailable' if avatar_snapshot.get(
+                    'reason') in ('getterError', 'none') else
+                    ('available' if input_status in ('complete', 'partial', 'truncated')
+                     else 'unknown')),
+                'reason': avatar_snapshot.get('reason'),
+                'limit': avatar_snapshot.get('limit'),
+                'distinctPlayerIdCount': len(observation_ids),
+                'apiMatchedCount': matched,
+                'missingInApiCount': missing,
+                'apiPresenceUnknownCount': unknown,
+                'unmatchableIdCount': unmatchable,
+                'duplicateIdConflictCount': len(conflicts),
+                'mapPositionAvailableCount': map_available,
+                'healthRawAvailableCount': health_available,
+            },
         }
 
     def _collect_avatar_health(self, entities=None):
@@ -2026,8 +2274,6 @@ class Collector(object):
         mpKey = _get(CC, 'mapPosition')
         avKey = _get(CC, 'avatar')
         visKey = _get(CC, 'visibility')
-        if avKey is None:
-            return out
         if avatar_entities is None:
             avatar_entities = _try(
                 lambda: dataHub.getEntityCollections('avatar'), []) or []
@@ -2035,100 +2281,143 @@ class Collector(object):
         sample = (_try(lambda: sample_reader(CC))
                   if sample_reader is not None else None)
         sample_rows = sample['rows'] if sample is not None else None
-        for index, entity in enumerate(avatar_entities or []):
-            if sample_rows is not None and index < len(sample_rows):
-                avatar = sample_rows[index].get('avatar')
-                if avatar is None:
-                    continue
-                pid = avatar.get('playerId')
-                if pid is None:
-                    pid = avatar.get('id')
-            else:
-                a = _try(lambda e=entity: e[avKey])
-                if a is None:
-                    continue
-                pid = _get(a, 'playerId')
-                if pid is None:
-                    pid = _get(a, 'id')
-            if pid is None:
-                continue
-            if (_get(self, '_diagnosticsEnabled', False) is not True or
-                    _get(self, '_diagnosticsSampleDue', True) is not True):
-                self._mapVisibility[pid] = {}
-                self._mapVisibilityDiagnostics[pid] = {
-                    'status': ('notSampled' if _get(
-                        self, '_diagnosticsEnabled', False) is True else 'disabled'),
-                    'source': ('scheduling' if _get(
-                        self, '_diagnosticsEnabled', False) is True else
-                        'config.diagnostics_enabled'), 'sampleTs': None}
-                comp = _try(lambda e=entity: e[mpKey]) if mpKey is not None else None
-                if comp is not None:
-                    xy = _point_xy(_get(comp, 'position'))
-                    if xy is not None:
-                        out[pid] = (xy[0], xy[1], _get(comp, 'yaw'))
-                continue
-            raw_visibility = {}
-            candidate_diagnostics = {}
-            vis = None
-            component_status = 'available'
-            if visKey is None:
+
+        def read_map_position(entity, sample_row, keep_map_yaw):
+            if mpKey is None:
+                component = None
                 component_status = 'ccKeyMissing'
             else:
                 try:
-                    vis = entity[visKey]
-                    if vis is None:
-                        component_status = 'componentMissing'
-                except KeyError:
-                    component_status = 'componentMissing'
-                except Exception:
-                    component_status = 'componentReadError'
-            for name in ('mapVisible', 'visible', 'isVisible', 'isShipVisible'):
-                source = 'dataHub.visibility.' + name
-                if component_status != 'available':
-                    candidate_diagnostics[name] = _visibility_observation(
-                        source, component_status, None, component_status)
-                    continue
-                missing = object()
-                try:
-                    if _is_mapping(vis):
-                        value = vis.get(name, missing)
-                    else:
-                        value = getattr(vis, name, missing)
-                    if value is missing:
-                        status = 'missing'
-                        reason = 'attributeMissing'
-                    elif value is None:
-                        status = 'none'
-                        reason = 'valueNone'
-                    elif isinstance(value, bool):
-                        status = 'available'
-                        reason = None
-                    else:
-                        status = 'nonBoolean'
-                        reason = ('nonFiniteNumber' if isinstance(value, float)
-                                  and _visibility_raw(value) is None else 'expectedBoolean')
-                    candidate_diagnostics[name] = _visibility_observation(
-                        source, status, value if value is not missing else None, reason)
-                    # Preserve the established raw scalar fields. Do not allow
-                    # NaN/Infinity to escape into JSON.
-                    if isinstance(value, (bool, int, long, float)):
-                        safe_value = _visibility_raw(value)
-                        if safe_value is not None:
-                            raw_visibility[name] = safe_value
-                except Exception:
-                    candidate_diagnostics[name] = _visibility_observation(
-                        source, 'readError', None, 'attributeReadException')
-            self._mapVisibility[pid] = raw_visibility
-            self._mapVisibilityDiagnostics[pid] = {
+                    component = entity[mpKey]
+                    component_status = ('componentMissing' if component is None
+                                        else 'available')
+                except Exception as error:
+                    component = None
+                    component_status = (
+                        'componentMissing' if _observation_exception_name(error)
+                        in ('KeyError', 'IndexError') else 'componentReadError')
+            position = None
+            position_status = component_status
+            xy = None
+            yaw = None
+            if component_status == 'available':
+                position, position_status = _observation_field(component, 'position')
+                if position_status == 'available':
+                    xy = _point_xy(position)
+                    if xy is None:
+                        position_status = 'invalidCoordinates'
+                    elif keep_map_yaw:
+                        yaw = _get(component, 'yaw')
+            raw = [None, None]
+            nx = ny = None
+            position_valid = False
+            if xy is not None:
+                raw = [_observation_scalar(xy[0]), _observation_scalar(xy[1])]
+                position_valid = raw[0] is not None and raw[1] is not None
+                if position_valid:
+                    normalized = _map_norm_xy(xy[0], xy[1])
+                    if normalized is not None:
+                        nx, ny = normalized
+                else:
+                    position_status = 'nonFiniteCoordinates'
+            map_row = {
+                'status': 'available' if position_valid else 'unknown',
+                'source': 'dataHub.mapPosition',
                 'componentStatus': component_status,
-                'candidates': candidate_diagnostics}
-            comp = _try(lambda e=entity: e[mpKey]) if mpKey is not None else None
-            if comp is None:
-                continue
-            xy = _point_xy(_get(comp, 'position'))
-            if xy is None:
-                continue
-            out[pid] = (xy[0], xy[1], _get(comp, 'yaw'))
+                'positionStatus': position_status,
+                'reason': None if position_valid else position_status,
+                'freshness': 'unknown',
+                'raw': raw,
+                'nx': nx,
+                'ny': ny,
+            }
+            if sample_row is not None:
+                sample_row['mapPosition'] = map_row
+            return (xy, yaw)
+
+        for index, entity in enumerate(avatar_entities or []):
+            sample_row = (sample_rows[index] if sample_rows is not None and
+                          index < len(sample_rows) else None)
+            if sample_rows is not None and index < len(sample_rows):
+                avatar = sample_row.get('avatar') if sample_row is not None else None
+                pid = avatar.get('playerId') if avatar is not None else None
+                if pid is None and avatar is not None:
+                    pid = avatar.get('id')
+            else:
+                a = (_try(lambda e=entity: e[avKey]) if avKey is not None else None)
+                pid = _get(a, 'playerId') if a is not None else None
+                if pid is None and a is not None:
+                    pid = _get(a, 'id')
+
+            if pid is not None:
+                if (_get(self, '_diagnosticsEnabled', False) is not True or
+                        _get(self, '_diagnosticsSampleDue', True) is not True):
+                    self._mapVisibility[pid] = {}
+                    self._mapVisibilityDiagnostics[pid] = {
+                        'status': ('notSampled' if _get(
+                            self, '_diagnosticsEnabled', False) is True else 'disabled'),
+                        'source': ('scheduling' if _get(
+                            self, '_diagnosticsEnabled', False) is True else
+                            'config.diagnostics_enabled'), 'sampleTs': None}
+                else:
+                    raw_visibility = {}
+                    candidate_diagnostics = {}
+                    vis = None
+                    visibility_component_status = 'available'
+                    if visKey is None:
+                        visibility_component_status = 'ccKeyMissing'
+                    else:
+                        try:
+                            vis = entity[visKey]
+                            if vis is None:
+                                visibility_component_status = 'componentMissing'
+                        except KeyError:
+                            visibility_component_status = 'componentMissing'
+                        except Exception:
+                            visibility_component_status = 'componentReadError'
+                    for name in ('mapVisible', 'visible', 'isVisible', 'isShipVisible'):
+                        source = 'dataHub.visibility.' + name
+                        if visibility_component_status != 'available':
+                            candidate_diagnostics[name] = _visibility_observation(
+                                source, visibility_component_status, None,
+                                visibility_component_status)
+                            continue
+                        missing = object()
+                        try:
+                            if _is_mapping(vis):
+                                value = vis.get(name, missing)
+                            else:
+                                value = getattr(vis, name, missing)
+                            if value is missing:
+                                status = 'missing'
+                                reason = 'attributeMissing'
+                            elif value is None:
+                                status = 'none'
+                                reason = 'valueNone'
+                            elif isinstance(value, bool):
+                                status = 'available'
+                                reason = None
+                            else:
+                                status = 'nonBoolean'
+                                reason = ('nonFiniteNumber' if isinstance(value, float)
+                                          and _visibility_raw(value) is None else 'expectedBoolean')
+                            candidate_diagnostics[name] = _visibility_observation(
+                                source, status, value if value is not missing else None, reason)
+                            if isinstance(value, (bool, int, long, float)):
+                                safe_value = _visibility_raw(value)
+                                if safe_value is not None:
+                                    raw_visibility[name] = safe_value
+                        except Exception:
+                            candidate_diagnostics[name] = _visibility_observation(
+                                source, 'readError', None, 'attributeReadException')
+                    self._mapVisibility[pid] = raw_visibility
+                    self._mapVisibilityDiagnostics[pid] = {
+                        'componentStatus': visibility_component_status,
+                        'candidates': candidate_diagnostics}
+
+            xy, yaw = read_map_position(entity, sample_row, pid is not None)
+            if pid is not None and xy is not None:
+                out[pid] = (xy[0], xy[1], yaw)
         return out
 
     @staticmethod

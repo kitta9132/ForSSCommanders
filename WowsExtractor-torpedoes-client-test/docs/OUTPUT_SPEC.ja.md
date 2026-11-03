@@ -2,6 +2,59 @@
 
 `0.3.25`は、0.3.24の`diag.playerReads`とindex join契約を維持します。`sampleStatus`（players一覧取得のcomplete/partial/unavailable、direct call時notProvided）、`indexHits`、`vehicleLookups`（試行数、成功数ではない）は引き続きships sample内の個別lookupだけを数え、新しいgame APIや時計読取りは追加しません。
 
+`0.3.26-avatar-observations`は`0.3.25`までの`ships`契約を維持し、同じframeでcaptureしたavatar entityの観測値を独立したトップレベル`avatarObservations`へ追加します。rosterからAPI艦行を合成せず、API列挙の範囲とavatar側で見えた値を混ぜません。
+
+## 0.3.26-avatar-observations
+
+```json
+{
+  "avatarObservations": {
+    "status": "complete",
+    "source": "dataHub.getEntityCollections(avatar)",
+    "sampleTs": 37.5,
+    "rows": [{
+      "playerId": 123,
+      "playerIdStatus": "available",
+      "apiPresence": {"status": "missingInApi", "source": "state.ships"},
+      "mapPosition": {
+        "status": "available", "source": "dataHub.mapPosition",
+        "componentStatus": "available", "positionStatus": "available",
+        "freshness": "unknown", "raw": [0.25, 0.75], "nx": 0.25, "ny": 0.75
+      },
+      "health": {
+        "status": "available", "source": "dataHub.avatar.health",
+        "componentStatus": "available",
+        "fieldStatus": {"value": "available", "max": "available", "isAlive": "available"},
+        "raw": {"value": 0, "max": 80000, "isAlive": true},
+        "normalized": {"health": 80000.0, "maxHealth": 80000.0, "untickedFull": true}
+      }
+    }],
+    "coverage": {
+      "sampledEntityCount": 24, "inputStatus": "complete", "inputComplete": true,
+      "inputAvailability": "available",
+      "reason": null, "limit": 256, "distinctPlayerIdCount": 24,
+      "apiMatchedCount": 20, "missingInApiCount": 4,
+      "apiPresenceUnknownCount": 0, "unmatchableIdCount": 0,
+      "duplicateIdConflictCount": 0, "mapPositionAvailableCount": 24,
+      "healthRawAvailableCount": 24
+    }
+  }
+}
+```
+
+- `status`はavatar captureの`complete` / `partial` / `truncated`を示し、各componentの充足を意味しません。`coverage.inputAvailability`はcollection取得自体の`available` / `unavailable` / `unknown`を示し、None/getter例外時はcapture status `partial`とreason `none`/`getterError`を維持します。`sampleTs`はこのstate buildの`now`で、前frame値を持ち越しません。rowsはcaptureできたentityのみで、ID不明でもraw fieldを観測できればそのrowを出します。
+- player join候補は厳密な`avatar.playerId`のみです。`avatar.id`、vehicle ID、roster名簿、team/type/nameから補完しません。整数0は有効、bool・None・空文字・非有限数・非scalarはjoin不能です。IDは型も含めて完全一致させます。非scalar IDを文字列化・`repr`変換して出力しません。
+- `apiPresence.status`は`matched` / `missingInApi` / `unknown`です。`missingInApi`は**このsnapshotに出力された`ships`行に厳密一致しなかった**という比較結果だけで、死亡・撃沈・失探・last seenや、上流APIでの非列挙を示しません。現行stateに`getAllShips()`取得成功・完全性のstatusはないため、API一覧の完全性やentity消失をこの値から断定しません。captureがpartial/truncatedで一致しないIDは`unknown`です。avatarまたはships側で同じplayerIdが重複した場合も`unknown` (`duplicateIdConflict`) とし、重複keyをjoinしません。
+- `coverage.distinctPlayerIdCount`は有効なavatar playerIdのdistinct数、`unmatchableIdCount`は有効なplayerIdがないcapture row数です。duplicate conflict countは重複したstrict ID値のdistinct数です。その他のcountはrow単位です。`mapPositionAvailableCount`は有限なraw x/yのあるrow数で、roster人数やentity列挙数から位置取得を推定しません。
+- `mapPosition`の`raw`は同じentityの`dataHub.mapPosition.position`を読んだ2D値、`nx`/`ny`は既存のminimap正規化候補です。rawが有限なら範囲外でも保持し、範囲検証できない`nx`/`ny`はnullです。`freshness: "unknown"`はゲームcomponentの鮮度保証がないことを表します。component欠測・CC key欠落・component/property例外・position欠測は`componentStatus` / `positionStatus` / `reason`に分け、未知を0へ置換しません。
+- `health.raw`は有限scalar等として安全にcopyできた`value` / `max` / `isAlive`そのものです。`fieldStatus`はcomponent/fieldのavailable・欠測・None・例外等を区別します。`normalized`は既存`normalize_ui_health`の結果を別枠で示し、raw 0かつraw `isAlive: true`をdeadへ変換しません（既存規則の`untickedFull`）。raw `isAlive: null`はnullのままです。rawが非scalar/nonfiniteなら出力せず`unsafeScalar`とします。
+- partial/truncated captureでも取得済みentityのraw map/health rowsを出しますが、既存ships向けhealth indexは従来どおり無効で、未観測分をalive/deadにしません。未取得 componentとcapture不足はrow statusとtop-level completenessで別々に読めます。
+- `avatarObservations`はdisabled時とbattle終端時には空rowsです。disabled出力は`status: "disabled"`、終端は`status: "notSampled"`で、この場合の`coverage.inputAvailability`も`notSampled`です。過去の行をCollector/module/globalへ保存しません。
+
+取得予算：既存の`dataHub.getEntityCollections('avatar')` captureを1回だけ共有し、新しいbattle/API getter、clock read、static roster scanは行いません。complete captureでは既存health sampleとmap loopが読んだmapPositionを共有し、観測row組立自体による追加field readはありません。同じentityのmapPosition component/positionは二度読みません。ただしstrict playerIdおよび従来map index用`avatar.id`の両方が欠け、従来map loopでskipしていたrowにもmapPositionを観測するため、そのrowごとにcomponent lookupを最大1回追加します。partial/truncatedの場合は既存health indexを作らない一方、capture済みrowのraw healthを見せるため`health.value/max/isAlive`を各row最大1回ずつsampleします（1 captured entityあたり最大3 property samples。既存attribute/item fallback以外のretryや追加getter/API callなし）。read失敗時のrow無制限fallbackはありません。これらはoffline fixtureで確認したread回数上限であり、新観測処理のruntime時間・FPS影響は未測定です。
+
+新しいprofiler phaseは追加しません。profiler有効時はavatar observation rowの組立を既存`ships` phase wrapper内の`_build_ships`直後に行い、そのphase時間に含めます。無効時はwrapper closureを作らず、既存ships builderとobservation builderを直接呼びます。mapPosition capture自体も従来どおりships処理内です。`avatar` phaseは既存capture/roster/healthのまま、snapshot/cycle合計には全処理が含まれます。source-only offline countはAPI getter回数維持（avatar 1、players info 1、full strict hit時vehicle lookup 0）と24 avatar/20 API shipsを確認します。FPS・実機API内部時間は未計測です。
+
 ## 0.3.25-player-field-budget
 
 players一覧をstrict indexにも使うstate buildでは、同じraw PlayerInfoについてdamage cacheとstrict indexが読む`playerId`/`id`、`shipId`/`vehicleId`/`vehicleID`、`teamId`をrow-localのaccess sampleで共有します。item accessとattribute accessの結果・例外は別々にmemoizeし、damage側の「item例外時のみattributeへfallback」とstrict側の「mapping itemがNoneならattributeも確認」をそれぞれ維持します。したがって、競合するmapping key／属性、None alias、raising getterでも解決ルールは同一です。値を一つの汎用getterへ強制統一はしません。getterが同一row内で呼出しごとに値を変える場合は最初の観測値を両consumerで共有します。
@@ -229,7 +282,8 @@ ATM由来の誘導・被発見状態はuiStateに分離し、type文字列から
 | `active` | bool | 収集器が戦闘中と認識しているか。明示的退場でfalse |
 | `ts` | 数値 | `utils.getTimeFromGameStart()`由来。Unix時刻ではない。取得不能時は0になり得る |
 | `self` | オブジェクトまたはnull | 既存の自艦情報 |
-| `ships` | 配列 | 既存の艦船情報。条件により最終目撃情報も含む |
+| `ships` | 配列 | `battle.getAllShips()`由来の既存艦船情報。avatarから合成しない |
+| `avatarObservations` | オブジェクト | 同一frameのcaptured avatar rowから得たstrict player ID・mapPosition・raw/normalized health・shipsとのstrict一致状況。`ships`とは独立 |
 | `torpedoes` | 配列 | 今回追加した魚雷の現在フレームの一覧 |
 | `identityCandidates` | オブジェクト | 同一snapshotのowner/target ID値一致候補。API契約ではなく、raw fieldを上書きしない（0.3.14） |
 | `torpedoStatus` | オブジェクト | 今回の魚雷一覧取得の状態 |
@@ -340,7 +394,7 @@ UI参照に基づくread-only診断であり、正式なPython/dataHub契約で�
 - `validationScope`はoffline根拠の範囲を明記します。魚雷はB10/B12/B14の2,014行・4 track・active/selfOnly/singleShipSnapshot、WaveHitはB27の439行・1 target・active/enemyTarget/sevenShipSnapshotです。敵魚雷、僚艦魚雷、多艦snapshot、cross-battle、self target、target切替は未確認（`notCovered`）です。
 - helper失敗時は`error=probeFailed`のunknown objectを返し、呼出し側の既存state・raw fieldを置き換えません。
 
-上表は通常フレームです。**終了フレームは軽量形**で、`schema`, `apiVersion`, `battleId`, `active`, `ts`, `ships`, `self`, `torpedoes`, `torpedoStatus`, `torpedoArmament`, `damage`を含みます。`ballistics`と`diag`はありません。`torpedoStatus.source`も終了フレームではありません。読み手は項目欠落を許容します。
+上表は通常フレームです。**終了フレームは軽量形**で、`schema`, `apiVersion`, `battleId`, `active`, `ts`, `ships`, `self`, `torpedoes`, `torpedoStatus`, `torpedoArmament`, `avatarObservations`, `damage`を含みます。`avatarObservations`は`status=notSampled`かつ空rowsで、前frameの値は保持しません。`ballistics`と`diag`はありません。`torpedoStatus.source`も終了フレームではありません。読み手は項目欠落を許容します。
 
 ### self（元プロジェクト継承）
 

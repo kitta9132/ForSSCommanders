@@ -38,6 +38,54 @@ def _entity_comp(entity, key):
         return None
 
 
+def _observation_exception_name(error):
+    """Read only an exception class name; never format the exception object."""
+    try:
+        return error.__class__.__name__
+    except Exception:
+        return ""
+
+
+def _entity_comp_observation(entity, key):
+    """Read one component while retaining bounded availability metadata."""
+    if entity is None or key is None:
+        return None, "ccKeyMissing"
+    try:
+        component = entity[key]
+    except Exception as error:
+        status = ("componentMissing" if _observation_exception_name(error)
+                  in ("KeyError", "IndexError") else "componentReadError")
+        return None, status
+    if component is None:
+        return None, "componentMissing"
+    return component, "available"
+
+
+def _field_observation(obj, name):
+    """Read a component field once per access path with safe failure labels."""
+    if obj is None:
+        return None, "componentMissing"
+    try:
+        value = getattr(obj, name)
+    except Exception as attribute_error:
+        try:
+            value = obj[name]
+        except Exception as item_error:
+            attribute_name = _observation_exception_name(attribute_error)
+            item_name = _observation_exception_name(item_error)
+            # _comp_get tries item access after any attribute failure. Keep that
+            # fallback, but only label normal absence as missing; a failed
+            # property getter or unexpected item error remains a readError.
+            normal_attribute_miss = attribute_name == "AttributeError"
+            normal_item_miss = item_name in (
+                "KeyError", "IndexError", "TypeError", "AttributeError")
+            return None, ("missing" if normal_attribute_miss and normal_item_miss
+                          else "readError")
+    if value is None:
+        return None, "none"
+    return value, "available"
+
+
 def _is_alive_flag(value):
     if value is False or value == 0:
         return False
@@ -146,14 +194,24 @@ def sample_avatar_ids(entity, cc):
     }
 
 
+def _sample_avatar_health(entity, cc):
+    """Read raw health once and return values plus observation metadata."""
+    health_key = _comp_get(cc, "health")
+    health, component_status = _entity_comp_observation(entity, health_key)
+    fields = {}
+    statuses = {}
+    for name in ("value", "max", "isAlive"):
+        value, status = _field_observation(health, name)
+        fields[name] = value
+        statuses[name] = status
+    return ({"value": fields["value"], "max": fields["max"],
+             "isAlive": fields["isAlive"]},
+            {"componentStatus": component_status, "fieldStatus": statuses})
+
+
 def sample_avatar_health(entity, cc):
     """Read the raw UI health fields once; normalize/index later."""
-    health = _entity_comp(entity, _comp_get(cc, "health"))
-    return {
-        "value": _comp_get(health, "value"),
-        "max": _comp_get(health, "max"),
-        "isAlive": _comp_get(health, "isAlive"),
-    }
+    return _sample_avatar_health(entity, cc)[0]
 
 
 def index_avatar_health_sample(rows):
@@ -202,15 +260,17 @@ class AvatarRows(list):
         return sample
 
     def sample_health(self, cc):
-        if not self.complete:
-            return []
+        # Partial captures still expose raw health for entities actually seen.
+        # They never create a health index: absence from an incomplete capture
+        # remains unknown rather than alive/dead.
         sample = self.sample_ids(cc)
         rows = sample["rows"]
         for index, entity in enumerate(self):
             row = rows[index]
             if "health" not in row:
-                row["health"] = sample_avatar_health(entity, cc)
-        return rows
+                row["health"], row["healthObservation"] = _sample_avatar_health(
+                    entity, cc)
+        return rows if self.complete else []
 
 
 def apply_ui_health(entry, index, for_unspotted=False):

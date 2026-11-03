@@ -24,6 +24,27 @@ def method(name, ns):
     return ns[name]
 
 
+def _fixture_avatar_observations(snapshot, now, ships):
+    return {'status': snapshot.get('status', 'unknown'), 'source': 'fixture',
+            'sampleTs': now, 'rows': [],
+            'coverage': {'sampledEntityCount': len(snapshot.get('entities', []))}}
+
+
+def _read_observation_field(obj, name):
+    try:
+        value = obj.get(name) if isinstance(obj, dict) else getattr(obj, name)
+    except Exception:
+        return None, 'missing'
+    return (value, 'available') if value is not None else (None, 'none')
+
+
+def _read_observation_exception_name(error):
+    try:
+        return error.__class__.__name__
+    except Exception:
+        return ''
+
+
 def test_config_is_opt_in_and_unknown_values_are_off():
     current = {}
     load = method('_load_config', {
@@ -155,7 +176,9 @@ def test_disabled_start_tick_double_start_and_quit_do_not_poll_game_apis():
     calls = []
     ns = {'_now': lambda: 7., 'SCHEMA_VERSION': 1, 'WIRE_API_VERSION': '1.0',
           'META_RETRY_SECONDS': 12., 'logInfo': calls.append,
-          '_try': lambda fn: fn(), 'callbacks': type('Callbacks', (), {
+          '_try': lambda fn: fn(),
+          '_empty_avatar_observations': lambda *args: {'rows': []},
+          'callbacks': type('Callbacks', (), {
               'perTick': staticmethod(lambda fn: calls.append('schedule')),
               'cancel': staticmethod(lambda h: calls.append('cancel'))})()}
     start = method('_start_collection', ns)
@@ -248,6 +271,7 @@ def test_diagnostics_off_builds_fresh_disabled_shapes_without_probe_calls():
     c._selfTeam = None
     c._capture_avatar_snapshot = lambda: {'entities': [], 'status': 'complete',
         'count': 0, 'limit': 256, 'reason': None}
+    c._build_avatar_observations = _fixture_avatar_observations
     c._remember_roster_vehicles = lambda entities: None
     c._collect_avatar_health = lambda entities: {}
     c._build_ships = lambda now, hp, entities, players: ([], {})
@@ -352,6 +376,12 @@ def test_24_avatar_core_outputs_match_independent_getters_and_share_one_call():
             '_get': lambda obj, key, default=None: (obj.get(key, default)
                 if isinstance(obj, dict) else getattr(obj, key, default)),
             '_is_mapping': lambda obj: isinstance(obj, dict), 'dataHub': hub, 'CC': cc,
+            '_observation_field': _read_observation_field,
+            '_observation_exception_name': _read_observation_exception_name,
+            '_observation_scalar': lambda value: value if isinstance(
+                value, (bool, int, float, str)) else None,
+            '_map_norm_xy': lambda x, y: [float(x), float(y)] if
+                0 <= float(x) <= 1 and 0 <= float(y) <= 1 else None,
             'battle': type('Battle', (), {'getPlayersInfo': lambda self: []})(),
             'roster_ids_from_avatar': lambda avatar, vehicle:
                 (avatar.get('playerId'), vehicle.get('id'), 1),
@@ -423,6 +453,7 @@ def test_build_state_shares_fresh_core_snapshot_even_when_diagnostics_off():
     captured = {'entities': rows, 'status': 'complete',
         'count': 24, 'limit': 256, 'reason': None}
     c._capture_avatar_snapshot = lambda: captured
+    c._build_avatar_observations = _fixture_avatar_observations
     player_sample = {'status': 'complete', 'index': {}}
     c._remember_roster_vehicles = lambda entities: (
         calls.append(('roster', entities)) or player_sample)
@@ -517,6 +548,7 @@ def test_main_state_reuses_actual_self_producers_once_and_never_across_frames():
     c._battleId, c._selfTeam = 'test', ns['_UNSET']
     c._capture_avatar_snapshot = lambda: {'entities': [], 'status': 'complete',
         'count': 0, 'limit': 256, 'reason': None}
+    c._build_avatar_observations = _fixture_avatar_observations
     c._remember_roster_vehicles = lambda entities: None
     c._collect_avatar_health = lambda entities: {}
     c._build_ships = lambda now, hp, entities, players: ([], {'totalShips': 0})
@@ -606,6 +638,14 @@ def _avatar_read_ns(cc):
             else getattr(obj, key, default)),
         '_is_mapping': lambda obj: isinstance(obj, dict),
         '_point_xy': lambda pt: [float(pt[0]), float(pt[1])],
+        '_observation_field': _read_observation_field,
+        '_observation_exception_name': _read_observation_exception_name,
+        '_observation_scalar': lambda value: value if isinstance(
+            value, (bool, int, float, str)) and not (
+                isinstance(value, float) and (value != value or abs(value) == float('inf')))
+            else None,
+        '_map_norm_xy': lambda x, y: [float(x), float(y)] if
+            0 <= float(x) <= 1 and 0 <= float(y) <= 1 else None,
         'CC': cc,
         'battle': type('Battle', (), {'getPlayersInfo': lambda self: []})(),
         'dataHub': object(),

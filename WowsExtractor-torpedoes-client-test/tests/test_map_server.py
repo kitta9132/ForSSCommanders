@@ -92,6 +92,25 @@ class MapServerTests(unittest.TestCase):
             self.assertTrue(result['stale'])
             self.assertEqual(result['data']['battleId'], 'good')
 
+    def test_unknown_avatar_observations_are_forwarded_separately_from_ships(self):
+        state = {
+            'active': True,
+            'ships': [{'playerId': 20, 'vehicleId': 2000}],
+            'avatarObservations': {
+                'status': 'complete',
+                'rows': [{'playerId': 24,
+                          'apiPresence': {'status': 'missingInApi'},
+                          'mapPosition': {'status': 'available'}}],
+            },
+            'futureUnknownField': {'kept': True},
+        }
+        self.write('state', state)
+        result = self.reader.snapshot()['state']['data']
+        self.assertEqual(result['ships'], state['ships'])
+        self.assertEqual(result['avatarObservations'], state['avatarObservations'])
+        self.assertEqual(result['futureUnknownField'], state['futureUnknownField'])
+        self.assertEqual(len(result['ships']), 1)  # no observation-to-ship merge
+
 
 if __name__ == '__main__':
     unittest.main()

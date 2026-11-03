@@ -1,11 +1,11 @@
 # WowsExtractor 魚雷出力版：実機テスト用パッケージ
 
 作成日：2026-11-03（日本時間）
-modバージョン：`0.3.25-player-field-budget` / ModsAPI：`API_v1.0`（source only・未導入）
+modバージョン：`0.3.26-avatar-observations` / ModsAPI：`API_v1.0`（source only・未導入）
 
 ## 最優先：性能報告と安全設定
 
-0.3.14導入後「自艦が沈むまでminFPS 25、撃沈後110まで回復」と報告されています。外部記録ツールは未使用とのことですが、mod内部のtick・state書込は別途戦闘中継続します。因果は未確定です。0.3.25-player-field-budgetはsource only・未導入です。`collection_enabled = false`、`diagnostics_enabled = false`、`profiler_enabled = false`、`position_fallbacks_enabled = false`の既定を維持し、state既定0.2秒（約5Hz）・0.1明示10Hz互換・全snapshot一体・meta 0.5秒gate・較正observe戻り値再利用も据え置きます。前版の同一state players index共有を維持し、同一raw PlayerInfoについてdamage登録とstrict indexが使うfield accessをrow-localに共有します。24行offline fixtureでは通常の`playerId`/`shipId`/`teamId` readsを144→72回、`ship.teamId`をhit/miss/diagnostic fallback各経路で最大1回にしました。player/damage出力、team 0、従来lookup fallbackを維持し、players getterは1回・normal full index hitのvehicle lookupは0回です。これはoffline read countでありFPS・実ゲーム時間・API内部時間の改善根拠ではありません。index不要のstart/direct経路は追加readなし、frame間cacheなしです。詳細：[性能事故記録](docs/PERFORMANCE_INCIDENT_0.3.14.ja.md)／[出力仕様](docs/OUTPUT_SPEC.ja.md)／[周期調査](docs/RESEARCH_COLLECTION_CADENCE_B31.ja.md)
+0.3.14導入後「自艦が沈むまでminFPS 25、撃沈後110まで回復」と報告されています。外部記録ツールは未使用とのことですが、mod内部のtick・state書込は別途戦闘中継続します。因果は未確定です。0.3.26-avatar-observationsはsource only・未導入です。collection/diagnostics/profiler/position fallback既定OFF、state既定0.2秒（約5Hz）・0.1明示10Hz互換・全snapshot一体を維持します。前版のplayers strict index／row-local field read共有を維持し、新しい`avatarObservations`は同frameのcaptured avatar raw/map/healthをAPI `ships`と独立出力します。rosterからships行を合成せず、strict `avatar.playerId`以外でjoinしません。partial/truncated時もcapture済みのraw行は出しますが、health indexを無効にし、API shipsで未一致のIDはunknownにします。24 avatar/20 API ships fixture、map 24/20/0 variant、ID競合・partial・CC欠測・getter予算をoffline確認しました。FPS・実ゲーム時間・API内部時間は未計測です。次回実機評価はavatar coverage・player budget・魚雷あり増分をまとめ、開始直後FPSは追いません。詳細：[出力仕様](docs/OUTPUT_SPEC.ja.md)／[性能事故記録](docs/PERFORMANCE_INCIDENT_0.3.14.ja.md)
 
 `config.ini` がない場合・読み込みに失敗した場合も収集停止です。明示的に `collection_enabled = true` のときだけ通常収集を開始します。重いUI/dataHub probeはさらに `diagnostics_enabled = true`、profilerは独立して `profiler_enabled = true` が必要です（どちらもcollection必須）。収集停止中はprofiler初期化clock callも0回で、probe/API poll・定期tickを行わず、戦闘開始時のdisabled stateと終了stateだけを書きます。core収集（既定0.2秒）およびarmament/public_dataの負荷は未評価です。
 

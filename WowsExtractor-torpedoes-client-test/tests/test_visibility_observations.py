@@ -38,7 +38,9 @@ def visibility_ns(**values):
           '_is_mapping': lambda obj: isinstance(obj, dict), 'long': int,
           '_INT_TYPES': (int,), '_STRING_TYPES': (str,)}
     for name in ('_visibility_type', '_visibility_raw', '_visibility_observation',
-                 '_strict_player_lookup_key'):
+                  '_strict_player_lookup_key', '_observation_scalar',
+                  '_observation_exception_name',
+                  '_observation_field', '_map_norm_xy'):
         source_function(name, ns)
     ns.update(values)
     return ns
