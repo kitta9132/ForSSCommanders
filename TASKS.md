@@ -2,6 +2,8 @@
 
 ## 緊急優先：通常プレイのFPS低下
 
+- 周期調査完了（2026-11-03、実装変更なし）：B31の艦＋avatarはcycleの約80.7%。第一候補は既存state_intervalによる全体5Hz化（未適用）、次に艦＋avatarの周期分離。単発負荷はavatar走査共有・同sample ID index・自艦重複getter・較正snapshot二重生成を検討。meta ID探索がstate gate／profiler開始前にperTickで走る経路も発見。装填／消耗品は停船でも変化しており静的cache不可。取得損失・鮮度契約・offline testsを含む詳細：[周期・負荷削減調査](WowsExtractor-torpedoes-client-test/docs/RESEARCH_COLLECTION_CADENCE_B31.ja.md)。mod退避継続、追加実機なし。
+- DSFFレビュー統合済み。同モデルの較正reservoir総当たり主因説は、早期returnとB31再生の平均32.26比較/state（最大45、reservoir25）から優先根拠に採用せず。meta全処理の計測外・診断dueのstate周期従属・低頻度化によるmotion/driftへの影響を調査資料に補記した。
 - 2026-11-03 B31後：クライアント停止を確認し、収集modの13ファイルをハッシュ照合してロード対象外へ退避済み。次は**一律10Hzの必要性と取得周期の分離**を優先検討する。B31のcycle平均10.893msを約10Hz実行しているが、時計の意味は未確定でCPU使用率・FPSへの換算はしない。頻度低下は総負荷と発生回数を減らす候補だが、1回の処理時間によるカクつきは別問題。まず既存の設定・イベント経路を調べ、静的情報と動的情報の周期、未取得／未sample／過去値の鮮度契約を設計する。追加実機は今は依頼しない。
 - B31（2026-11-03）：0.3.21・12隻でminFPS 45安定、カクつきが出始めたと報告。9窓の記録値はships平均6.849ms、avatar 1.938ms、cycle 10.893ms。拡張fallback 0でも未解消。**24隻への拡大は中止し、追加実機は依頼しない。** ships内部の取得・行構築を次の調査対象とする。[B31詳細](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_B31_0.3.21.ja.md)。
 - B30（2026-11-03）：0.3.21・1対1でminFPS 70～45と報告。7窓の記録時計上ではships平均1.303ms、snapshot平均2.918ms。全683艦行で地図座標を保持し、拡張探索0・coreDirectOnlyを確認。B28は24隻なのでコード単独の改善率・性能問題解消とは判定しない。追加12対12は依頼しない。詳細：[B30](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_B30_0.3.21.ja.md)。
