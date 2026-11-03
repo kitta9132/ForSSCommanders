@@ -117,6 +117,102 @@ def index_avatar_health(entities, cc):
     return index
 
 
+def _plain_fields(obj, names):
+    """Copy selected component properties into a plain dict.
+
+    Missing/None/raising properties are omitted, which is the same value the
+    legacy per-consumer readers observe. 0 and False are real values here and
+    must survive (playerId/teamId can legitimately be 0 in these APIs).
+    """
+    if obj is None:
+        return None
+    out = {}
+    for name in names:
+        value = _comp_get(obj, name)
+        if value is not None:
+            out[name] = value
+    return out
+
+
+def sample_avatar_ids(entity, cc):
+    """Read the avatar/vehicle ids needed by roster, health and map joins once."""
+    avatar_key = _comp_get(cc, "avatar")
+    vehicle_key = _comp_get(cc, "vehicle")
+    return {
+        "avatar": _plain_fields(
+            _entity_comp(entity, avatar_key),
+            ("playerId", "id", "teamId", "shipId")),
+        "vehicle": _plain_fields(_entity_comp(entity, vehicle_key), ("id",)),
+    }
+
+
+def sample_avatar_health(entity, cc):
+    """Read the raw UI health fields once; normalize/index later."""
+    health = _entity_comp(entity, _comp_get(cc, "health"))
+    return {
+        "value": _comp_get(health, "value"),
+        "max": _comp_get(health, "max"),
+        "isAlive": _comp_get(health, "isAlive"),
+    }
+
+
+def index_avatar_health_sample(rows):
+    """Build the same health index from pre-read sample rows.
+
+    Kept separate from ``index_avatar_health`` so the standalone entity reader
+    stays byte-for-byte compatible, while the shared path uses the same
+    normalize and alias helpers.
+    """
+    index = {}
+    for row in rows or ():
+        health = row.get("health") or {}
+        rec = normalize_ui_health(
+            health.get("value"), health.get("max"), health.get("isAlive"))
+        if rec is None:
+            continue
+        for alias in _alias_ids(row.get("avatar"), row.get("vehicle")):
+            index[alias] = rec
+    return index
+
+
+class AvatarRows(list):
+    """One captured avatar list plus its state-local plain-data sample.
+
+    The sample is built once by the first core consumer (roster, health or map
+    positions) and lives only on this captured list. It is never stored on the
+    Collector, so a later frame cannot reuse stale ids/health. ``complete`` is
+    False for partial/truncated captures, where absence of a health row must
+    not become an alive/dead assertion even if the health reader is called
+    directly.
+    """
+
+    def __init__(self, rows=(), complete=True):
+        list.__init__(self, rows)
+        self._sample = None
+        self.complete = complete
+
+    def sample_ids(self, cc):
+        sample = self._sample
+        if sample is None:
+            rows = []
+            for entity in self:
+                rows.append(sample_avatar_ids(entity, cc))
+            sample = {"rows": rows}
+            self._sample = sample
+        return sample
+
+    def sample_health(self, cc):
+        if not self.complete:
+            return []
+        sample = self.sample_ids(cc)
+        rows = sample["rows"]
+        for index, entity in enumerate(self):
+            row = rows[index]
+            if "health" not in row:
+                row["health"] = sample_avatar_health(entity, cc)
+        return rows
+
+
 def apply_ui_health(entry, index, for_unspotted=False):
     """Fill missing health / maxHealth on a ship or self dict. Returns entry.
 

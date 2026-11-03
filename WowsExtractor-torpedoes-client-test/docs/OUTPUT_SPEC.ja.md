@@ -1,5 +1,17 @@
 # WowsExtractor 魚雷出力版（WoWSクライアント用mod）
 
+## 0.3.23-avatar-read-sharing
+
+同一state build内のavatar collectionは従来どおり1回だけ取得します。この版はcollection getter回数を減らしたのではなく、その同じcaptured rowsに対するavatar/vehicle/healthのcomponent・ID property読取りを、roster・health・map positionの3用途で共有する変更です。captureは`complete`/`partial`/`truncated`のstatusとcount/limit/reasonを維持し、新しいJSON fieldは追加していません。
+
+共有sampleはcaptured list自身にだけ遅延生成するplain-data（avatar/vehicleのID、healthのvalue/max/isAlive）で、`Collector`・module global・次frameへ保存しません。次frameは新しいcaptureから再生成し、前frameのsampleを再利用しません。既存の`index_avatar_health(entities, cc)`単独呼出し、`_remember_roster_vehicles()`/`_collect_map_positions()`の引数省略direct call・イベント経路は維持し、その場合は従来どおり各consumerが必要な分だけ読みます。rosterは従来どおり`avatar.playerId`だけをdamage vehicle cacheのplayer keyに使い、`avatar.id`をplayer IDとしてjoinしません。health indexのaliasは従来と同じ`avatar.playerId` / `avatar.id` / `vehicle.id`で、`untickedFull`・`isAlive`・死亡0・max保持の正規化も変更しません。
+
+24行のoffline fixtureで、同じ3用途を個別に読む従来経路はcomponent key access 168回＋ID/health/property access 288回（合計456回）、共有sample経路は96回＋240回（合計336回）です。これはoffline doubles上の読取り回数であり、実ゲームのAPI内部時間・FPS・処理時間の改善を意味しません。`_capture_avatar_snapshot`のgetterは1回のままで、collection API呼出しの削減は主張しません。
+
+partial/truncated snapshotでは、captured rows自身がincomplete状態を持ち、health readerを直接呼んでもindexを空にして未観測rowをalive/deadの根拠にしません。rosterとmap positionは観測済みrowだけを処理し、地図座標の保持と欠落時のunknown/fallback規則を変えません。`CC`がNone、component欠測、property読取り例外は各fieldでunknownとして局所化し、推測joinやteam 0の補完は行いません。
+
+phaseの意味は維持します。avatar phaseはcapture・roster・health、ships phaseはship builderとmapPosition/visibilityです。avatar/vehicle/healthの読取りがavatar phase内の1回に集約され、ships phaseはavatar IDを再読しません。profilerの`avatar`/`ships`は包含phaseのままで、合計時間として加算しません。群別scheduler、players API lookupの削減、位置のframe間cacheはこの版のscope外です。moduleは既存9個のままで、source only・未導入、FPS未計測です。取得項目・出力coverageは変わりません。
+
 ## 0.3.22-cadence-budget
 
 `state_interval`の既定を0.2秒（約5Hz）へ変更しました。`collection_enabled=true`時のstate取得・行構築・JSON書込みは、引き続き1つのsnapshotとして同じdueで実行し、群別周期やframe間の位置cacheは導入していません。`state_interval`を明示的に`0.1`にした場合は従来の約10Hz互換で、取得範囲・出力項目は変わりません。collection/diagnostics/profiler/position fallbackの既定OFFも維持します。

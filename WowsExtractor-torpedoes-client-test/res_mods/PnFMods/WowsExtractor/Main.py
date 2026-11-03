@@ -6,7 +6,7 @@
 
 API_VERSION = 'API_v1.0'
 MOD_NAME = 'WowsExtractor'
-MOD_VERSION = '0.3.22-cadence-budget'
+MOD_VERSION = '0.3.23-avatar-read-sharing'
 
 # ---------------------------------------------------------------------------
 # WowsExtractor -- in-game data collector for the "8111 for WoWS" project.
@@ -58,9 +58,13 @@ except:
     from emit_guard import should_write_state
 
 try:
-    from .ui_health import apply_ui_health, index_avatar_health
+    from .ui_health import (
+        AvatarRows, apply_ui_health, index_avatar_health,
+        index_avatar_health_sample)
 except:
-    from ui_health import apply_ui_health, index_avatar_health
+    from ui_health import (
+        AvatarRows, apply_ui_health, index_avatar_health,
+        index_avatar_health_sample)
 
 try:
     from .torpedo_telemetry import (TorpedoTelemetry, ui_torpedo_probe,
@@ -1020,6 +1024,15 @@ class Collector(object):
         if avatar_entities is None:
             avatar_entities = _try(
                 lambda: dataHub.getEntityCollections('avatar'), []) or []
+        sample_reader = getattr(avatar_entities, 'sample_ids', None)
+        sample = (_try(lambda: sample_reader(CC))
+                  if sample_reader is not None else None)
+        if sample is not None:
+            for row in sample['rows']:
+                rec = roster_ids_from_avatar(row.get('avatar'), row.get('vehicle'))
+                if rec is not None:
+                    self._damage.remember(rec[0], rec[1], rec[2])
+            return
         for entity in avatar_entities or []:
             avatar = _try(lambda e=entity, k=av_key: e[k])
             vehicle = _try(lambda e=entity, k=veh_key: e[k]) if veh_key is not None else None
@@ -1434,7 +1447,7 @@ class Collector(object):
         if entities is None:
             return {'entities': [], 'status': 'partial', 'count': 0,
                     'limit': limit, 'reason': 'none'}
-        rows = []
+        rows = AvatarRows(complete=False)
         try:
             for index, entity in enumerate(entities):
                 if index >= limit:
@@ -1446,6 +1459,7 @@ class Collector(object):
             return {'entities': rows, 'status': 'partial',
                     'count': len(rows), 'limit': limit,
                     'reason': 'iterationError'}
+        rows.complete = True
         return {'entities': rows, 'status': 'complete',
                 'count': len(rows), 'limit': limit, 'reason': None}
 
@@ -1632,6 +1646,10 @@ class Collector(object):
         """Live HP from the same dataHub `health` component TTaroTeamPanel binds."""
         if CC is None:
             return {}
+        sample_reader = getattr(entities, 'sample_health', None)
+        if sample_reader is not None:
+            return index_avatar_health_sample(
+                _try(lambda: sample_reader(CC)) or [])
         if entities is None:
             entities = _try(lambda: dataHub.getEntityCollections('avatar'), []) or []
         return index_avatar_health(entities, CC)
@@ -1819,13 +1837,25 @@ class Collector(object):
         if avatar_entities is None:
             avatar_entities = _try(
                 lambda: dataHub.getEntityCollections('avatar'), []) or []
-        for entity in avatar_entities or []:
-            a = _try(lambda e=entity: e[avKey])
-            if a is None:
-                continue
-            pid = _get(a, 'playerId')
-            if pid is None:
-                pid = _get(a, 'id')
+        sample_reader = getattr(avatar_entities, 'sample_ids', None)
+        sample = (_try(lambda: sample_reader(CC))
+                  if sample_reader is not None else None)
+        sample_rows = sample['rows'] if sample is not None else None
+        for index, entity in enumerate(avatar_entities or []):
+            if sample_rows is not None and index < len(sample_rows):
+                avatar = sample_rows[index].get('avatar')
+                if avatar is None:
+                    continue
+                pid = avatar.get('playerId')
+                if pid is None:
+                    pid = avatar.get('id')
+            else:
+                a = _try(lambda e=entity: e[avKey])
+                if a is None:
+                    continue
+                pid = _get(a, 'playerId')
+                if pid is None:
+                    pid = _get(a, 'id')
             if pid is None:
                 continue
             if (_get(self, '_diagnosticsEnabled', False) is not True or

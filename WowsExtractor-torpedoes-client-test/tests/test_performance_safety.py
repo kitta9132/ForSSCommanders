@@ -4,6 +4,9 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] /
                       'res_mods/PnFMods/WowsExtractor'))
 from performance_profiler import PerformanceProfiler
+from ui_health import (
+    AvatarRows, index_avatar_health, index_avatar_health_sample)
+from damage_tracker import roster_ids_from_avatar
 
 
 SOURCE = (Path(__file__).resolve().parents[1] /
@@ -277,17 +280,20 @@ def test_core_avatar_capture_is_bounded_fresh_and_preserves_failure_status():
     calls = []
     source = list(range(256))
     ns = {'dataHub': type('Hub', (), {'getEntityCollections':
-        lambda self, name: calls.append(name) or source})()}
+        lambda self, name: calls.append(name) or source})(),
+        'AvatarRows': AvatarRows}
     capture = method('_capture_avatar_snapshot', ns)
     snap = capture(type('C', (), {})())
     assert snap == {'entities': source, 'status': 'complete', 'count': 256,
                     'limit': 256, 'reason': None}
+    assert snap['entities'].complete is True
     assert calls == ['avatar']
 
     source.append(256)
     next_snap = capture(type('C', (), {})())
     assert next_snap['status'] == 'truncated' and next_snap['count'] == 256
     assert next_snap['entities'] == source[:256]
+    assert next_snap['entities'].complete is False
     assert calls == ['avatar', 'avatar']  # no cross-frame reuse
 
     ns['dataHub'].getEntityCollections = lambda name: []
@@ -306,6 +312,7 @@ def test_core_avatar_capture_is_bounded_fresh_and_preserves_failure_status():
     ns['dataHub'].getEntityCollections = lambda name: broken_rows()
     partial = capture(type('C', (), {})())
     assert partial['entities'] == ['first']
+    assert partial['entities'].complete is False
     assert partial['status'] == 'partial' and partial['reason'] == 'iterationError'
 
 
@@ -544,3 +551,186 @@ def test_main_state_reuses_actual_self_producers_once_and_never_across_frames():
     assert calls['observer'] == 2
     assert 'teamId' not in third['self']
     assert third['torpedoArmament']['available'] is False
+
+class _ReadCounter(object):
+    def __init__(self):
+        self.components = 0
+        self.properties = 0
+
+
+class _CountedComp(object):
+    def __init__(self, counter, **fields):
+        self._counter = counter
+        self._fields = fields
+
+    def __getattr__(self, name):
+        if name not in self._fields:
+            raise AttributeError(name)
+        self._counter.properties += 1
+        return self._fields[name]
+
+
+class _CountedEntity(object):
+    def __init__(self, counter, components):
+        self._counter = counter
+        self._components = components
+
+    def __getitem__(self, key):
+        self._counter.components += 1
+        return self._components[key]
+
+
+def _avatar_read_rows(counter, count=24):
+    rows = []
+    for pid in range(1, count + 1):
+        rows.append(_CountedEntity(counter, {
+            'avatar': _CountedComp(
+                counter, playerId=pid, id=100000 + pid,
+                teamId=1 if pid % 2 else 0, shipId=2000 + pid),
+            'vehicle': _CountedComp(counter, id=2000 + pid),
+            'health': _CountedComp(counter, value=1000 - pid, max=1000,
+                                   isAlive=True),
+            'mapPosition': _CountedComp(
+                counter, position=(pid / 100.0, pid / 200.0), yaw=pid),
+        }))
+    return rows
+
+
+def _avatar_read_ns(cc):
+    ns = {
+        '_try': _attempt,
+        '_get': lambda obj, key, default=None: (
+            obj.get(key, default) if isinstance(obj, dict)
+            else getattr(obj, key, default)),
+        '_is_mapping': lambda obj: isinstance(obj, dict),
+        '_point_xy': lambda pt: [float(pt[0]), float(pt[1])],
+        'CC': cc,
+        'battle': type('Battle', (), {'getPlayersInfo': lambda self: []})(),
+        'dataHub': object(),
+        'roster_ids_from_avatar': roster_ids_from_avatar,
+        'index_avatar_health': index_avatar_health,
+        'index_avatar_health_sample': index_avatar_health_sample,
+    }
+    method('_remember_roster_vehicles', ns)
+    method('_collect_avatar_health', ns)
+    method('_collect_map_positions', ns)
+    return ns
+
+
+class _AvatarDamage(object):
+    def __init__(self):
+        self.rows = []
+
+    def remember(self, *args):
+        self.rows.append(args)
+
+
+def _avatar_collector():
+    return type('C', (), {
+        '_damage': _AvatarDamage(),
+        '_diagnosticsEnabled': False, '_diagnosticsSampleDue': False,
+        '_mapVisibility': {}, '_mapVisibilityDiagnostics': {}})()
+
+
+def test_avatar_sample_24_rows_reduces_component_and_id_reads_once():
+    cc = type('CC', (), {
+        'avatar': 'avatar', 'vehicle': 'vehicle', 'health': 'health',
+        'mapPosition': 'mapPosition', 'visibility': 'visibility'})()
+    ns = _avatar_read_ns(cc)
+    legacy_reads = _ReadCounter()
+    legacy_rows = _avatar_read_rows(legacy_reads)
+    legacy_collector = _avatar_collector()
+    ns['_remember_roster_vehicles'](legacy_collector, legacy_rows)
+    legacy_hp = ns['_collect_avatar_health'](legacy_collector, legacy_rows)
+    legacy_maps = ns['_collect_map_positions'](legacy_collector, legacy_rows)
+    # 2+3+2 component reads and 3+6+3 id/property reads per row.
+    assert legacy_reads.components == 168
+    assert legacy_reads.properties == 288
+
+    shared_reads = _ReadCounter()
+    holder = AvatarRows(_avatar_read_rows(shared_reads))
+    shared_collector = _avatar_collector()
+    ns['_remember_roster_vehicles'](shared_collector, holder)
+    shared_hp = ns['_collect_avatar_health'](shared_collector, holder)
+    shared_maps = ns['_collect_map_positions'](shared_collector, holder)
+    # avatar+vehicle+health+mapPosition components once; ids/health/yaw once.
+    assert shared_reads.components == 96
+    assert shared_reads.properties == 240
+    assert legacy_reads.components + legacy_reads.properties == 456
+    assert shared_reads.components + shared_reads.properties == 336
+    assert legacy_collector._damage.rows == shared_collector._damage.rows
+    assert legacy_hp == shared_hp
+    assert legacy_maps == shared_maps
+    assert len(shared_collector._damage.rows) == 24
+    assert (2002, 2, 0) in shared_collector._damage.rows
+    assert shared_hp[1]['health'] == 999
+    assert shared_maps[1] == (0.01, 0.005, 1)
+
+
+def test_partial_avatar_rows_keep_map_and_roster_but_skip_health_index():
+    cc = type('CC', (), {
+        'avatar': 'avatar', 'vehicle': 'vehicle', 'health': 'health',
+        'mapPosition': 'mapPosition', 'visibility': 'visibility'})()
+    ns = _avatar_read_ns(cc)
+    reads = _ReadCounter()
+    holder = AvatarRows(_avatar_read_rows(reads, count=2))
+    collector = _avatar_collector()
+    ns['_remember_roster_vehicles'](collector, holder)
+    # _build_state passes [] for partial/truncated snapshots: absence must not
+    # become dead/alive and the health index stays empty.
+    assert ns['_collect_avatar_health'](collector, []) == {}
+    maps = ns['_collect_map_positions'](collector, holder)
+    assert maps == {1: (0.01, 0.005, 1), 2: (0.02, 0.01, 2)}
+    assert len(collector._damage.rows) == 2
+    assert collector._mapVisibility == {1: {}, 2: {}}
+
+
+def test_shared_sample_missing_components_cc_none_and_no_next_frame_reuse():
+    cc = type('CC', (), {
+        'avatar': 'avatar', 'vehicle': 'vehicle', 'health': 'health',
+        'mapPosition': 'mapPosition', 'visibility': 'visibility'})()
+    ns = _avatar_read_ns(cc)
+
+    class Broken(object):
+        def __getitem__(self, key):
+            raise RuntimeError('component unavailable')
+
+    readable = _CountedEntity(_ReadCounter(), {
+        'avatar': _CountedComp(_ReadCounter(), playerId=5),
+        'health': _CountedComp(_ReadCounter(), value=5, max=10,
+                               isAlive=True),
+        'mapPosition': _CountedComp(
+            _ReadCounter(), position=(0.5, 0.5), yaw=0)})
+    holder = AvatarRows([Broken(), readable])
+    collector = _avatar_collector()
+    ns['_remember_roster_vehicles'](collector, holder)
+    hp = ns['_collect_avatar_health'](collector, holder)
+    maps = ns['_collect_map_positions'](collector, holder)
+    assert hp == {5: {'health': 5, 'maxHealth': 10}}
+    assert maps == {5: (0.5, 0.5, 0)}
+    assert collector._damage.rows == []
+
+    # A later empty capture must not reuse the previous holder's sample.
+    empty = AvatarRows([])
+    next_collector = _avatar_collector()
+    ns['_remember_roster_vehicles'](next_collector, empty)
+    assert ns['_collect_avatar_health'](next_collector, empty) == {}
+    assert ns['_collect_map_positions'](next_collector, empty) == {}
+    assert next_collector._damage.rows == []
+    assert holder._sample is not None and empty._sample is not None
+
+    ns['CC'] = None
+    ns['_remember_roster_vehicles'](next_collector, empty)
+    assert ns['_collect_avatar_health'](next_collector, empty) == {}
+    assert ns['_collect_map_positions'](next_collector, empty) == {}
+
+
+def test_collection_off_tick_never_builds_avatar_state():
+    calls = []
+    tick = method('_tick', {'_now': lambda: 1.0})
+    c = type('C', (), {})()
+    c._active = True
+    c._collectionEnabled = False
+    c._build_state = lambda now: calls.append(now)
+    tick(c)
+    assert calls == []
