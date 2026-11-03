@@ -4,7 +4,9 @@
 
 `0.3.26-avatar-observations`は`0.3.25`までの`ships`契約を維持し、同じframeでcaptureしたavatar entityの観測値を独立したトップレベル`avatarObservations`へ追加します。rosterからAPI艦行を合成せず、API列挙の範囲とavatar側で見えた値を混ぜません。
 
-## 0.3.26-avatar-observations
+`0.3.27-avatar-id-candidates`は、B37で実機取得できなかったstrict `avatar.playerId`の代替joinを行わず、既存sample済みの`avatar.id`をnamespace付きの未確定candidateとして別出力します。same-snapshotのships playerIdとの厳密scalar一致は匿名countだけで記録し、confirmed coverageとは分離します。
+
+## 0.3.27-avatar-id-candidates
 
 ```json
 {
@@ -16,6 +18,12 @@
       "playerId": 123,
       "playerIdStatus": "available",
       "apiPresence": {"status": "missingInApi", "source": "state.ships"},
+      "identifierCandidates": {
+        "avatarId": {
+          "source": "dataHub.avatar.id", "namespace": "avatar.id",
+          "status": "available", "raw": 456, "semantics": "unverified"
+        }
+      },
       "mapPosition": {
         "status": "available", "source": "dataHub.mapPosition",
         "componentStatus": "available", "positionStatus": "available",
@@ -29,6 +37,16 @@
         "normalized": {"health": 80000.0, "maxHealth": 80000.0, "untickedFull": true}
       }
     }],
+    "candidateConsistency": {
+      "source": "sameSnapshot.avatar.id == state.ships[].playerId",
+      "candidateNamespace": "avatar.id", "comparedNamespace": "ships[].playerId",
+      "comparison": "strictScalarTypeAndValue", "semantics": "unverified",
+      "avatarInputComplete": true, "shipsCompleteness": "unknown",
+      "candidateAvailableCount": 24, "candidateExactValueMatchCount": 12,
+      "candidateUnmatchedInSnapshotCount": 8, "candidateAmbiguousCount": 4,
+      "candidateUnknownCount": 0, "duplicateAvatarIdCount": 2,
+      "duplicateShipPlayerIdCount": 1
+    },
     "coverage": {
       "sampledEntityCount": 24, "inputStatus": "complete", "inputComplete": true,
       "inputAvailability": "available",
@@ -42,6 +60,14 @@
 }
 ```
 
+`identifierCandidates.avatarId`は同一frameの既存`AvatarRows.sample_ids()`に含まれる`avatar.id`のcandidateです。validな有限scalar ID（boolを除く）だけ`raw`を出し、0を保持します。None／欠落／field read status未保存は`status=unknown, reason=notRecorded`、bool・非finite・空文字・非scalar等は`status=unknown, reason=invalidId`としてraw値を出しません。例外文字列や`repr`は出力しません。sample後にゲームcomponentを読み直しません。
+
+`candidateConsistency`は候補値と同snapshotの出力`ships[].playerId`を型・値とも厳密に比較した匿名row countです。`candidateExactValueMatchCount`、`candidateUnmatchedInSnapshotCount`、`candidateAmbiguousCount`、`candidateUnknownCount`は相互排他的にcaptured avatar rowを分類します。重複ID countは重複したdistinct keyの数です。未一致は「この出力snapshotのstrict-valid ship playerIdに値一致がない」というだけで、API上流での不在を意味しません。候補値は`ships`へjoinせず、`playerId`、`apiPresence`、既存`coverage`の全count・意味を変更しません。candidate一致はidentity namespaceの確定でもありません。partial/truncated captureでは`avatarInputComplete=false`を維持し、ships一覧の完全性はunknownです。disabled/notSampled時も同じ形のzero count summaryを出します。
+
+## 0.3.26-avatar-observations
+
+0.3.26から維持する出力・confirmed coverage契約は次のとおりです。
+
 - `status`はavatar captureの`complete` / `partial` / `truncated`を示し、各componentの充足を意味しません。`coverage.inputAvailability`はcollection取得自体の`available` / `unavailable` / `unknown`を示し、None/getter例外時はcapture status `partial`とreason `none`/`getterError`を維持します。`sampleTs`はこのstate buildの`now`で、前frame値を持ち越しません。rowsはcaptureできたentityのみで、ID不明でもraw fieldを観測できればそのrowを出します。
 - player join候補は厳密な`avatar.playerId`のみです。`avatar.id`、vehicle ID、roster名簿、team/type/nameから補完しません。整数0は有効、bool・None・空文字・非有限数・非scalarはjoin不能です。IDは型も含めて完全一致させます。非scalar IDを文字列化・`repr`変換して出力しません。
 - `apiPresence.status`は`matched` / `missingInApi` / `unknown`です。`missingInApi`は**このsnapshotに出力された`ships`行に厳密一致しなかった**という比較結果だけで、死亡・撃沈・失探・last seenや、上流APIでの非列挙を示しません。現行stateに`getAllShips()`取得成功・完全性のstatusはないため、API一覧の完全性やentity消失をこの値から断定しません。captureがpartial/truncatedで一致しないIDは`unknown`です。avatarまたはships側で同じplayerIdが重複した場合も`unknown` (`duplicateIdConflict`) とし、重複keyをjoinしません。
@@ -51,7 +77,7 @@
 - partial/truncated captureでも取得済みentityのraw map/health rowsを出しますが、既存ships向けhealth indexは従来どおり無効で、未観測分をalive/deadにしません。未取得 componentとcapture不足はrow statusとtop-level completenessで別々に読めます。
 - `avatarObservations`はdisabled時とbattle終端時には空rowsです。disabled出力は`status: "disabled"`、終端は`status: "notSampled"`で、この場合の`coverage.inputAvailability`も`notSampled`です。過去の行をCollector/module/globalへ保存しません。
 
-取得予算：既存の`dataHub.getEntityCollections('avatar')` captureを1回だけ共有し、新しいbattle/API getter、clock read、static roster scanは行いません。complete captureでは既存health sampleとmap loopが読んだmapPositionを共有し、観測row組立自体による追加field readはありません。同じentityのmapPosition component/positionは二度読みません。ただしstrict playerIdおよび従来map index用`avatar.id`の両方が欠け、従来map loopでskipしていたrowにもmapPositionを観測するため、そのrowごとにcomponent lookupを最大1回追加します。partial/truncatedの場合は既存health indexを作らない一方、capture済みrowのraw healthを見せるため`health.value/max/isAlive`を各row最大1回ずつsampleします（1 captured entityあたり最大3 property samples。既存attribute/item fallback以外のretryや追加getter/API callなし）。read失敗時のrow無制限fallbackはありません。これらはoffline fixtureで確認したread回数上限であり、新観測処理のruntime時間・FPS影響は未測定です。
+取得予算：既存の`dataHub.getEntityCollections('avatar')` captureを1回だけ共有し、新しいbattle/API getter、clock read、static roster scanは行いません。0.3.27 candidateは既存sampleにある`avatar.id`を再利用し、ID property/componentの追加readをしません。complete captureでは既存health sampleとmap loopが読んだmapPositionを共有し、観測row組立自体による追加field readはありません。同じentityのmapPosition component/positionは二度読みません。ただしstrict playerIdおよび従来map index用`avatar.id`の両方が欠け、従来map loopでskipしていたrowにもmapPositionを観測するため、そのrowごとにcomponent lookupを最大1回追加します。partial/truncatedの場合は既存health indexを作らない一方、capture済みrowのraw healthを見せるため`health.value/max/isAlive`を各row最大1回ずつsampleします（1 captured entityあたり最大3 property samples。既存attribute/item fallback以外のretryや追加getter/API callなし）。read失敗時のrow無制限fallbackはありません。これらはoffline fixtureで確認したread回数上限であり、新観測処理のruntime時間・FPS影響は未測定です。
 
 新しいprofiler phaseは追加しません。profiler有効時はavatar observation rowの組立を既存`ships` phase wrapper内の`_build_ships`直後に行い、そのphase時間に含めます。無効時はwrapper closureを作らず、既存ships builderとobservation builderを直接呼びます。mapPosition capture自体も従来どおりships処理内です。`avatar` phaseは既存capture/roster/healthのまま、snapshot/cycle合計には全処理が含まれます。source-only offline countはAPI getter回数維持（avatar 1、players info 1、full strict hit時vehicle lookup 0）と24 avatar/20 API shipsを確認します。FPS・実機API内部時間は未計測です。
 

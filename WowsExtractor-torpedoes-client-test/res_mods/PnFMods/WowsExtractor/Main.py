@@ -6,7 +6,7 @@
 
 API_VERSION = 'API_v1.0'
 MOD_NAME = 'WowsExtractor'
-MOD_VERSION = '0.3.26-avatar-observations'
+MOD_VERSION = '0.3.27-avatar-id-candidates'
 
 # ---------------------------------------------------------------------------
 # WowsExtractor -- in-game data collector for the "8111 for WoWS" project.
@@ -283,6 +283,22 @@ def _empty_avatar_observations(status, source, reason=None):
         'source': source,
         'sampleTs': None,
         'rows': [],
+        'candidateConsistency': {
+            'source': 'sameSnapshot.avatar.id == state.ships[].playerId',
+            'candidateNamespace': 'avatar.id',
+            'comparedNamespace': 'ships[].playerId',
+            'comparison': 'strictScalarTypeAndValue',
+            'semantics': 'unverified',
+            'avatarInputComplete': False,
+            'shipsCompleteness': 'unknown',
+            'candidateAvailableCount': 0,
+            'candidateExactValueMatchCount': 0,
+            'candidateUnmatchedInSnapshotCount': 0,
+            'candidateAmbiguousCount': 0,
+            'candidateUnknownCount': 0,
+            'duplicateAvatarIdCount': 0,
+            'duplicateShipPlayerIdCount': 0,
+        },
         'coverage': {
             'sampledEntityCount': 0,
             'inputStatus': status,
@@ -1947,27 +1963,67 @@ class Collector(object):
             ship_counts[key] = ship_counts.get(key, 0) + 1
 
         observation_ids = {}
+        candidate_ids = {}
         row_ids = []
         for index in range(len(entities)):
             row = sample_rows[index] if index < len(sample_rows) else {}
             avatar = row.get('avatar') if isinstance(row, dict) else None
-            # avatar.id is deliberately a separate namespace and is never a
-            # fallback for this observation-to-ships join.
+            # avatar.id remains separate and is never a fallback for the
+            # confirmed observation-to-ships join.
             player_id = avatar.get('playerId') if isinstance(avatar, dict) else None
             key = _strict_player_lookup_key(player_id)
             safe_id = _observation_scalar(player_id) if key is not None else None
             if safe_id is None:
                 key = None
-            row_ids.append((key, safe_id, row))
+            # This candidate comes from the already shared AvatarRows sample.
+            # Do not reread the game component or use it for confirmed joins.
+            avatar_id = (avatar.get('id', _UNSET)
+                         if isinstance(avatar, dict) else _UNSET)
+            candidate_key = _strict_player_lookup_key(avatar_id)
+            candidate_id = (_observation_scalar(avatar_id)
+                            if candidate_key is not None else None)
+            if candidate_id is None:
+                candidate_key = None
+                candidate_status = 'unknown'
+                candidate_reason = ('notRecorded' if avatar_id is _UNSET or
+                                    avatar_id is None else 'invalidId')
+            else:
+                candidate_status = 'available'
+                candidate_reason = None
+            row_ids.append((key, safe_id, candidate_key, candidate_id,
+                            candidate_status, candidate_reason, row))
             if key is not None:
                 observation_ids[key] = observation_ids.get(key, 0) + 1
+            if candidate_key is not None:
+                candidate_ids[candidate_key] = candidate_ids.get(candidate_key, 0) + 1
 
         conflicts = set(key for key, count in observation_ids.items() if count > 1)
         conflicts.update(key for key, count in ship_counts.items() if count > 1)
+        candidate_conflicts = set(
+            key for key, count in candidate_ids.items() if count > 1)
+        candidate_ship_conflicts = set(
+            key for key, count in ship_counts.items() if count > 1)
+        candidate_available = candidate_exact = candidate_unmatched = 0
+        candidate_ambiguous = candidate_unknown = 0
+        for (_key, _player_id, candidate_key, _candidate_id, _status,
+             _reason, _row) in row_ids:
+            if candidate_key is None:
+                candidate_unknown += 1
+            else:
+                candidate_available += 1
+                if (candidate_key in candidate_conflicts or
+                        candidate_key in candidate_ship_conflicts):
+                    candidate_ambiguous += 1
+                elif candidate_key in ship_counts:
+                    candidate_exact += 1
+                else:
+                    candidate_unmatched += 1
+
         out_rows = []
         matched = missing = unknown = unmatchable = 0
         map_available = health_available = 0
-        for key, player_id, sampled in row_ids:
+        for (key, player_id, candidate_key, candidate_id,
+             candidate_status, candidate_reason, sampled) in row_ids:
             row = {}
             if key is None:
                 row['playerIdStatus'] = 'unknown'
@@ -1993,6 +2049,18 @@ class Collector(object):
                     row['apiPresence'] = {'status': 'unknown', 'source': 'state.ships',
                                           'reason': 'inputIncomplete'}
                     unknown += 1
+
+            candidate = {
+                'source': 'dataHub.avatar.id',
+                'namespace': 'avatar.id',
+                'status': candidate_status,
+                'semantics': 'unverified',
+            }
+            if candidate_key is not None:
+                candidate['raw'] = candidate_id
+            else:
+                candidate['reason'] = candidate_reason
+            row['identifierCandidates'] = {'avatarId': candidate}
 
             map_sample = sampled.get('mapPosition') if isinstance(sampled, dict) else None
             if isinstance(map_sample, dict):
@@ -2063,6 +2131,22 @@ class Collector(object):
             'source': 'dataHub.getEntityCollections(avatar)',
             'sampleTs': _observation_scalar(now),
             'rows': out_rows,
+            'candidateConsistency': {
+                'source': 'sameSnapshot.avatar.id == state.ships[].playerId',
+                'candidateNamespace': 'avatar.id',
+                'comparedNamespace': 'ships[].playerId',
+                'comparison': 'strictScalarTypeAndValue',
+                'semantics': 'unverified',
+                'avatarInputComplete': input_complete,
+                'shipsCompleteness': 'unknown',
+                'candidateAvailableCount': candidate_available,
+                'candidateExactValueMatchCount': candidate_exact,
+                'candidateUnmatchedInSnapshotCount': candidate_unmatched,
+                'candidateAmbiguousCount': candidate_ambiguous,
+                'candidateUnknownCount': candidate_unknown,
+                'duplicateAvatarIdCount': len(candidate_conflicts),
+                'duplicateShipPlayerIdCount': len(candidate_ship_conflicts),
+            },
             'coverage': {
                 'sampledEntityCount': len(entities),
                 'inputStatus': input_status,

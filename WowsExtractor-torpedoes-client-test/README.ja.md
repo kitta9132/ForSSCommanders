@@ -1,11 +1,11 @@
 # WowsExtractor 魚雷出力版：実機テスト用パッケージ
 
 作成日：2026-11-03（日本時間）
-modバージョン：`0.3.26-avatar-observations` / ModsAPI：`API_v1.0`（source only・未導入）
+modバージョン：`0.3.27-avatar-id-candidates` / ModsAPI：`API_v1.0`（source only・未導入）
 
 ## 最優先：性能報告と安全設定
 
-0.3.14導入後「自艦が沈むまでminFPS 25、撃沈後110まで回復」と報告されています。外部記録ツールは未使用とのことですが、mod内部のtick・state書込は別途戦闘中継続します。因果は未確定です。0.3.26-avatar-observationsはsource only・未導入です。collection/diagnostics/profiler/position fallback既定OFF、state既定0.2秒（約5Hz）・0.1明示10Hz互換・全snapshot一体を維持します。前版のplayers strict index／row-local field read共有を維持し、新しい`avatarObservations`は同frameのcaptured avatar raw/map/healthをAPI `ships`と独立出力します。rosterからships行を合成せず、strict `avatar.playerId`以外でjoinしません。partial/truncated時もcapture済みのraw行は出しますが、health indexを無効にし、API shipsで未一致のIDはunknownにします。24 avatar/20 API ships fixture、map 24/20/0 variant、ID競合・partial・CC欠測・getter予算をoffline確認しました。FPS・実ゲーム時間・API内部時間は未計測です。次回実機評価はavatar coverage・player budget・魚雷あり増分をまとめ、開始直後FPSは追いません。詳細：[出力仕様](docs/OUTPUT_SPEC.ja.md)／[性能事故記録](docs/PERFORMANCE_INCIDENT_0.3.14.ja.md)
+0.3.14導入後「自艦が沈むまでminFPS 25、撃沈後110まで回復」と報告されています。外部記録ツールは未使用とのことですが、mod内部のtick・state書込は別途戦闘中継続します。因果は未確定です。0.3.27-avatar-id-candidatesはsource only・未導入です。collection/diagnostics/profiler/position fallback既定OFF、state既定0.2秒（約5Hz）・0.1明示10Hz互換・全snapshot一体を維持します。B37ではavatar map/healthは取得できた一方、738 active state全てでstrict `avatar.playerId`がunmatchableでした。0.3.27は同frameで既にsample済みの`avatar.id`を`identifierCandidates.avatarId`へnamespace付き・semantics=unverifiedで出力し、`ships[].playerId`との型付き候補一致を匿名countします。確定join・既存coverageは変更せず、rosterからships行を合成しません。候補がAPI上のidentityであることは未確認で、B37の識別問題は未解決です。missing/None/readErrorの詳細はsampleに保存されていないため`notRecorded`とし、fieldを再読しません。offline testsで属性wrapper（playerId欠測/None）、重複・型差・0・bool・unsafe/nonfinite・partial/CC欠測を検証します。追加API/component/getter読取りなし、frame間cacheなし、FPS・実時間・API内部時間は未計測です。FPS開始直後の低下は追跡しません。詳細：[出力仕様](docs/OUTPUT_SPEC.ja.md)／[B37記録](docs/PERFORMANCE_B37_0.3.26.ja.md)
 
 `config.ini` がない場合・読み込みに失敗した場合も収集停止です。明示的に `collection_enabled = true` のときだけ通常収集を開始します。重いUI/dataHub probeはさらに `diagnostics_enabled = true`、profilerは独立して `profiler_enabled = true` が必要です（どちらもcollection必須）。収集停止中はprofiler初期化clock callも0回で、probe/API poll・定期tickを行わず、戦闘開始時のdisabled stateと終了stateだけを書きます。core収集（既定0.2秒）およびarmament/public_dataの負荷は未評価です。
 

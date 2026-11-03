@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = (ROOT / 'res_mods/PnFMods/WowsExtractor/Main.py').read_text(encoding='utf8')
 TREE = ast.parse(SOURCE.replace('except Exception, e:', 'except Exception as e:'))
 DEFAULT_CC = object()
+MISSING_FIELD = object()
 
 import sys
 sys.path.insert(0, str(ROOT / 'res_mods/PnFMods/WowsExtractor'))
@@ -88,6 +89,40 @@ class CountedEntity(dict):
     def __getitem__(self, name):
         self.reads[name] = self.reads.get(name, 0) + 1
         return dict.__getitem__(self, name)
+
+
+class CountedCC:
+    def __init__(self, **values):
+        self._values = values
+        self.reads = {}
+
+    def __getattr__(self, name):
+        values = object.__getattribute__(self, '_values')
+        if name not in values:
+            raise AttributeError(name)
+        reads = object.__getattribute__(self, 'reads')
+        reads[name] = reads.get(name, 0) + 1
+        return values[name]
+
+
+class AttributeAvatar:
+    """Attribute-backed API component with an optional playerId property."""
+    def __init__(self, avatar_id, player_id=MISSING_FIELD):
+        self._avatar_id = avatar_id
+        self._player_id = player_id
+        self.reads = {'id': 0, 'playerId': 0}
+
+    @property
+    def id(self):
+        self.reads['id'] += 1
+        return self._avatar_id
+
+    @property
+    def playerId(self):
+        self.reads['playerId'] += 1
+        if self._player_id is MISSING_FIELD:
+            raise AttributeError('playerId unavailable')
+        return self._player_id
 
 
 def avatar_entity(player_id, *, avatar_id=None, map_position=True,
@@ -205,6 +240,9 @@ def test_strict_ids_duplicate_conflicts_and_avatar_id_are_not_join_fallbacks():
     assert rows[1]['apiPresence']['status'] == 'unknown'
     assert rows[2]['playerIdStatus'] == 'unknown'  # avatar.id=2 is not joined
     assert rows[2]['apiPresence']['reason'] == 'unmatchablePlayerId'
+    assert rows[2]['identifierCandidates']['avatarId'] == {
+        'source': 'dataHub.avatar.id', 'namespace': 'avatar.id',
+        'status': 'available', 'raw': 2, 'semantics': 'unverified'}
     assert rows[4]['apiPresence']['reason'] == 'duplicateIdConflict'
     assert rows[5]['apiPresence']['reason'] == 'duplicateIdConflict'
     assert rows[3]['apiPresence']['reason'] == 'unmatchablePlayerId'
@@ -214,6 +252,121 @@ def test_strict_ids_duplicate_conflicts_and_avatar_id_are_not_join_fallbacks():
     assert observations['coverage']['duplicateIdConflictCount'] == 1
     assert observations['coverage']['missingInApiCount'] == 0
     json.dumps(observations, allow_nan=False)
+
+
+@pytest.mark.parametrize('player_id', [MISSING_FIELD, None], ids=['missing', 'none'])
+def test_attribute_avatar_id_candidate_is_sampled_once_without_confirmed_join(player_id):
+    avatars = [AttributeAvatar(pid, player_id=player_id) for pid in range(1, 13)]
+    entities = [CountedEntity(
+        avatar=avatar,
+        health={'value': 500, 'max': 1000, 'isAlive': True},
+        mapPosition={'position': (0.25, 0.75), 'yaw': 0.0})
+        for avatar in avatars]
+    ships = [{'playerId': pid} for pid in range(1, 13)]
+
+    observations, _health, _maps, _holder = frame(entities, ships)
+
+    assert all(avatar.reads == {'id': 1, 'playerId': 1} for avatar in avatars)
+    assert all(entity.reads.get('mapPosition', 0) == 1 for entity in entities)
+    assert all(row['playerIdStatus'] == 'unknown' for row in observations['rows'])
+    assert all(row['apiPresence'] == {
+        'status': 'unknown', 'source': 'state.ships',
+        'reason': 'unmatchablePlayerId'} for row in observations['rows'])
+    assert [row['identifierCandidates']['avatarId']['raw']
+            for row in observations['rows']] == list(range(1, 13))
+    consistency = observations['candidateConsistency']
+    assert consistency['candidateAvailableCount'] == 12
+    assert consistency['candidateExactValueMatchCount'] == 12
+    assert consistency['candidateUnmatchedInSnapshotCount'] == 0
+    assert consistency['candidateAmbiguousCount'] == 0
+    assert consistency['candidateUnknownCount'] == 0
+    # Confirmed coverage remains independent of the candidate value match.
+    assert observations['coverage']['distinctPlayerIdCount'] == 0
+    assert observations['coverage']['apiMatchedCount'] == 0
+    assert observations['coverage']['unmatchableIdCount'] == 12
+    json.dumps(observations, allow_nan=False)
+
+
+def test_candidate_consistency_uses_strict_types_and_quarantines_duplicates_and_unsafe_ids():
+    candidate_ids = [0, 4, 4, '5', 6.0, False, float('nan'),
+                     float('inf'), object(), None]
+    entities = [avatar_entity(None, avatar_id=avatar_id, map_position=False)
+                for avatar_id in candidate_ids]
+    ships = [{'playerId': pid} for pid in (0, 4, 4, 5, 6, False)]
+
+    observations, _health, _maps, _holder = frame(entities, ships)
+
+    candidates = [row['identifierCandidates']['avatarId']
+                  for row in observations['rows']]
+    assert [candidate['status'] for candidate in candidates] == [
+        'available', 'available', 'available', 'available', 'available',
+        'unknown', 'unknown', 'unknown', 'unknown', 'unknown']
+    assert [candidate.get('raw') for candidate in candidates[:5]] == [
+        0, 4, 4, '5', 6.0]
+    assert all('raw' not in candidate for candidate in candidates[5:])
+    assert candidates[5]['reason'] == 'invalidId'  # bool ID is never emitted
+    assert candidates[6]['reason'] == 'invalidId'  # non-finite ID is never emitted
+    assert candidates[7]['reason'] == 'invalidId'
+    assert candidates[8]['reason'] == 'invalidId'  # no repr/string conversion
+    assert candidates[9]['reason'] == 'notRecorded'
+
+    consistency = observations['candidateConsistency']
+    assert consistency['candidateAvailableCount'] == 5
+    assert consistency['candidateExactValueMatchCount'] == 1  # integer zero
+    assert consistency['candidateUnmatchedInSnapshotCount'] == 2  # str/int, float/int
+    assert consistency['candidateAmbiguousCount'] == 2  # duplicate avatar + ships IDs
+    assert consistency['candidateUnknownCount'] == 5
+    assert consistency['duplicateAvatarIdCount'] == 1
+    assert consistency['duplicateShipPlayerIdCount'] == 1
+    # Candidate matches never promote strict playerId/apiPresence coverage.
+    assert observations['coverage']['distinctPlayerIdCount'] == 0
+    assert observations['coverage']['apiMatchedCount'] == 0
+    assert observations['coverage']['unmatchableIdCount'] == len(entities)
+    assert all(row['apiPresence']['status'] == 'unknown'
+               for row in observations['rows'])
+    json.dumps(observations, allow_nan=False)
+
+
+def test_partial_cc_missing_and_unsampled_candidate_states_do_not_confirm_absence():
+    partial, _health, _maps, _holder = frame(
+        [avatar_entity(0, avatar_id=0), avatar_entity(77, avatar_id=77)],
+        [{'playerId': 0}], status='partial')
+    assert partial['candidateConsistency']['avatarInputComplete'] is False
+    assert partial['candidateConsistency']['candidateExactValueMatchCount'] == 1
+    assert partial['candidateConsistency']['candidateUnmatchedInSnapshotCount'] == 1
+    assert partial['rows'][1]['apiPresence'] == {
+        'status': 'unknown', 'source': 'state.ships', 'reason': 'inputIncomplete'}
+    assert partial['coverage']['missingInApiCount'] == 0
+
+    truncated, _health, _maps, _holder = frame(
+        [avatar_entity(91, avatar_id=91)], [], status='truncated')
+    assert truncated['candidateConsistency']['avatarInputComplete'] is False
+    assert truncated['candidateConsistency'][
+        'candidateUnmatchedInSnapshotCount'] == 1
+    assert truncated['rows'][0]['apiPresence'] == {
+        'status': 'unknown', 'source': 'state.ships', 'reason': 'inputIncomplete'}
+    assert truncated['coverage']['missingInApiCount'] == 0
+
+    no_cc, _health, _maps, _holder = frame(
+        [avatar_entity(None, avatar_id=88)], [], cc=None)
+    no_cc_candidate = no_cc['rows'][0]['identifierCandidates']['avatarId']
+    assert no_cc_candidate['status'] == 'unknown'
+    assert no_cc_candidate['reason'] == 'notRecorded'
+    assert no_cc['candidateConsistency']['candidateUnknownCount'] == 1
+
+    ns = main_namespace(Obj(avatar='avatar', vehicle='vehicle', health='health',
+                            mapPosition='mapPosition'))
+    build = method('_build_avatar_observations', ns)
+    no_sample = build(Obj(), {'entities': [object()], 'status': 'complete'},
+                      11.0, [])
+    no_sample_candidate = no_sample['rows'][0]['identifierCandidates']['avatarId']
+    assert no_sample_candidate['status'] == 'unknown'
+    assert no_sample_candidate['reason'] == 'notRecorded'
+    assert no_sample['candidateConsistency']['candidateUnknownCount'] == 1
+    json.dumps(partial, allow_nan=False)
+    json.dumps(truncated, allow_nan=False)
+    json.dumps(no_cc, allow_nan=False)
+    json.dumps(no_sample, allow_nan=False)
 
 
 def test_cc_missing_component_exception_and_nonfinite_values_stay_unknown():
@@ -361,13 +514,17 @@ def test_observation_helpers_survive_restricted_exception_builtins():
 
 
 def test_each_frame_uses_current_sample_and_map_component_is_read_once():
-    first_entities = [avatar_entity(1, map_position=(0.2, 0.3), health=(10, 20, True))]
+    first_entities = [avatar_entity(1, avatar_id=101,
+                                    map_position=(0.2, 0.3), health=(10, 20, True))]
     first, _health, _maps, _holder = frame(first_entities, [], now=10.0)
-    second_entities = [avatar_entity(1, map_position=(0.8, 0.7), health=(18, 20, True))]
+    second_entities = [avatar_entity(1, avatar_id=202,
+                                     map_position=(0.8, 0.7), health=(18, 20, True))]
     second, _health, _maps, _holder = frame(second_entities, [], now=20.0)
     assert first['sampleTs'] == 10.0 and second['sampleTs'] == 20.0
     assert first['rows'][0]['mapPosition']['raw'] == [0.2, 0.3]
     assert second['rows'][0]['mapPosition']['raw'] == [0.8, 0.7]
+    assert first['rows'][0]['identifierCandidates']['avatarId']['raw'] == 101
+    assert second['rows'][0]['identifierCandidates']['avatarId']['raw'] == 202
     assert second['rows'][0]['health']['raw']['value'] == 18
     assert first_entities[0].reads['mapPosition'] == 1
     assert second_entities[0].reads['mapPosition'] == 1
@@ -394,11 +551,16 @@ def test_avatar_collection_unavailable_is_distinct_from_partial_iteration():
 
 
 def test_main_state_reuses_existing_getter_budget_for_24_avatars_and_20_ships():
-    cc = Obj(avatar='avatar', vehicle='vehicle', health='health',
-             mapPosition='mapPosition', visibility='visibility')
-    entities = [avatar_entity(pid, map_position=(pid / 100.0, 0.5),
-                              vehicle_id=1000 + pid)
-                for pid in range(1, 25)]
+    cc = CountedCC(avatar='avatar', vehicle='vehicle', health='health',
+                   mapPosition='mapPosition', visibility='visibility')
+    avatar_components = [AttributeAvatar(pid, player_id=pid)
+                         for pid in range(1, 25)]
+    entities = [CountedEntity(
+        avatar=avatar,
+        vehicle={'id': 1000 + pid},
+        health={'value': 800, 'max': 1000, 'isAlive': True},
+        mapPosition={'position': (pid / 100.0, 0.5), 'yaw': 0.0})
+        for pid, avatar in enumerate(avatar_components, 1)]
     player_rows = [{'playerId': pid, 'shipId': 1000 + pid,
                     'teamId': 1 if pid <= 12 else 2}
                    for pid in range(1, 21)]
@@ -449,6 +611,15 @@ def test_main_state_reuses_existing_getter_budget_for_24_avatars_and_20_ships():
                  '_build_avatar_observations', '_build_ships', '_build_state'):
         fn = method(name, ns)
         setattr(c, name, MethodType(fn, c))
+    build_observations = c._build_avatar_observations
+
+    def build_observations_without_new_cc_reads(*args):
+        before = dict(cc.reads)
+        result = build_observations(*args)
+        assert cc.reads == before
+        return result
+
+    c._build_avatar_observations = build_observations_without_new_cc_reads
     c._active = True
     c._diagnosticsEnabled = False
     c._diagnosticsSampleDue = False
@@ -483,8 +654,22 @@ def test_main_state_reuses_existing_getter_budget_for_24_avatars_and_20_ships():
     assert len(state['avatarObservations']['rows']) == 24
     assert state['avatarObservations']['coverage']['apiMatchedCount'] == 20
     assert state['avatarObservations']['coverage']['missingInApiCount'] == 4
+    assert state['avatarObservations']['candidateConsistency'][
+        'candidateExactValueMatchCount'] == 20
+    assert state['avatarObservations']['candidateConsistency'][
+        'candidateUnmatchedInSnapshotCount'] == 4
     assert state['avatarObservations']['sampleTs'] == state['ts']
     assert all(entity.reads['mapPosition'] == 1 for entity in entities)
+    assert all(entity.reads == {
+        'avatar': 1, 'vehicle': 1, 'health': 1, 'mapPosition': 1}
+        for entity in entities)
+    assert all(avatar.reads == {'id': 1, 'playerId': 1}
+               for avatar in avatar_components)
+    # Existing producer CC accesses; observation assembly adds none (checked
+    # by the wrapper above).
+    assert cc.reads == {
+        'avatar': 26, 'vehicle': 25, 'health': 24,
+        'mapPosition': 1, 'visibility': 1}
     json.dumps(state, allow_nan=False)
 
 
