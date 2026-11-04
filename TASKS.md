@@ -4,6 +4,7 @@
 
 現行正本は **0.3.31-calibration-spatial-index**（未導入・実機未確認）。親の独立検証は427 passed・1 skipped、Python3.11 checker成功（9 moduleのPython2 grammarを含む）。下記の旧版時点の「作業版」「未実機」記述は履歴として読み、現況は本行と最新項目を優先する。
 
+<a id="task-performance"></a>
 ## 緊急優先：通常プレイのFPS低下
 
 - 0.3.31-calibration-spatial-index（source only・実機未確認）：較正duplicate候補をbounded空間indexで絞る。B44の4,458組で旧実装714,861比較→40,168比較（94.38%減）、743 state全て新旧snapshot/reservoir/RNG一致。記録との係数差は再生runtimeの浮動小数点演算差で説明でき、逐次sum・sqrt相当の残差計算では全743 snapshot一致。独立調査完了、最適化による数値差は未検出。FPS改善は未確認、取得・schema・周期は不変、mod退避継続。
@@ -52,6 +53,16 @@
 
 開発目標・収集層の責務は [DEVELOPMENT.md](DEVELOPMENT.md)、AI向け指示・自律進行・Git運用は [.ai/INSTRUCTIONS.md](.ai/INSTRUCTIONS.md) を参照。以下は進捗と残課題。
 
+<a id="task-scope"></a>
+## P0：潜水艦戦闘補助への絞り込み
+
+- [ ] 汎用ダメージ集計・砲弾弾道計算を削減候補として、イベント購読・ID対応・consumer・テストの依存を調査する。潜水艦の攻撃／回避／潜航判断に不要なら収集経路と出力を整理する。現時点では未撤去。
+- [ ] 詳細診断を実用収集から分離し、必要な自艦深度・Battery・ping・装填が汎用診断一式のONを必要としない構成を検討する。
+- [ ] 距離別魚雷cadenceを設計する。案：近距離5Hz／遠距離2Hz。ただし距離閾値は未決定、自艦魚雷・接近魚雷・距離不明の扱いも設計対象。自艦魚雷の確定識別ができない場合に推測で分類しない。
+- [ ] 全魚雷列挙・分類用位置readの費用と、owner取得・motion・map変換・serialize費用を分け、2Hz化で何が減るかoffline確認する。初観測・領域境界・出現／消失・欠測・観戦・自艦位置不明を検証する。
+- [ ] 群別sampleTs／周期／状態を出力契約へ追加する場合の互換性を設計する。非dueを0本・消失と扱わず、保持する場合は過去sampleとして分離する。既存のlive位置frame間cache禁止を無断で変更しない。
+
+<a id="task-freshness"></a>
 ## P0：位置鮮度・失探管理（実質完了／マップ実装時へ移管）
 
 - [x] modとマップアプリの責務を確定。modで最終目撃管理を完成させる作業は進めず、P0は実質完了とする。
@@ -61,6 +72,7 @@
 旧0.3.1の最終目撃キャッシュ・既定60秒TTL・ghost生成は0.3.2で撤去。
 旧`lastSeenTs/staleSeconds`はmodの派生値だったため生成を廃止。
 
+<a id="task-visibility"></a>
 ## P1：収集層への整理（設計反映・別途コード変更）
 
 状態記号：`[x]` 完了、`[△]` 一部対応・調査済みだが未完了、`[ ]` 未着手。
@@ -78,6 +90,7 @@
 
 次の着手順：0.3.4記録の再試験では対象を一隻に識別し、画面録画・残時間・操作時刻とJSONLを同時に照合する。最終目撃表示と候補値の関係を試験条件内で確認し、味方視界のみは再現できる場合だけ別区間で評価する。最終発見時刻の未公開経路調査と魚雷所有者の識別調査は継続。
 
+<a id="task-torpedoes"></a>
 ## P1：魚雷識別・運動・単位（mod）
 
 - [ ] 自艦魚雷／僚艦魚雷／敵魚雷の確実な識別。`ownerId/ownerTeamId/ownerType`はcore rowから取得済み、owner objectは別API `getTorpedoOwnerById(ownerId)`で取得する。現在のcollectorに`ownerShip` field readはなく、`isOwn`は返却ownerの厳密bool `isPlayer`がある場合だけ。ownerIdとplayerId/vehicleId/GUI ownerIDのnamespaceは未確定で推測joinを避ける。
@@ -87,6 +100,7 @@
 - [ ] ATMあり／なしのtype・isHoming・isSpottedの対応、供給元、更新差を整理。0.3.29で`isHoming`/`isSpotted`固定2候補を専用`torpedo_state_sampling_enabled` 1Hz opt-inへ分離する（source only・実機未確認）。producer unknown・semantics unverifiedを維持。`isHoming`は誘導先ID・停止距離／地点／理由ではない。誘導先ID・停止情報は未取得。
 - [ ] 停止・旋回・欠測・再取得時の速度／航向／観測距離・時間の挙動を検証。
 
+<a id="task-armament"></a>
 ## P1：装填・魚雷性能（取得経路調査→mod）
 
 - [△] 0.3.9で`selectedTorpedoParamsProbe`実装。controller selection → unique slot.type → exact slot.id/ammo.id → `viewData.paramsDescriptor` → 固定TTX variantの経路をread-only候補として追加。B15で当該Undine条件の値を確認済み。0.3.10でGUI抽出owner参照を確認し、`torpedoTooltipParameterProbe`を追加。B18でPython playerAvatar singleton、complete parameter collection（54行）、固定field shape/raw valuesを実機確認。正本0.3.10 raw selectorは複合key誤構成でnoExactMatchだった。修正後はB18のraw rowsを使ったoffline選択確認済み。これは実機の修正版再試験ではなく、GUI lookup/namespaceの意味確認も未完了。詳細は[B18記録](WowsExtractor-torpedoes-client-test/docs/VALIDATION_0.3.10_B18_PARAMETERS.ja.md)。
@@ -100,6 +114,7 @@
   - 2026-11-02 B18追記：tooltip約10秒の実機報告は画面75kts/9kmでB15と同一。今回のJSONLでも選択`torpedo` TTX raw 75.0/9.0・delta 0を取得し、独立目視報告と整合。別経路の`torpedoTooltipParameterProbe`はowner/collection取得済み（54 complete rows）だがcomposite id exact matchなし。これは補正overrideがない証拠ではない。再試験を求めず、GUI lookup/key/namespaceのコード調査後に潜水艦固有情報P1へ進む。詳細は[B18記録](WowsExtractor-torpedoes-client-test/docs/VALIDATION_0.3.10_B18_PARAMETERS.ja.md)。
 - [ ] 飛翔中魚雷の残り射程・残存寿命。現行API/GUIの限定調査で個体lifetime・remaining range直接fieldは未確認。TTX maxDistや`observedDistance/Age`から推定しない。[調査](WowsExtractor-torpedoes-client-test/docs/RESEARCH_TORPEDO_RANGE_LIFETIME.ja.md)
 
+<a id="task-submarine"></a>
 ## P1：潜水艦固有情報（取得経路調査→mod）
 
 - [△] 0.3.11で`selfSubmarineProbe`と`waveHitProbe`を追加。B23は両probeが列挙例外だった一方、同じ2,622 active frameすべてで既存`weaponContextProbe.collections.selfVehicle`は完全なsingletonとしてavailable。0.3.12で列挙を`for ... in enumerate(...)`へ変更し、制限builtins fixtureを含むoffline回帰を追加。B24の206 active frameでは両collectionが正常取得され、selfVehicle singletonと各Submarine/Battery raw fieldがavailable、WaveHitはcompleteな正常空collection。B23の原因は依然未確定。B27ではUndineの2,233 active samplesとWaveHit 439 snapshotsをraw照合し、depth/Battery/WaveHitのUI用途根拠を静的資料で別metadata化（0.3.13）。depthのmはUI hint、enum名はUI label、`lifeTime`はUIの秒countdown入力に限り、サーバー状態一般は確定しない。同じ潜水試験の再要求は不要。B27記録：[潜水艦](WowsExtractor-torpedoes-client-test/docs/VALIDATION_0.3.12_B27_SUBMARINE.ja.md)／[WaveHit](WowsExtractor-torpedoes-client-test/docs/VALIDATION_0.3.12_B27_WAVEHIT.ja.md)、[UI根拠](WowsExtractor-torpedoes-client-test/docs/RESEARCH_SUBMARINE_STATE_SEMANTICS.ja.md)。
@@ -111,6 +126,7 @@
 - [ ] ソナー・レーダー・潜水艦探知装置の距離、作動／準備／クールダウン、残時間。
 - [ ] 消耗品の残数・状態・endTimeの時刻基準、搭載なし／取得不可の区別。
 
+<a id="task-stability"></a>
 ## P1：実機検証・安定性
 
 - [ ] 別地図で較正の成立、係数・軸・境界を確認。Oceanの係数を一般化しない。
@@ -122,6 +138,7 @@
 - [ ] クライアントbuild変更時の互換確認、安全停止、導入／復元手順を維持。
 - [ ] 出力契約・取得状態・単位・検証根拠と詳細対応表を更新し、回帰テスト／配布物を維持。
 
+<a id="task-consumer"></a>
 ## P2：本番SS用マップ（mod完成後・別途開発）
 
 以下は今の仮マップへの追加要求ではない。modから何を取得できるか確定して設計する。
