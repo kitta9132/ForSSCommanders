@@ -42,6 +42,12 @@ _MAX_SCALE = 1000000.0
 _MAX_WORLD_COORDINATE = 1000000000.0
 _MAP_DUPLICATE_DISTANCE = 0.002
 _WORLD_DUPLICATE_DISTANCE = 3.0
+# Map coordinates are already constrained to [0, 1]. Buckets four times wider
+# than the map duplicate radius keep the candidate lookup small. Searching three
+# buckets either side is deliberately wider than the real-valued one-bucket
+# bound: division rounding can move each endpoint across one bucket boundary.
+_MAP_DUPLICATE_BUCKET_SIZE = _MAP_DUPLICATE_DISTANCE * 4.0
+_MAP_DUPLICATE_BUCKET_RADIUS = 3
 _HOLDOUT_MODULUS = 5
 _DRIFT_BATCHES = 3
 
@@ -183,6 +189,7 @@ class MapCalibration(object):
     def clear(self):
         """Reset samples, time ordering, diagnostics, and any fitted model."""
         self._samples = []
+        self._duplicate_buckets = {}
         self._seen = 0
         self._sequence = 0
         self._rng = 1
@@ -225,8 +232,49 @@ class MapCalibration(object):
             pass
         return parsed
 
+    def _duplicate_bucket_key(self, values):
+        return (int(math.floor(values[0] / _MAP_DUPLICATE_BUCKET_SIZE)),
+                int(math.floor(values[1] / _MAP_DUPLICATE_BUCKET_SIZE)))
+
+    def _duplicate_candidate_slots(self, values):
+        """Return reservoir slots that can satisfy the exact map-radius test.
+
+        Public observations are normalized to finite map coordinates in [0, 1].
+        Keep a brute-force fallback for private/direct callers outside that
+        contract; the exact distance predicate below remains authoritative.
+        """
+        if (not _finite(values[0]) or not _finite(values[1]) or
+                values[0] < 0.0 or values[0] > 1.0 or
+                values[1] < 0.0 or values[1] > 1.0):
+            return list(range(len(self._samples)))
+
+        bucket_x, bucket_y = self._duplicate_bucket_key(values)
+        radius = _MAP_DUPLICATE_BUCKET_RADIUS
+        candidates = []
+        for x_index in range(bucket_x - radius, bucket_x + radius + 1):
+            for y_index in range(bucket_y - radius, bucket_y + radius + 1):
+                slots = self._duplicate_buckets.get((x_index, y_index))
+                if slots:
+                    candidates.extend(slots)
+        # Preserve the original reservoir iteration order so the same first
+        # duplicate wins and the exact early-return behavior remains stable.
+        candidates.sort()
+        return candidates
+
+    def _index_duplicate_sample(self, slot, item):
+        key = self._duplicate_bucket_key(item["v"])
+        self._duplicate_buckets.setdefault(key, []).append(slot)
+
+    def _unindex_duplicate_sample(self, slot, item):
+        key = self._duplicate_bucket_key(item["v"])
+        slots = self._duplicate_buckets.get(key)
+        slots.remove(slot)
+        if not slots:
+            del self._duplicate_buckets[key]
+
     def _is_duplicate(self, values):
-        for item in self._samples:
+        for slot in self._duplicate_candidate_slots(values):
+            item = self._samples[slot]
             old = item["v"]
             map_distance = math.sqrt((values[0] - old[0]) ** 2 +
                                      (values[1] - old[1]) ** 2)
@@ -244,14 +292,20 @@ class MapCalibration(object):
         self._sequence += 1
         self._seen += 1
         if len(self._samples) < _MAX_SAMPLES:
+            slot = len(self._samples)
             self._samples.append(item)
+            self._index_duplicate_sample(slot, item)
         else:
             # Deterministic Algorithm R. This LCG is for bounded sampling only,
             # not security or cryptographic use.
             self._rng = (1103515245 * self._rng + 12345) % 2147483648
             slot = self._rng % self._seen
             if slot < _MAX_SAMPLES:
-                self._samples[int(slot)] = item
+                slot = int(slot)
+                old = self._samples[slot]
+                self._unindex_duplicate_sample(slot, old)
+                self._samples[slot] = item
+                self._index_duplicate_sample(slot, item)
         return True
 
     def _append_many(self, values_list):
@@ -434,6 +488,7 @@ class MapCalibration(object):
 
     def _reset_fit_and_samples(self):
         self._samples = []
+        self._duplicate_buckets = {}
         self._seen = 0
         self._sequence = 0
         self._rng = 1

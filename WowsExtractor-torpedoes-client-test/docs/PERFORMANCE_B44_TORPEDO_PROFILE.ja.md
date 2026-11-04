@@ -27,4 +27,14 @@ profiler available29窓、notSampled714。writerMode syncEncodeWrite、time.cloc
 
 ## 次工程
 
+### 0.3.31のoffline結果
+
+direct world位置と同rowのmapPositionRawの組を4,458件再生、各stateの抽出件数はdiag.mapSamplesと743/743件一致。旧走査は早期return込み714,861比較（平均160.36/候補）、重複2,783件。reservoirはstate221で256件に達し523 state満杯、入替489回。
+
+幅0.008のbucketから±3セル（49セル）を検索し、候補を元slot順に並べて従来の距離・境界判定を行う。新走査は厳密比較40,168回（94.38%減）、bucket参照218,442回、比較候補49,889件。削減率は距離比較のみで、全処理やFPSの改善率ではない。入替時に旧slotと空bucketを除き、clear/drift reset時にindexも消去する。保持するのは既存numeric較正sampleの索引だけで生位置cacheは追加しない。
+
+新旧snapshot・sample・RNGは743/743 state一致。ホストPython3.14再生中央値0.518→0.122秒は実機性能ではない。**記録された係数・RMSE・holdout RMSEは710 stateで一致しない。旧commit実装でも同差があるため、記録数値の完全再現とは扱わない。** sampleCount/status/spanは一致し、差の原因は独立調査中。既存のB44測定値は0.3.30のもので、0.3.31のFPSは未検証。
+
+親の独立検証：全pytest 427 passed・1 skipped、Python3.11 checker成功（9 moduleのPython2 grammarとcollector integration）。サブエージェント報告の428 passedとは区別し、今回の親の結果を採用する。
+
 追加実機を直ちに要求せず、魚雷がない区間でも増えるships費用を既存記録の較正replayで調べる。B31でreservoirが小さい条件ではduplicate scan主因説は支持されなかったため、今回も比較回数とearlyreturnを実測し、条件差を明記する。意味・coverageを保った削減が成立する場合だけsourceを変更する。魚雷切捨てやframeを超えた古いowner/positionの再利用はしない。

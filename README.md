@@ -1,5 +1,7 @@
 # ForSSCommanders
 
+現行ソース：**0.3.31-calibration-spatial-index**（未導入・実機未確認）。較正の距離比較候補を絞り、B44再生で旧実装との同値を確認。FPS改善は未確認、mod退避継続。以下の0.3.30説明は旧版の機能履歴です。[検証と制約](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_B44_TORPEDO_PROFILE.ja.md)。
+
 - [開発タスク・残課題](TASKS.md)（仮マップはパラメーター確認用。本番マップはmod完成後に別途開発）
 - [開発方針](DEVELOPMENT.md)
 - [AI向け指示・Git運用](.ai/INSTRUCTIONS.md)

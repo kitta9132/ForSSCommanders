@@ -1,7 +1,9 @@
 # WowsExtractor 魚雷出力版：実機テスト用パッケージ
 
 作成日：2026-11-04（日本時間）
-modバージョン：`0.3.30-atm-derived-state` / ModsAPI：`API_v1.0`（source only・未導入／未実機）
+modバージョン：`0.3.31-calibration-spatial-index` / ModsAPI：`API_v1.0`（source only・未導入／未実機）
+
+0.3.31は較正reservoirの重複判定を空間indexで絞り込みます。取得周期・観測行・出力schemaは変更しません。B44再生の新旧実装は同値、距離比較94.38%減。ゲーム内の速度・FPS改善は未確認で、collectorは退避を維持します。[根拠と再生の制約](docs/PERFORMANCE_B44_TORPEDO_PROFILE.ja.md)。以下の0.3.30説明は引き継ぐ機能の履歴です。
 
 ## 最優先：性能報告と安全設定
 
