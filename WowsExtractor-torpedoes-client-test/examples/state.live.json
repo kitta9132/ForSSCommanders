@@ -4,6 +4,7 @@
   "battleId": "synthetic-example-only",
   "active": true,
   "ts": 123.4,
+  "healthSampling": {"status": "notSampled", "sampleTs": null, "intervalSeconds": 0.5},
   "self": {
     "teamId": 0,
     "position": [

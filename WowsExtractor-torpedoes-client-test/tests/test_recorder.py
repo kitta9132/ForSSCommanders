@@ -63,6 +63,20 @@ def test_non_due_torpedo_membership_is_preserved_without_inventing_current_rows(
     assert events[0]['data']['torpedoes'] == []
 
 
+def test_full_capture_preserves_health_non_due_and_avatar_comparison_status(tmp_path):
+    health = {'status': 'notSampled', 'sampleTs': None, 'intervalSeconds': .5}
+    comparison = {'status': 'notSampled', 'sampleTs': None, 'intervalSeconds': 1.}
+    ship = {'uiId': 1, 'nx': .2, 'ny': .3}
+    write(tmp_path / 'state.json', healthSampling=health, ships=[ship],
+          avatarObservations={'rows': [], 'comparisonSampling': comparison})
+    result = rec.poll_files(tmp_path, {})[0]['data']
+    assert result['healthSampling'] == health
+    assert result['avatarObservations']['comparisonSampling'] == comparison
+    assert result['ships'] == [ship]
+    assert 'health' not in result['ships'][0]
+    assert 'alive' not in result['ships'][0]
+
+
 def test_cannot_overwrite_source_or_existing_recording(tmp_path):
     source = tmp_path / 'state.json'
     write(source)

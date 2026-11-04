@@ -1,5 +1,21 @@
 # WowsExtractor 魚雷出力版（WoWSクライアント用mod）
 
+## 0.3.35：共通HP群2Hz、avatar比較群1Hz
+
+位置・yaw・visibility・必要IDの5Hz取得を維持し、HP・生存値のreadを共通0.5秒期限へ、avatarのAPI範囲比較／candidateConsistency／coverage集計を1.0秒期限へ分離する。0.2秒tickへ量子化するためHPは0.4/0.6秒相当の交互で平均約2Hz、比較は約1Hz。実際の取得時刻を使い、周期を厳密保証しない。
+
+- `state.healthSampling={status: sampled|notSampled, sampleTs: now|null, intervalSeconds:0.5}`。sampledはその群の採取を試みた意味で、全fieldの取得成功ではない。
+- `avatarObservations.healthSampling`は同じHP sample時計。`comparisonSampling`は同形でintervalSeconds=1.0。avatarObservations自体のsampleTsとmap rowsは毎core tick更新する。
+- HP非dueはshipsのhealth/maxHealth/alive、selfのhealth/maxHealthおよびHP補助由来aliveを省略する。avatar rows.healthは`{status:notSampled,source:dataHub.avatar.health,sampleTs:null}`のみ。過去HPを現在fieldへコピーしない。
+- HP due時だけAPI・avatarのHP／生存値を読む。HP0・alive・最大HPを同じsampleで正規化し、その時点のvisibilityでuntickedFullの既存規則を適用する。partial avatarのhealth index無効・観測raw行保持も従来どおり。
+- 比較非dueでもavatar rowsのID候補・mapPositionは出す。apiPresence／candidateConsistency／coverageはnotSampledを明示し、比較countは省略する。古い比較を現在として再出力しない。比較dueでもHP非dueならcoverage.healthRawAvailableCountを出さない。
+- diag.healthSamplingStatusを示し、HP非dueのdiag.uiHealthは省略する。非取得をHP0や取得件数0の失敗として読まない。
+- disabledはHP群status=disabled、終了frameはnotSampled。戦闘切替・時計逆行で期限をresetし、停止期間のcatch-up sampleを作らない。frame間に保存するのはscheduler数値だけで、live object／過去HPをcollectorが持ち越す機能は追加しない。
+
+付属viewerだけが過去HPを最大1.5秒、取得ts付きの表示用viewerHealthへ保持し「現在HPではない」と表示する。producerのraw rowsを書き換えず、新しいdue sampleが欠測なら旧HPへ補完しない。inactive・battle切替・期限超過・ID衝突で保持を破棄する。位置表示は5Hzのまま。HP変更・死亡検出が最大約0.5秒＋tick遅延だけ遅れることを許容する設計で、全遷移捕捉の保証ではない。
+
+③～⑦⑨⑩の周期変更はこの版には含めない。既存consumerはHP fieldの非掲載とunknownを区別し、sample時刻を参照する。schema=1/apiVersion=1.0を維持し、変更境界はmod.versionとsampling metadataで判定する。
+
 ## 0.3.34：魚雷性能は戦闘初回のみ
 
 `meta.torpedoInitialParams`へ戦闘初回の弾薬・TTX候補を移す。`sampleTs`は取得時のゲーム時計、`policy=oncePerBattle`、`valueKind=initialObservation`、`liveAdjusted=false`、`dynamicAdjustments=externalMap`。`status=sampled`は初回試行が完了したことだけを示し、field取得成功は`ammunition`／`ttx`内のstatusで判断する。

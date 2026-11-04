@@ -6,7 +6,7 @@
 
 API_VERSION = 'API_v1.0'
 MOD_NAME = 'WowsExtractor'
-MOD_VERSION = '0.3.34-initial-torpedo-parameters'
+MOD_VERSION = '0.3.35-health-cadence'
 
 # ---------------------------------------------------------------------------
 # WowsExtractor -- observations for an external submarine-combat map.
@@ -153,6 +153,11 @@ except:
     CC = None
 
 STATE_INTERVAL = 0.2          # default seconds between state.json writes (~5 Hz); see config.ini
+# Shared HP/survival group (raw, normalized, self, ships, avatar health) and the
+# heavier avatar identity comparison. Positions/visibility/ids stay at the core
+# tick rate; only these two groups are gated.
+HEALTH_SAMPLING_INTERVAL = 0.5      # average 2 Hz on 0.2 s ticks (0.4/0.6 s)
+COMPARISON_SAMPLING_INTERVAL = 1.0  # avatar apiPresence/consistency/coverage
 META_RETRY_INTERVAL = 0.5     # battleInfo/map can be late in very small battles
                               # (also gates the arena-id promotion probe)
 META_RETRY_SECONDS = 12.0
@@ -288,6 +293,10 @@ def _empty_avatar_observations(status, source, reason=None):
         'status': status,
         'source': source,
         'sampleTs': None,
+        'healthSampling': {'status': status, 'sampleTs': None,
+                           'intervalSeconds': 0.5},
+        'comparisonSampling': {'status': status, 'sampleTs': None,
+                               'intervalSeconds': 1.0},
         'rows': [],
         'candidateConsistency': {
             'source': 'sameSnapshot.avatar.id == state.ships[].playerId',
@@ -811,6 +820,14 @@ class Collector(object):
         self._diagnosticsLastSampleTs = None
         self._diagnosticsLastNow = None
         self._diagnosticsSampleDue = False
+        self._healthSamplingInterval = HEALTH_SAMPLING_INTERVAL
+        self._healthSamplingNextDue = None
+        self._healthSamplingLastNow = None
+        self._healthSamplingDue = False
+        self._comparisonSamplingInterval = COMPARISON_SAMPLING_INTERVAL
+        self._comparisonSamplingNextDue = None
+        self._comparisonSamplingLastNow = None
+        self._comparisonSamplingDue = False
         self._lastMetaWrite = 0.0
         self._metaRetryUntil = 0.0
         self._metaReady = False
@@ -919,6 +936,14 @@ class Collector(object):
         self._diagnosticsLastSampleTs = None
         self._diagnosticsLastNow = None
         self._diagnosticsSampleDue = False
+        # Group schedules restart with the first frame of the next battle (or the
+        # next config reload); only numeric scheduler state is kept here.
+        self._healthSamplingNextDue = None
+        self._healthSamplingLastNow = None
+        self._healthSamplingDue = False
+        self._comparisonSamplingNextDue = None
+        self._comparisonSamplingLastNow = None
+        self._comparisonSamplingDue = False
         if self._performanceProfiler is not None:
             self._performanceProfiler.reset_battle()
         # clamp the interval so a typo (0 / negative) can't hammer the disk
@@ -953,6 +978,12 @@ class Collector(object):
         self._diagnosticsNextDue = None
         self._diagnosticsLastSampleTs = None
         self._diagnosticsLastNow = None
+        self._healthSamplingNextDue = None
+        self._healthSamplingLastNow = None
+        self._healthSamplingDue = False
+        self._comparisonSamplingNextDue = None
+        self._comparisonSamplingLastNow = None
+        self._comparisonSamplingDue = False
         self._torpedoDepthSamplingNextDue = None
         self._torpedoDepthSamplingLastNow = None
         self._torpedoDepthSamplingDue = False
@@ -1012,6 +1043,8 @@ class Collector(object):
                 'apiVersion': WIRE_API_VERSION, 'battleId': self._battleId,
                 'active': True, 'collection': {'status': 'disabled',
                     'source': 'config.collection_enabled'}, 'ts': _now(),
+                'healthSampling': {'status': 'disabled', 'sampleTs': None,
+                                   'intervalSeconds': 0.5},
                 'ships': [], 'self': None, 'torpedoes': [], 'damage': {},
                 'avatarObservations': _empty_avatar_observations(
                     'disabled', 'config.collection_enabled')})
@@ -1034,6 +1067,12 @@ class Collector(object):
         self._battleShown = False
         self._metaProbeDue = None
         self._metaProbeLastNow = None
+        self._healthSamplingNextDue = None
+        self._healthSamplingLastNow = None
+        self._healthSamplingDue = False
+        self._comparisonSamplingNextDue = None
+        self._comparisonSamplingLastNow = None
+        self._comparisonSamplingDue = False
         self._mapCalibration.clear()
         self._torpedoMotion.clear()
         sampling = getattr(self, '_torpedoSamplingGroups', None)
@@ -1046,6 +1085,8 @@ class Collector(object):
         try:
             snap = {'schema': SCHEMA_VERSION, 'apiVersion': WIRE_API_VERSION,
                     'battleId': self._battleId, 'active': False, 'ts': _now(),
+                    'healthSampling': {'status': 'notSampled', 'sampleTs': None,
+                                       'intervalSeconds': 0.5},
                     'ships': [], 'self': None,
                     'torpedoes': [],
                     'torpedoStatus': {'available': False, 'status': 'unknown'},
@@ -1333,6 +1374,12 @@ class Collector(object):
             self._torpedoStateSamplingNextDue = None
             self._torpedoStateSamplingLastNow = None
             self._torpedoStateSamplingDue = False
+            self._healthSamplingNextDue = None
+            self._healthSamplingLastNow = None
+            self._healthSamplingDue = False
+            self._comparisonSamplingNextDue = None
+            self._comparisonSamplingLastNow = None
+            self._comparisonSamplingDue = False
             if previous_now is not None and clock_ok:
                 self._lastWrite = 0.0
         self._refresh_meta(now)
@@ -1344,6 +1391,15 @@ class Collector(object):
         self._diagnosticsSampleDue = self._diagnostics_due(now)
         self._torpedoDepthSamplingDue = self._torpedo_depth_sampling_due(now)
         self._torpedoStateSamplingDue = self._torpedo_state_sampling_due(now)
+        # Runtime collectors provide the shared group schedulers. Legacy test
+        # harnesses that only patch the older due methods keep working (no HP
+        # group sampling flag -> their previous full-frame behaviour).
+        health_due = _get(self, '_health_sampling_due', None)
+        self._healthSamplingDue = bool(
+            health_due is None or health_due(now) is True)
+        comparison_due = _get(self, '_comparison_sampling_due', None)
+        self._comparisonSamplingDue = bool(
+            comparison_due is None or comparison_due(now) is True)
         self._lastWrite = now
         cycle = (measure_profiler.begin('state_cycle_total')
                  if measure_profiler is not None else None)
@@ -1381,6 +1437,64 @@ class Collector(object):
             self._diagnosticsSampleDue = False
             self._torpedoDepthSamplingDue = False
             self._torpedoStateSamplingDue = False
+            self._healthSamplingDue = False
+            self._comparisonSamplingDue = False
+
+    def _deadline_due(self, now, enabled, interval, next_due, last_now):
+        """Shared anchored deadline scheduler; never replays missed periods.
+
+        On 0.2 s ticks an interval of 0.5 s alternates 0.4/0.6 s observations
+        (mean 2 Hz). The first call is due, a backwards/frozen clock cannot
+        leave a future deadline stranded, and a stall longer than one interval
+        restarts the phase at the current tick instead of emitting catch-up
+        samples.
+        """
+        if not enabled:
+            return False, None, None
+        try:
+            interval = float(interval)
+            if (interval != interval or interval == float('inf') or
+                    interval == -float('inf')):
+                interval = 1.0
+        except Exception:
+            interval = 1.0
+        if interval < 0.01:
+            interval = 0.01
+        try:
+            now = float(now)
+            if now != now or now == float('inf') or now == -float('inf'):
+                return False, None, None
+        except Exception:
+            return False, None, None
+        if last_now is not None and now < last_now:
+            next_due = None
+        due = next_due is None or now >= next_due
+        if due:
+            if next_due is None or (next_due + interval) <= now:
+                next_due = now + interval
+            else:
+                next_due = next_due + interval
+        return due, next_due, now
+
+    def _health_sampling_due(self, now):
+        """Gate the shared HP/survival group (self, ships and avatar raw)."""
+        due, next_due, last_now = self._deadline_due(
+            now, True, _get(self, '_healthSamplingInterval', 0.5),
+            _get(self, '_healthSamplingNextDue'),
+            _get(self, '_healthSamplingLastNow'))
+        self._healthSamplingNextDue = next_due
+        self._healthSamplingLastNow = last_now
+        return due
+
+    def _comparison_sampling_due(self, now):
+        """Gate avatar apiPresence/consistency/coverage assembly to 1 Hz."""
+        due, next_due, last_now = self._deadline_due(
+            now, True, _get(self, '_comparisonSamplingInterval', 1.0),
+            _get(self, '_comparisonSamplingNextDue'),
+            _get(self, '_comparisonSamplingLastNow'))
+        self._comparisonSamplingNextDue = next_due
+        self._comparisonSamplingLastNow = last_now
+        return due
 
     def _torpedo_depth_sampling_due(self, now):
         """Schedule the independent depth-only probe without catch-up samples."""
@@ -1827,22 +1941,41 @@ class Collector(object):
         avatar_snapshot = self._capture_avatar_snapshot()
         avatar_entities = avatar_snapshot['entities']
         players_sample = self._remember_roster_vehicles(avatar_entities)
+        health_due = _get(self, '_healthSamplingDue', True) is True
+        comparison_due = _get(self, '_comparisonSamplingDue', True) is True
+        health_sampling = {
+            'status': 'sampled' if health_due else 'notSampled',
+            'sampleTs': now if health_due else None,
+            'intervalSeconds': _get(self, '_healthSamplingInterval', 0.5)}
+        comparison_sampling = {
+            'status': 'sampled' if comparison_due else 'notSampled',
+            'sampleTs': now if comparison_due else None,
+            'intervalSeconds': _get(self, '_comparisonSamplingInterval', 1.0)}
         # Partial captures expose raw health only for captured entities. Their
         # incomplete health index remains empty, so absence cannot assert life.
-        if avatar_snapshot['status'] == 'complete':
-            ui_hp = self._collect_avatar_health(avatar_entities)
+        # Off the shared 2 Hz HP due, no avatar health field is read at all.
+        if health_due:
+            if avatar_snapshot['status'] == 'complete':
+                ui_hp = self._collect_avatar_health(avatar_entities)
+            else:
+                sample_health = getattr(avatar_entities, 'sample_health', None)
+                if sample_health is not None:
+                    _try(lambda: sample_health(CC))
+                ui_hp = self._collect_avatar_health([])
         else:
-            sample_health = getattr(avatar_entities, 'sample_health', None)
-            if sample_health is not None:
-                _try(lambda: sample_health(CC))
-            ui_hp = self._collect_avatar_health([])
+            ui_hp = {}
         if profiler is not None:
             profiler.finish(avatar_phase)
 
         if profiler is not None:
             def build_ships_and_avatar_observations():
-                built_ships, built_diag = self._build_ships(
-                    now, ui_hp, avatar_entities, players_sample)
+                if health_due:
+                    built_ships, built_diag = self._build_ships(
+                        now, ui_hp, avatar_entities, players_sample)
+                else:
+                    built_ships, built_diag = self._build_ships(
+                        now, ui_hp, avatar_entities, players_sample,
+                        health_due=False)
                 observations = self._build_avatar_observations(
                     avatar_snapshot, now, built_ships)
                 return built_ships, built_diag, observations
@@ -1850,14 +1983,30 @@ class Collector(object):
             ships, diag, avatar_observations = profiler.measure(
                 'ships', build_ships_and_avatar_observations)
         else:
-            ships, diag = self._build_ships(
-                now, ui_hp, avatar_entities, players_sample)
+            if health_due:
+                ships, diag = self._build_ships(
+                    now, ui_hp, avatar_entities, players_sample)
+            else:
+                ships, diag = self._build_ships(
+                    now, ui_hp, avatar_entities, players_sample,
+                    health_due=False)
             avatar_observations = self._build_avatar_observations(
                 avatar_snapshot, now, ships)
+        if isinstance(avatar_observations, dict):
+            # Same object as the top-level metadata: one HP sample clock.
+            avatar_observations['healthSampling'] = health_sampling
+            avatar_observations['comparisonSampling'] = comparison_sampling
         diag['avatarSnapshotStatus'] = {
             'status': avatar_snapshot['status'], 'count': avatar_snapshot['count'],
             'limit': avatar_snapshot['limit'], 'reason': avatar_snapshot['reason']}
-        self_state = self._build_self(ui_hp, self_info, self_ship)
+        diag['healthSamplingStatus'] = health_sampling['status']
+        if not health_due:
+            diag.pop('uiHealth', None)
+        if health_due:
+            self_state = self._build_self(ui_hp, self_info, self_ship)
+        else:
+            self_state = self._build_self(ui_hp, self_info, self_ship,
+                                          health_due=False)
         torpedoes_phase = profiler.begin('torpedoes') if profiler is not None else None
         sampling = getattr(self, '_torpedoSamplingGroups', None)
         context = (self._torpedo_sampling_context(self_state, diag)
@@ -2077,6 +2226,7 @@ class Collector(object):
             'battleId': self._battleId,
             'active': bool(self._active),
             'ts': now,
+            'healthSampling': health_sampling,
             'self': self_state,
             'ships': ships,
             'avatarObservations': avatar_observations,
@@ -2135,21 +2285,40 @@ class Collector(object):
             return None
 
     def _build_avatar_observations(self, avatar_snapshot, now, ships):
-        """Report only current captured-avatar fields, separate from API ships."""
+        """Report only current captured-avatar fields, separate from API ships.
+
+        Positions, visibility and the ids needed for joins are captured every
+        core tick. The shared HP group only fills ``rows[].health`` on
+        ``_healthSamplingDue``; apiPresence/consistency/coverage are assembled
+        only on ``_comparisonSamplingDue`` so a non-due frame keeps raw ids and
+        map positions without pretending the comparison observed zero matches.
+        Both flags default to due for standalone/legacy readers.
+        """
         entities = avatar_snapshot.get('entities', []) or []
         input_status = avatar_snapshot.get('status', 'unknown')
         input_complete = input_status == 'complete'
+        health_due = _get(self, '_healthSamplingDue', True) is True
+        comparison_due = _get(self, '_comparisonSamplingDue', True) is True
+        health_sampling = {
+            'status': 'sampled' if health_due else 'notSampled',
+            'sampleTs': _observation_scalar(now) if health_due else None,
+            'intervalSeconds': _get(self, '_healthSamplingInterval', 0.5)}
+        comparison_sampling = {
+            'status': 'sampled' if comparison_due else 'notSampled',
+            'sampleTs': _observation_scalar(now) if comparison_due else None,
+            'intervalSeconds': _get(self, '_comparisonSamplingInterval', 1.0)}
         sample_reader = getattr(entities, 'sample_ids', None)
         sample = _try(lambda: sample_reader(CC)) if sample_reader is not None else None
         sample_rows = sample.get('rows', []) if isinstance(sample, dict) else []
 
         ship_counts = {}
-        for ship in ships or []:
-            player_id = ship.get('playerId') if isinstance(ship, dict) else None
-            key = _strict_player_lookup_key(player_id)
-            if key is None:
-                continue
-            ship_counts[key] = ship_counts.get(key, 0) + 1
+        if comparison_due:
+            for ship in ships or []:
+                player_id = ship.get('playerId') if isinstance(ship, dict) else None
+                key = _strict_player_lookup_key(player_id)
+                if key is None:
+                    continue
+                ship_counts[key] = ship_counts.get(key, 0) + 1
 
         observation_ids = {}
         candidate_ids = {}
@@ -2181,32 +2350,43 @@ class Collector(object):
                 candidate_reason = None
             row_ids.append((key, safe_id, candidate_key, candidate_id,
                             candidate_status, candidate_reason, row))
-            if key is not None:
-                observation_ids[key] = observation_ids.get(key, 0) + 1
-            if candidate_key is not None:
-                candidate_ids[candidate_key] = candidate_ids.get(candidate_key, 0) + 1
+            if comparison_due:
+                if key is not None:
+                    observation_ids[key] = observation_ids.get(key, 0) + 1
+                if candidate_key is not None:
+                    candidate_ids[candidate_key] = candidate_ids.get(
+                        candidate_key, 0) + 1
 
-        conflicts = set(key for key, count in observation_ids.items() if count > 1)
-        conflicts.update(key for key, count in ship_counts.items() if count > 1)
-        candidate_conflicts = set(
-            key for key, count in candidate_ids.items() if count > 1)
-        candidate_ship_conflicts = set(
-            key for key, count in ship_counts.items() if count > 1)
-        candidate_available = candidate_exact = candidate_unmatched = 0
-        candidate_ambiguous = candidate_unknown = 0
-        for (_key, _player_id, candidate_key, _candidate_id, _status,
-             _reason, _row) in row_ids:
-            if candidate_key is None:
-                candidate_unknown += 1
-            else:
-                candidate_available += 1
-                if (candidate_key in candidate_conflicts or
-                        candidate_key in candidate_ship_conflicts):
-                    candidate_ambiguous += 1
-                elif candidate_key in ship_counts:
-                    candidate_exact += 1
+        if comparison_due:
+            conflicts = set(key for key, count in observation_ids.items()
+                            if count > 1)
+            conflicts.update(key for key, count in ship_counts.items() if count > 1)
+            candidate_conflicts = set(
+                key for key, count in candidate_ids.items() if count > 1)
+            candidate_ship_conflicts = set(
+                key for key, count in ship_counts.items() if count > 1)
+            candidate_available = candidate_exact = candidate_unmatched = 0
+            candidate_ambiguous = candidate_unknown = 0
+            for (_key, _player_id, candidate_key, _candidate_id, _status,
+                 _reason, _row) in row_ids:
+                if candidate_key is None:
+                    candidate_unknown += 1
                 else:
-                    candidate_unmatched += 1
+                    candidate_available += 1
+                    if (candidate_key in candidate_conflicts or
+                            candidate_key in candidate_ship_conflicts):
+                        candidate_ambiguous += 1
+                    elif candidate_key in ship_counts:
+                        candidate_exact += 1
+                    else:
+                        candidate_unmatched += 1
+        else:
+            # Do not build the comparison sets/counters off the 1 Hz group.
+            conflicts = set()
+            candidate_conflicts = set()
+            candidate_ship_conflicts = set()
+            candidate_available = candidate_exact = candidate_unmatched = 0
+            candidate_ambiguous = candidate_unknown = 0
 
         out_rows = []
         matched = missing = unknown = unmatchable = 0
@@ -2216,14 +2396,20 @@ class Collector(object):
             row = {}
             if key is None:
                 row['playerIdStatus'] = 'unknown'
-                row['apiPresence'] = {'status': 'unknown', 'source': 'state.ships',
-                                      'reason': 'unmatchablePlayerId'}
-                unmatchable += 1
-                unknown += 1
+                if comparison_due:
+                    row['apiPresence'] = {
+                        'status': 'unknown', 'source': 'state.ships',
+                        'reason': 'unmatchablePlayerId'}
+                    unmatchable += 1
+                    unknown += 1
+                else:
+                    row['apiPresence'] = {'status': 'notSampled'}
             else:
                 row['playerId'] = player_id
                 row['playerIdStatus'] = 'available'
-                if key in conflicts:
+                if not comparison_due:
+                    row['apiPresence'] = {'status': 'notSampled'}
+                elif key in conflicts:
                     row['apiPresence'] = {'status': 'unknown', 'source': 'state.ships',
                                           'reason': 'duplicateIdConflict'}
                     unknown += 1
@@ -2262,10 +2448,18 @@ class Collector(object):
                     'freshness': 'unknown',
                     'raw': [None, None], 'nx': None, 'ny': None,
                 }
-            if map_row.get('status') == 'available':
+            if comparison_due and map_row.get('status') == 'available':
                 map_available += 1
             row['mapPosition'] = map_row
 
+            if not health_due:
+                # HP group not due: distinguish an intentional no-read from a
+                # read that failed (status 'unknown'). Do not carry old values.
+                row['health'] = {'status': 'notSampled',
+                                 'source': 'dataHub.avatar.health',
+                                 'sampleTs': None}
+                out_rows.append(row)
+                continue
             health_sample = sampled.get('health') if isinstance(sampled, dict) else None
             health_observation = (sampled.get('healthObservation')
                                  if isinstance(sampled, dict) else None)
@@ -2315,12 +2509,12 @@ class Collector(object):
             }
             out_rows.append(row)
 
-        return {
-            'status': input_status,
-            'source': 'dataHub.getEntityCollections(avatar)',
-            'sampleTs': _observation_scalar(now),
-            'rows': out_rows,
-            'candidateConsistency': {
+        input_availability = ('unavailable' if avatar_snapshot.get(
+            'reason') in ('getterError', 'none') else
+            ('available' if input_status in ('complete', 'partial', 'truncated')
+             else 'unknown'))
+        if comparison_due:
+            candidate_consistency = {
                 'source': 'sameSnapshot.avatar.id == state.ships[].playerId',
                 'candidateNamespace': 'avatar.id',
                 'comparedNamespace': 'ships[].playerId',
@@ -2335,15 +2529,12 @@ class Collector(object):
                 'candidateUnknownCount': candidate_unknown,
                 'duplicateAvatarIdCount': len(candidate_conflicts),
                 'duplicateShipPlayerIdCount': len(candidate_ship_conflicts),
-            },
-            'coverage': {
+            }
+            coverage = {
                 'sampledEntityCount': len(entities),
                 'inputStatus': input_status,
                 'inputComplete': input_complete,
-                'inputAvailability': ('unavailable' if avatar_snapshot.get(
-                    'reason') in ('getterError', 'none') else
-                    ('available' if input_status in ('complete', 'partial', 'truncated')
-                     else 'unknown')),
+                'inputAvailability': input_availability,
                 'reason': avatar_snapshot.get('reason'),
                 'limit': avatar_snapshot.get('limit'),
                 'distinctPlayerIdCount': len(observation_ids),
@@ -2354,11 +2545,58 @@ class Collector(object):
                 'duplicateIdConflictCount': len(conflicts),
                 'mapPositionAvailableCount': map_available,
                 'healthRawAvailableCount': health_available,
-            },
+            }
+            if not health_due:
+                # No HP observation was attempted on this comparison-only tick.
+                # Zero would incorrectly look like a sampled-but-empty HP set.
+                del coverage['healthRawAvailableCount']
+        else:
+            # Comparison group not due: say so instead of reporting zero matches
+            # as if this frame had really compared and found nothing.
+            candidate_consistency = {
+                'status': 'notSampled',
+                'source': 'scheduling',
+                'sampleTs': None,
+                'intervalSeconds': 1.0,
+                'reason': 'comparisonNotSampled',
+                'candidateNamespace': 'avatar.id',
+                'comparedNamespace': 'ships[].playerId',
+                'comparison': 'strictScalarTypeAndValue',
+                'semantics': 'unverified',
+                'avatarInputComplete': input_complete,
+            }
+            coverage = {
+                'status': 'notSampled',
+                'source': 'scheduling',
+                'sampleTs': None,
+                'intervalSeconds': 1.0,
+                'sampledEntityCount': len(entities),
+                'inputStatus': input_status,
+                'inputComplete': input_complete,
+                'inputAvailability': input_availability,
+                'reason': avatar_snapshot.get('reason'),
+                'limit': avatar_snapshot.get('limit'),
+            }
+        return {
+            'status': input_status,
+            'source': 'dataHub.getEntityCollections(avatar)',
+            'sampleTs': _observation_scalar(now),
+            'healthSampling': health_sampling,
+            'comparisonSampling': comparison_sampling,
+            'rows': out_rows,
+            'candidateConsistency': candidate_consistency,
+            'coverage': coverage,
         }
 
-    def _collect_avatar_health(self, entities=None):
-        """Live HP from the same dataHub `health` component TTaroTeamPanel binds."""
+    def _collect_avatar_health(self, entities=None, health_due=True):
+        """Live HP from the same dataHub `health` component TTaroTeamPanel binds.
+
+        ``health_due`` defaults to True for the standalone/legacy readers. The
+        runtime collector passes False off the shared HP group, which must run
+        zero health getters instead of re-reading or carrying an old value.
+        """
+        if not health_due:
+            return {}
         if CC is None:
             return {}
         sample_reader = getattr(entities, 'sample_health', None)
@@ -2369,7 +2607,8 @@ class Collector(object):
             entities = _try(lambda: dataHub.getEntityCollections('avatar'), []) or []
         return index_avatar_health(entities, CC)
 
-    def _build_self(self, ui_hp=None, self_info=_UNSET, self_ship=_UNSET):
+    def _build_self(self, ui_hp=None, self_info=_UNSET, self_ship=_UNSET,
+                    health_due=True):
         info = (_try(lambda: battle.getSelfPlayerInfo())
                 if self_info is _UNSET else self_info)
         data = {}
@@ -2379,6 +2618,8 @@ class Collector(object):
             gd = _try(lambda: info.shipGameData)
             if gd is not None:
                 for k in ('health', 'maxHealth', 'yaw', 'speed', 'isVisible', 'isShipVisible'):
+                    if not health_due and k in ('health', 'maxHealth'):
+                        continue
                     v = _try(lambda: gd[k]) if _is_mapping(gd) else _try(lambda: getattr(gd, k))
                     if v is not None:
                         data[k] = v
@@ -2391,12 +2632,15 @@ class Collector(object):
             if pos:
                 data['position'] = pos
             for k in ('health', 'maxHealth', 'yaw'):
+                if not health_due and k in ('health', 'maxHealth'):
+                    continue
                 if k not in data:
                     v = _try(lambda: getattr(ship, k))
                     if v is not None:
                         data[k] = v
         data['isObserver'] = _try(lambda: battle.isObserverMode(), False)
-        apply_ui_health(data, ui_hp)
+        if health_due:
+            apply_ui_health(data, ui_hp)
         return data if data else None
 
     def _position_from_obj(self, obj, skip_get_position=False):
@@ -2746,7 +2990,7 @@ class Collector(object):
         return self._mapCalibration.map_to_world(mx, my)
 
     def _build_ships(self, now, ui_hp=None, avatar_entities=None,
-                     players_sample=_UNSET):
+                     players_sample=_UNSET, health_due=True):
         self._positionDiagnostics = {}
         player_reads = {
             'source': 'sampleLocalPlayersIndex',
@@ -2827,7 +3071,8 @@ class Collector(object):
             teamId = ship_team
             entry['teamId'] = teamId
             entry['relation'] = self._relation(teamId)
-            entry['alive'] = _try(lambda: ship.isAlive())
+            if health_due:
+                entry['alive'] = _try(lambda: ship.isAlive())
             ui_visibility = self._mapVisibility.get(pid, {})
             ui_diagnostics = self._mapVisibilityDiagnostics.get(pid, {})
             api_visibility = {}
@@ -2925,12 +3170,16 @@ class Collector(object):
                 entry['position'] = pos
             entry['positionAvailable'] = bool(pos or norm is not None)
             for k in ('yaw', 'health', 'maxHealth', 'name'):
+                if not health_due and k in ('health', 'maxHealth'):
+                    continue
                 v = _get(ship, k)
                 if v is not None:
                     entry[k] = v
             # 3D ship.health is empty on some builds; fill from dataHub avatar
             # health (the component TTaroTeamPanel's side bars already use).
-            apply_ui_health(entry, ui_hp, for_unspotted=entry.get('visible') is False)
+            if health_due:
+                apply_ui_health(entry, ui_hp,
+                                for_unspotted=entry.get('visible') is False)
             # spotted-only enemies have no ship.yaw; fall back to mapPosition yaw
             if entry.get('yaw') is None and mp is not None and mp[2] is not None:
                 entry['yaw'] = mp[2]
@@ -2984,6 +3233,7 @@ class Collector(object):
                 'sampledShips': sampled_ships,
                 'notSampledShips': len(out) - sampled_ships,
             },
+            'healthSamplingStatus': 'sampled' if health_due else 'notSampled',
             'uiHealth': nHp,
         }
 

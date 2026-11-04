@@ -72,6 +72,33 @@ const collision={...grouped,membership:[[8,3,4],[8.0,3,4]]};
 draw({battleId:'collision',active:true,ts:12,ships:[],torpedoes:[{...low,sampling:{...low.sampling,sampleTs:12}}],torpedoStatus:collision});
 draw({battleId:'collision',active:true,ts:12.2,ships:[],torpedoes:[],torpedoStatus:collision});
 assert.equal(run('markers.length'),0);
+const hpShip={playerId:1,vehicleId:2,uiId:3,nx:.2,ny:.3,health:100,maxHealth:200,alive:true};
+const hpDue=ts=>({status:'sampled',sampleTs:ts,intervalSeconds:.5});
+const hpSkip={status:'notSampled',sampleTs:null,intervalSeconds:.5};
+draw({battleId:'health',active:true,ts:20,ships:[hpShip],torpedoes:[],healthSampling:hpDue(20)});
+assert.equal(run('markers[0].obj.viewerHealth.health'),100);
+assert.equal(run('markers[0].obj.viewerHealth.held'),false);
+assert.equal(hpShip.viewerHealth,undefined); // display history never mutates producer observations
+draw({battleId:'health',active:true,ts:20.2,ships:[{playerId:1,vehicleId:2,uiId:3,nx:.4,ny:.3}],torpedoes:[],healthSampling:hpSkip});
+assert.equal(run('markers[0].obj.nx'),.4);
+assert.equal(run('markers[0].obj.health'),undefined);
+assert.equal(run('markers[0].obj.viewerHealth.health'),100);
+run('show(markers[0],false)');assert(elements['#detail'].textContent.includes('現在HPではない'));
+draw({battleId:'health',active:true,ts:20.6,ships:[{...hpShip,health:0,alive:false}],torpedoes:[],healthSampling:hpDue(20.6)});
+assert.equal(run('markers[0].obj.viewerHealth.health'),0);
+assert.equal(run('markers[0].obj.viewerHealth.alive'),false);
+draw({battleId:'health',active:true,ts:21,ships:[{playerId:1,vehicleId:2,uiId:3,nx:.4,ny:.3}],torpedoes:[],healthSampling:hpDue(21)});
+assert.equal(run('markers[0].obj.viewerHealth'),undefined); // a failed due sample is not filled from history
+draw({battleId:'health',active:true,ts:22,ships:[hpShip],torpedoes:[],healthSampling:hpDue(22)});
+wall+=1600;
+draw({battleId:'health',active:true,ts:22.2,ships:[{playerId:1,vehicleId:2,uiId:3,nx:.4,ny:.3}],torpedoes:[],healthSampling:hpSkip},true);
+assert.equal(run('markers[0].obj.viewerHealth'),undefined);
+draw({battleId:'health',active:true,ts:23,ships:[hpShip],torpedoes:[],healthSampling:hpDue(23)});
+draw({battleId:'new-health',active:true,ts:23.2,ships:[{playerId:1,vehicleId:2,uiId:3,nx:.4,ny:.3}],torpedoes:[],healthSampling:hpSkip});
+assert.equal(run('healthSamples.size'),0);
+draw({battleId:'new-health',active:true,ts:24,ships:[hpShip],torpedoes:[],healthSampling:hpDue(24)});
+draw({battleId:'new-health',active:false,ships:[],torpedoes:[]});
+assert.equal(run('healthSamples.size'),0);
 '''
     result = subprocess.run([shutil.which('node'), '-e', code, str(html)],
                             capture_output=True, text=True, timeout=20)

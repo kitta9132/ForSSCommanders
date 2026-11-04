@@ -4,7 +4,7 @@
   "battleId": "synthetic-example-only",
   "mod": {
     "name": "WowsExtractor",
-    "version": "0.3.34-initial-torpedo-parameters"
+    "version": "0.3.35-health-cadence"
   },
   "ts": 120.0,
   "battleType": null,

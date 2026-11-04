@@ -259,11 +259,17 @@ class AvatarRows(list):
             self._sample = sample
         return sample
 
-    def sample_health(self, cc):
+    def sample_health(self, cc, include_health=True):
         # Partial captures still expose raw health for entities actually seen.
         # They never create a health index: absence from an incomplete capture
         # remains unknown rather than alive/dead.
+        #
+        # ``include_health=False`` is the runtime off-due path: ids and map
+        # positions are still sampled at the core rate, but no health component
+        # field is read or cached for a later frame.
         sample = self.sample_ids(cc)
+        if not include_health:
+            return sample["rows"] if self.complete else []
         rows = sample["rows"]
         for index, entity in enumerate(self):
             row = rows[index]
@@ -273,13 +279,19 @@ class AvatarRows(list):
         return rows if self.complete else []
 
 
-def apply_ui_health(entry, index, for_unspotted=False):
+def apply_ui_health(entry, index, for_unspotted=False, health_due=True):
     """Fill missing health / maxHealth on a ship or self dict. Returns entry.
 
     ``for_unspotted``: last-seen / 灭点 rows. Do not copy the Unbound
     "value==0 means full bar" sentinel, and let UI ``isAlive=False``
     overwrite a ghost that was still flagged alive.
+
+    ``health_due=False``: the shared HP group is not sampled this frame. No
+    alias lookup or field copy happens; callers must omit health/alive instead
+    of carrying a previous value forward.
     """
+    if not health_due:
+        return entry
     if not isinstance(entry, dict) or not index:
         return entry
     rec = None

@@ -1,5 +1,9 @@
 # 開発タスク
 
+0.3.35最終検証：Python3.11全505テスト成功（私有record replayを含む）、9 moduleのPython2 grammar／collector checker成功。ソース検証のみで実機FPSは未確認。
+
+最新ソース：**0.3.35-health-cadence**（未導入・実機未確認）。HP・生存値取得を共通平均2Hz、avatar照合／集計を1Hzへ分離。位置・visibility・必要IDは5Hz維持。HP非dueはraw fieldsを省略し、群別sampleTsとnotSampledを出力。合成fixtureではHP component read60%減、getter再列挙なし。FPSは未計測。△装填／ping／初回性能の[コード棚卸し](WowsExtractor-torpedoes-client-test/docs/CODE_AUDIT_PARTIAL_ITEMS.ja.md)も完了、次はFPSタスクC。
+
 最新ソース：**0.3.34-initial-torpedo-parameters**（未導入・実機未確認）。⑧魚雷性能・弾薬paramsの定期取得とTTX／tooltip性能probeを撤去し、戦闘初回の結果だけmetaへ保存。全Python3.11回帰491 passed（私有replay含む）、9 module checker成功。①HP群2Hz・②③④⑤⑥⑦⑨⑩1Hz化は[依存・取り逃し調査](WowsExtractor-torpedoes-client-test/docs/RESEARCH_SLOW_GROUPS.ja.md)完了、周期変更は未実装。①②の共通HP源、④⑤短期状態、⑥故障timer未観測等の判断が残る。以下の旧版記述は履歴。
 
 現行ソース：**0.3.33-torpedo-sampling-groups**（未導入・実機未確認）。5秒距離再分類・high5Hz／low平均2Hz・新規暫定highを実装。今回sampleと全体membershipを分け、far非dueの位置・owner・派生処理を省略。Python3.11全pytest485 passed（B43/B44私有replayを明示ONして含む）、9 module checker成功。位置read削減はB43約9.88%／B44約18.62%だが、ホストの安価getterではnear中心時に管理固定費で遅くなりFPS改善は未確認。通常導入保留。砲弾道計算は0.3.32で全撤去済み。最新進捗は[FPS専用タスク](WowsExtractor-torpedoes-client-test/docs/FPS_TASKS.ja.md)を参照。
@@ -10,6 +14,8 @@
 
 <a id="task-performance"></a>
 ## 緊急優先：通常プレイのFPS低下
+
+- 共通HP群2Hz＋avatar照合／集計1Hzの実装・△装填／潜水艦コード棚卸しを完了。次は[タスクC](WowsExtractor-torpedoes-client-test/docs/FPS_TASKS.ja.md#fps-other)の集計頻度・診断依存を整理する。直近の⑨1Hz指定に合わせ、damageイベントは維持しsnapshot生成・出力だけを低頻度化する方針。既知の未知を理由に同条件の実機試験を繰り返さない。
 
 - 最新の低頻度化指定と依存調査：[10項目の調査](WowsExtractor-torpedoes-client-test/docs/RESEARCH_SLOW_GROUPS.ja.md)、[実装タスクE](WowsExtractor-torpedoes-client-test/docs/FPS_TASKS.ja.md#fps-slow-groups)。①HP群2Hzと②avatar1Hzは共有HP源のため分割が必要。④⑤は短期状態取り逃し、⑥故障timerは実測根拠不足。⑧は初回取得のみへ変更済み。他群の周期はまだ変更していない。
 
@@ -113,6 +119,8 @@ FPS改善の実施順・詳細タスクは[専用タスクファイル](WowsExtr
 <a id="task-armament"></a>
 ## P1：装填・魚雷性能（取得経路調査→mod）
 
+0.3.34固定版の[△コード棚卸し](WowsExtractor-torpedoes-client-test/docs/CODE_AUDIT_PARTIAL_ITEMS.ja.md)：装填progressとloaded count、gun IDと物理管番号、module critTimerを分離。初回TTX selectorの実機未確認と、定期tooltip selector撤去後の状態を整理した。新しい実機根拠はなく△を維持する。
+
 - [△] 0.3.9で`selectedTorpedoParamsProbe`実装。controller selection → unique slot.type → exact slot.id/ammo.id → `viewData.paramsDescriptor` → 固定TTX variantの経路をread-only候補として追加。B15で当該Undine条件の値を確認済み。0.3.10でGUI抽出owner参照を確認し、`torpedoTooltipParameterProbe`を追加。B18でPython playerAvatar singleton、complete parameter collection（54行）、固定field shape/raw valuesを実機確認。正本0.3.10 raw selectorは複合key誤構成でnoExactMatchだった。修正後はB18のraw rowsを使ったoffline選択確認済み。これは実機の修正版再試験ではなく、GUI lookup/namespaceの意味確認も未完了。詳細は[B18記録](WowsExtractor-torpedoes-client-test/docs/VALIDATION_0.3.10_B18_PARAMETERS.ja.md)。
   - 2026-11-02 B15追記：0.3.9実機のUndine選択魚雷で、selection 162/162 strict一意match、descriptorはpinger 25→torpedo 137、`selfVehicle`/`shipTTX`は162/162 available。選択`torpedo` variantは137/137 available、speed 75.0/delta 0、maxDist 9.0/delta 0（すべてvalue/delta available）。画面報告75kts/9kmとの当該条件内の数値整合を確認。`ttxStatus=partial`は固定3 variant中deepwater/alternativeが`none`のためで、selected leafの失敗ではない。`ammoParams`は162 stateで`{}`のままで、今回の値は別経路。補正後live値・単位・delta意味・Battle tooltip上書き・全艦一般は未確認のため[△]維持。追加実機試験は当該条件では不要。詳細は[B15記録](WowsExtractor-torpedoes-client-test/docs/VALIDATION_0.3.9_B15_TTX.ja.md)。
 
@@ -126,6 +134,8 @@ FPS改善の実施順・詳細タスクは[専用タスクファイル](WowsExtr
 
 <a id="task-submarine"></a>
 ## P1：潜水艦固有情報（取得経路調査→mod）
+
+[△コード棚卸し](WowsExtractor-torpedoes-client-test/docs/CODE_AUDIT_PARTIAL_ITEMS.ja.md)：WaveHit targetIDは同snapshot観測集合内の候補一致だけ。lifeTimeのUI countdown hintをTTL／失効契約へ昇格しない。新たなGUI探索・同条件の実機再試験は不要。
 
 - [△] 0.3.11で`selfSubmarineProbe`と`waveHitProbe`を追加。B23は両probeが列挙例外だった一方、同じ2,622 active frameすべてで既存`weaponContextProbe.collections.selfVehicle`は完全なsingletonとしてavailable。0.3.12で列挙を`for ... in enumerate(...)`へ変更し、制限builtins fixtureを含むoffline回帰を追加。B24の206 active frameでは両collectionが正常取得され、selfVehicle singletonと各Submarine/Battery raw fieldがavailable、WaveHitはcompleteな正常空collection。B23の原因は依然未確定。B27ではUndineの2,233 active samplesとWaveHit 439 snapshotsをraw照合し、depth/Battery/WaveHitのUI用途根拠を静的資料で別metadata化（0.3.13）。depthのmはUI hint、enum名はUI label、`lifeTime`はUIの秒countdown入力に限り、サーバー状態一般は確定しない。同じ潜水試験の再要求は不要。B27記録：[潜水艦](WowsExtractor-torpedoes-client-test/docs/VALIDATION_0.3.12_B27_SUBMARINE.ja.md)／[WaveHit](WowsExtractor-torpedoes-client-test/docs/VALIDATION_0.3.12_B27_WAVEHIT.ja.md)、[UI根拠](WowsExtractor-torpedoes-client-test/docs/RESEARCH_SUBMARINE_STATE_SEMANTICS.ja.md)。
 - [△] 対象艦・魚雷の深度および深度差。0.3.28の独立1Hz `dataHub.torpedo.depth`候補はB40で262行raw0.14を取得し、一意UI/API ID対応時だけ`uiState.depth`へ付与。unitはnull。`position.y`・地図補助y=0は代用しない。別深度での変化、単位、対象艦深度・深度差は未確定。同じ浮上発射試験は繰り返さない。

@@ -1,5 +1,7 @@
 # 既知の問題と実用化の到達点
 
+0.3.35更新：HP群平均2Hz・avatar比較1Hzを実装。位置と必要IDは5Hz維持し、非dueのHPを現在値として持ち越さない。付属viewerの過去HP表示はsample時刻付き。実機FPSは未確認。[△コード棚卸し](CODE_AUDIT_PARTIAL_ITEMS.ja.md)では未知を閉じる新実測はなく、装填・修理timer・WaveHit対象候補・TTLを分離して記録した。
+
 0.3.34更新：魚雷性能・弾薬paramsは戦闘初回のみのmetaへ移動し、定期TTX／tooltip性能probeも撤去。初回未準備時の欠測は固定され、再取得しない制約が残る。他情報の低頻度化は[10項目の調査](RESEARCH_SLOW_GROUPS.ja.md)と[FPSタスクE](FPS_TASKS.ja.md#fps-slow-groups)へ。HP源の重複・短期状態の取り逃し等を無条件に安全とは扱わない。
 
 0.3.33更新：5秒距離再分類・近距離5Hz／遠距離平均2Hz、新規・不明暫定5Hzをソース実装。位置read削減を既存記録で確認したが、near中心時のscheduler固定費リスクがありFPS改善は未認定。全体membershipと今回sampleを分けた新契約・consumer対応も実装済み、実機未確認のため通常導入は保留。[予算・固定費・検証結果](FPS_TASKS.ja.md)。

@@ -1,7 +1,9 @@
 # WowsExtractor 魚雷出力版：実機テスト用パッケージ
 
 作成日：2026-11-04（日本時間）
-modバージョン：`0.3.34-initial-torpedo-parameters` / ModsAPI：`API_v1.0`（source only・未導入／未実機）
+modバージョン：`0.3.35-health-cadence` / ModsAPI：`API_v1.0`（source only・未導入／未実機）
+
+0.3.35は共通HP・生存値の取得を平均2Hz、avatar照合／集計を1Hzへ分離。位置・visibility・必要IDは5Hz維持。HP非dueのraw fieldを省略し、群別sample状態・時刻を出す。付属viewerは取得時刻付きの前回HP表示に対応。実機性能は未確認。以下は旧版履歴。
 
 0.3.34は魚雷性能・弾薬paramsの定期取得を撤去し、戦闘ごとの初回結果だけをmeta.torpedoInitialParamsへ保存する。動的補正は外部マップ責務。初回取得不能はunknownのまま固定し、周期retryしない。艦HP2Hz・他情報1Hz化は[依存調査](docs/RESEARCH_SLOW_GROUPS.ja.md)の段階で、まだ周期を変えていない。
 

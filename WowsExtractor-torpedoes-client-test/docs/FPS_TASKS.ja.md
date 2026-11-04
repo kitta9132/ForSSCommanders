@@ -3,11 +3,21 @@
 <a id="fps-slow-groups"></a>
 ## E：情報群の低頻度化（最新指定）
 
+0.3.35実装：①②は共通HP・生存値群2Hz、avatar照合・集計1Hzへ分割。位置・visibilityと必要IDは5Hz維持。他の1Hz候補はこの版へ混ぜない。HP非dueのgetter0、比較非dueのcount省略、death／0HP sentinel／partial／clock resetをoffline確認。実機性能は未確認。
+
+親の最終検証はPython3.11全505 passed（私有replay含む）、9 module checker成功。付属viewerの過去HP保持・欠測時破棄・終了／ID切替とrecorderの非due状態保存も回帰対象。
+
+親の合成fixture比較（Python3.11、24 avatar／20 API艦、300 tick×3反復中央値、snapshot＋compact JSON encode）は0.3.34の1.759ms→0.3.35の1.494ms。HP component read 7,200→2,880（60%減）、比較sample 300→60、avatar collection getterは300→300で維持。総byteは13,313,974→12,227,790（約8.16%減）。test_health_sampling_cadenceのcounted fake componentsと旧Main固定版からのメソッド差替えを使用したホスト上の限定比較であり、ゲームAPI内部費用・FPS・実機payloadの測定ではない。
+
+次の作業順（追加キュー）：①②の検証・統合 → TASKSの△領域で有用なコード確認と根拠文書化（既知調査の繰り返しはしない） → Cの用途外処理削減・実用情報の独立化へ進む。
+
+△領域の読取りは完了し、[装填・ping・初回性能のコード境界](CODE_AUDIT_PARTIAL_ITEMS.ja.md)へ記録した。未知を閉じる新しい実機根拠はなく、△は維持。HP周期分離を統合したらCへ進む。
+
 [10項目の依存・取り逃し調査](RESEARCH_SLOW_GROUPS.ja.md)を参照。①HP・生存値2Hz、②③④⑤⑥⑦⑨⑩は1Hzの適性を調査、⑧の性能・弾薬paramsは初回取得のみへ変更する。
 
 - [x] ①②のHP源重複、avatar位置／識別依存、③遠距離位置と⑩較正modelの分離を調査。
 - [x] ④⑤の短期状態、⑥故障timerの根拠不足、⑦Battery独立化、⑨イベント受付とsnapshot頻度の分離を調査。
-- [ ] ①②はHP群2Hz・照合／coverage1Hzの分割案を確定し実装。avatarの全列挙・必要ID・位置まで1Hzへ落とさない。
+- [x] ①②を0.3.35でHP群2Hz・照合／coverage1Hzへ分割。avatar全列挙・必要ID・位置は5Hz維持。新しいAPI/health readを非dueで増やさない回帰を追加。
 - [ ] ③の全位置1Hzかworld/yawのみ1Hzか、距離閾値・重要対象例外を決定して実装。
 - [ ] ④⑤は短期遷移取り逃し・作動検知遅延を明記して1Hz群を設計。
 - [ ] ⑥は1Hz化可能でも故障・修理の検出保証は未確認とする。
