@@ -6,7 +6,7 @@
 
 API_VERSION = 'API_v1.0'
 MOD_NAME = 'WowsExtractor'
-MOD_VERSION = '0.3.36-damage-cadence'
+MOD_VERSION = '0.3.37-independent-submarine'
 
 # ---------------------------------------------------------------------------
 # WowsExtractor -- observations for an external submarine-combat map.
@@ -807,6 +807,9 @@ class Collector(object):
         self._stateInterval = STATE_INTERVAL
         self._collectionEnabled = False
         self._diagnosticsEnabled = False
+        self._selfDepthSamplingEnabled = False
+        self._batterySamplingEnabled = False
+        self._waveHitSamplingEnabled = False
         self._torpedoDepthSamplingEnabled = False
         self._torpedoDepthSamplingInterval = 1.0
         self._torpedoDepthSamplingNextDue = None
@@ -875,6 +878,15 @@ class Collector(object):
         self._collectionEnabled = cfg.get('collection_enabled') == 'true'
         self._diagnosticsEnabled = (
             self._collectionEnabled and cfg.get('diagnostics_enabled') == 'true')
+        self._selfDepthSamplingEnabled = (
+            self._collectionEnabled and
+            cfg.get('self_depth_sampling_enabled') == 'true')
+        self._batterySamplingEnabled = (
+            self._collectionEnabled and
+            cfg.get('battery_sampling_enabled') == 'true')
+        self._waveHitSamplingEnabled = (
+            self._collectionEnabled and
+            cfg.get('wave_hit_sampling_enabled') == 'true')
         self._positionFallbacksEnabled = (
             self._collectionEnabled and cfg.get('position_fallbacks_enabled') == 'true')
         profiler_enabled = (
@@ -1606,6 +1618,124 @@ class Collector(object):
             self._diagnosticsNextDue = now + self._diagnosticsInterval
         return due
 
+    def _submarine_sampling_plan(self, diagnostic_due, comparison_due):
+        """Select independent core/comparison reads, falling back to legacy
+        heavy-diagnostic reads only for groups without their own opt-in.
+
+        Depth and WaveHit use the caller's core tick. Battery shares the
+        existing one-Hz comparison gate; it is never re-read by heavy
+        diagnostics when its dedicated sampler is enabled but not due.
+        """
+        depth_enabled = _get(self, '_selfDepthSamplingEnabled', False) is True
+        battery_enabled = _get(self, '_batterySamplingEnabled', False) is True
+        wave_hit_enabled = _get(self, '_waveHitSamplingEnabled', False) is True
+        diagnostic_due = diagnostic_due is True
+        comparison_due = comparison_due is True
+        sample_depth = (depth_enabled or
+                        (diagnostic_due and not depth_enabled))
+        sample_battery = ((battery_enabled and comparison_due) or
+                          (diagnostic_due and not battery_enabled))
+        sample_wave_hit = (wave_hit_enabled or
+                           (diagnostic_due and not wave_hit_enabled))
+        any_opt_in = depth_enabled or battery_enabled or wave_hit_enabled
+        diagnostics_enabled = _get(self, '_diagnosticsEnabled', False) is True
+        diagnostic_interval = _get(self, '_diagnosticsInterval', 1.0)
+        core_interval = _get(self, '_stateInterval', STATE_INTERVAL)
+        comparison_interval = _get(
+            self, '_comparisonSamplingInterval', COMPARISON_SAMPLING_INTERVAL)
+
+        def group(status_enabled, selected, interval, source, config_source):
+            if selected:
+                status = 'sampled'
+                sample_ts = None  # filled by _collect_submarine_probes
+            elif status_enabled or diagnostics_enabled:
+                status = 'notSampled'
+                sample_ts = None
+                source = 'scheduling'
+            else:
+                status = 'disabled'
+                sample_ts = None
+                source = config_source
+            return {'status': status, 'sampleTs': sample_ts,
+                    'intervalSeconds': interval, 'source': source}
+
+        return {
+            'sample_depth': sample_depth,
+            'sample_battery': sample_battery,
+            'sample_wave_hit': sample_wave_hit,
+            'any_opt_in': any_opt_in,
+            'sampling': {
+                'depth': group(depth_enabled, sample_depth,
+                               core_interval if depth_enabled else diagnostic_interval,
+                               'core' if depth_enabled else 'diagnostics',
+                               'config.self_depth_sampling_enabled'),
+                'battery': group(battery_enabled, sample_battery,
+                                 comparison_interval if battery_enabled else diagnostic_interval,
+                                 'comparison' if battery_enabled else 'diagnostics',
+                                 'config.battery_sampling_enabled'),
+                'waveHit': group(wave_hit_enabled, sample_wave_hit,
+                                 core_interval if wave_hit_enabled else diagnostic_interval,
+                                 'core' if wave_hit_enabled else 'diagnostics',
+                                 'config.wave_hit_sampling_enabled'),
+            },
+        }
+
+    def _collect_submarine_probes(self, diagnostic_hub, now, diagnostic_due,
+                                  comparison_due, plan=None):
+        """Sample selected submarine groups without retaining game objects."""
+        if plan is None:
+            plan = self._submarine_sampling_plan(diagnostic_due,
+                                                 comparison_due)
+        sample_depth = plan['sample_depth']
+        sample_battery = plan['sample_battery']
+        sample_wave_hit = plan['sample_wave_hit']
+        wave_hit_sampled = sample_wave_hit
+
+        if not plan['any_opt_in']:
+            if diagnostic_due:
+                # Preserve the legacy default-heavy call and raw output shape.
+                probes = _try(lambda: safe_submarine_probe(diagnostic_hub, CC, now),
+                    {'selfSubmarineProbe': {'source': 'dataHub.selfVehicle',
+                        'status': 'unknown', 'semantics': 'unverified',
+                        'sampleTs': now, 'collection': {}, 'entityIdCandidate': None,
+                        'components': {}},
+                     'waveHitProbe': {'source': 'dataHub.waveHit', 'status': 'unknown',
+                        'semantics': 'unverified', 'sampleTs': now, 'collection': {},
+                        'componentKeyStatus': 'unknown', 'rows': [],
+                        'truncated': False, 'partial': False}})
+                return probes, wave_hit_sampled
+            state = ({'status': 'notSampled', 'source': 'scheduling'}
+                     if _get(self, '_diagnosticsEnabled', False) is True else
+                     {'status': 'disabled', 'source': 'config.diagnostics_enabled'})
+            return {'selfSubmarineProbe': dict(state),
+                    'waveHitProbe': dict(state)}, False
+
+        probes = _try(lambda: safe_submarine_probe(
+            diagnostic_hub, CC, now, sample_depth=sample_depth,
+            sample_battery=sample_battery, sample_wave_hit=sample_wave_hit),
+            {'selfSubmarineProbe': {'source': 'dataHub.selfVehicle',
+                'status': 'unknown', 'semantics': 'unverified',
+                'sampleTs': now if sample_depth or sample_battery else None,
+                'collection': {}, 'entityIdCandidate': None, 'components': {}},
+             'waveHitProbe': {'source': 'dataHub.waveHit',
+                'status': 'unknown' if sample_wave_hit else 'notSampled',
+                'semantics': 'unverified',
+                'sampleTs': now if sample_wave_hit else None,
+                'collection': {}, 'componentKeyStatus': 'unknown', 'rows': [],
+                'truncated': False, 'partial': False}})
+        sampling = plan['sampling']
+        for name in ('depth', 'battery', 'waveHit'):
+            if sampling[name]['status'] == 'sampled':
+                sampling[name]['sampleTs'] = now
+        self_probe = probes.get('selfSubmarineProbe')
+        if isinstance(self_probe, dict):
+            self_probe['sampling'] = {
+                'depth': sampling['depth'], 'battery': sampling['battery']}
+        wave_probe = probes.get('waveHitProbe')
+        if isinstance(wave_probe, dict):
+            wave_probe['sampling'] = sampling['waveHit']
+        return probes, wave_hit_sampled
+
     # -- relation helper ----------------------------------------------------
     def _self_team(self, self_info=_UNSET):
         """Self team id, memoized for the duration of one snapshot build so we
@@ -1957,6 +2087,18 @@ class Collector(object):
         players_sample = self._remember_roster_vehicles(avatar_entities)
         health_due = _get(self, '_healthSamplingDue', True) is True
         comparison_due = _get(self, '_comparisonSamplingDue', True) is True
+        plan_builder = _get(self, '_submarine_sampling_plan', None)
+        if callable(plan_builder):
+            submarine_plan = plan_builder(diagnostic_due, comparison_due)
+        else:
+            # Older offline __new__ fixtures extract _build_state alone. Their
+            # missing opt-in attributes retain the pre-independent heavy path.
+            submarine_plan = {
+                'sample_depth': diagnostic_due,
+                'sample_battery': diagnostic_due,
+                'sample_wave_hit': diagnostic_due,
+                'any_opt_in': False,
+            }
         health_sampling = {
             'status': 'sampled' if health_due else 'notSampled',
             'sampleTs': now if health_due else None,
@@ -2048,6 +2190,11 @@ class Collector(object):
                        torpedo_status.get('membershipComplete') is True else torpedoes)
         diagnostic_hub = None
         if diagnostic_due or depth_sampling_due or state_sampling_due:
+            diagnostic_hub = _try(
+                lambda: shared_diagnostic_snapshot(dataHub), None)
+        elif (submarine_plan['sample_depth'] or
+              submarine_plan['sample_battery'] or
+              submarine_plan['sample_wave_hit']):
             diagnostic_hub = _try(
                 lambda: shared_diagnostic_snapshot(dataHub), None)
         if diagnostic_due:
@@ -2165,6 +2312,35 @@ class Collector(object):
                      'sampleTs': None}
         diagnostics_phase = (profiler.begin('diagnostics_due')
                              if profiler is not None and diagnostic_due else None)
+        submarine_phase = (profiler.begin('submarine_sampling')
+                           if profiler is not None and not diagnostic_due and
+                           (submarine_plan['sample_depth'] or
+                            submarine_plan['sample_battery'] or
+                            submarine_plan['sample_wave_hit']) else None)
+        probe_collector = _get(self, '_collect_submarine_probes', None)
+        if callable(probe_collector):
+            submarine_probes, wave_hit_sampled = probe_collector(
+                diagnostic_hub, now, diagnostic_due, comparison_due,
+                submarine_plan)
+        elif diagnostic_due:
+            submarine_probes = _try(
+                lambda: safe_submarine_probe(diagnostic_hub, CC, now),
+                {'selfSubmarineProbe': {'source': 'dataHub.selfVehicle',
+                    'status': 'unknown', 'semantics': 'unverified',
+                    'sampleTs': now, 'collection': {}, 'entityIdCandidate': None,
+                    'components': {}},
+                 'waveHitProbe': {'source': 'dataHub.waveHit', 'status': 'unknown',
+                    'semantics': 'unverified', 'sampleTs': now, 'collection': {},
+                    'componentKeyStatus': 'unknown', 'rows': [],
+                    'truncated': False, 'partial': False}})
+            wave_hit_sampled = True
+        else:
+            state = unsampled if diagnostic_enabled else disabled
+            submarine_probes = {'selfSubmarineProbe': dict(state),
+                                'waveHitProbe': dict(state)}
+            wave_hit_sampled = False
+        if submarine_phase is not None:
+            profiler.finish(submarine_phase)
         if diagnostic_due:
             weapon_probe = _try(lambda: safe_weapon_hub_probe(diagnostic_hub, CC),
                 {'source': 'dataHub weapon UI candidates', 'status': 'unknown',
@@ -2179,15 +2355,6 @@ class Collector(object):
                 {'source': 'dataHub UI gun reload candidates', 'status': 'unknown',
                  'semantics': 'unverified', 'collections': {}, 'references': [],
                  'error': 'probeFailed'})
-            submarine_probes = _try(lambda: safe_submarine_probe(diagnostic_hub, CC, now),
-                {'selfSubmarineProbe': {'source': 'dataHub.selfVehicle',
-                    'status': 'unknown', 'semantics': 'unverified',
-                    'sampleTs': now, 'collection': {}, 'entityIdCandidate': None,
-                    'components': {}},
-                 'waveHitProbe': {'source': 'dataHub.waveHit', 'status': 'unknown',
-                    'semantics': 'unverified', 'sampleTs': now, 'collection': {},
-                    'componentKeyStatus': 'unknown', 'rows': [],
-                    'truncated': False, 'partial': False}})
             for _probe in (weapon_context, game_clock):
                 for _observation in _get(_probe, 'observations', {}).values():
                     _observation['sampleTs'] = now
@@ -2197,8 +2364,6 @@ class Collector(object):
             weapon_context = dict(state)
             game_clock = dict(state)
             gun_reload = dict(state)
-            submarine_probes = {'selfSubmarineProbe': dict(state),
-                                'waveHitProbe': dict(state)}
         if profiler is not None and diagnostic_due:
             profiler.finish(diagnostics_phase)
         if diagnostic_due and ui_join_status != 'available':
@@ -2208,10 +2373,15 @@ class Collector(object):
                 'status': 'notSampled', 'reason': identity_reason,
                 'source': 'scheduling', 'sampleTs': now,
                 'torpedoRowsStatus': identity_reason}
-        elif diagnostic_due:
+        elif diagnostic_due and wave_hit_sampled:
             identity_candidates_state = _try(
                 lambda: safe_identity_candidates(ships, self_state, torpedoes,
                     submarine_probes['waveHitProbe']), dict(disabled))
+        elif diagnostic_due:
+            identity_candidates_state = {
+                'status': 'notSampled', 'reason': 'waveHitNotSampled',
+                'source': 'scheduling', 'sampleTs': now,
+                'torpedoRowsStatus': 'notSampled'}
         else:
             identity_candidates_state = dict(unsampled if diagnostic_enabled else disabled)
         if diagnostic_due:

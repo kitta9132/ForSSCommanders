@@ -239,20 +239,30 @@ AP通常経路は1 stateあたり照準getter最大2回、条件次第でimpact 
 <a id="fps-other"></a>
 ## C：その他の削減候補
 
+0.3.37統合：自艦深度／Battery／WaveHitを専用既定OFF設定でheavy diagnosticsから分離。深度／WaveHitはcore周期、Batteryは比較共通1Hz、専用ON群のcadenceをheavy dueで上書きしない。群別sampling状態／時刻を追加し、同tick facade共有、identity候補はheavy dueの同frameだけ。独立probe費用をprofilerのsubmarine_samplingへ計上する（heavy dueでは従来diagnostics_due内）。親の全545 passed（私有replay含む）、9 module checker成功。装填は軽量helper基盤のみで独立runtimeは未完、実機未確認・退避継続。
+
+次版の親レビュー：制限builtinsテストをモジュール再exec方式へ修正したところ、gun collection／modifier配列のenumerate依存で取得unknownになる問題を検出。gun専用のforベース添字列挙へ変更し、制限環境・共有collection getter予算・参照16件上限を含む関連156 passed。既存moduleの__builtins__差替えだけではPython3の生成済み関数を制限できないため、この新規テストでは制限namespace下で関数を生成し、実際のbuiltins参照もassertする。実ゲームでの失敗を観測した主張ではない。
+
+次版準備：gun reload helperにmodifier参照解決を明示省略する選択肢を追加。直接collectionのgun／reloadBar／gunBarrel観測は同一のまま、references=[]・getEntity.status=notSampled・attempted=0とする。既定は従来の参照解決を維持し、runtime独立samplerへの接続はまだ行わない。既存関連と新規予算テスト152 passed。これを「管ID解決」「装填数確定」とは扱わない。
+
 0.3.36親検証：全519 passed（私有replay含む）、9 module checker成功。damage非dueのrecorder保存、選択probeの全群OFF read0とshared facade予算も確認した。
+
+damage単体の補助測定（Python3.11、300tick×5反復中央値、snapshot＋群metadataのcompact JSON encode）：空台帳は毎tick0.0055ms→5tickに1回0.0036ms、24player全ての異なる順序pairに各100damageを投入した合成台帳は1.0731ms→0.2125ms。snapshot回数300→60、後者の当該部分byte3,862,187→791,330。比較の両側へ同じmetadataを含め、イベント更新費用とstateの他fieldは含めない。実戦のdamage分布・全payload・ゲームFPSへの外挿はしない。
 
 0.3.36：damage snapshot生成／出力を既存comparison1Hz枠へ統合。イベント受付と台帳更新は変更せず、終了時の最新出力、非due snapshot呼出し0、collection OFF呼出し0、例外nullを回帰対象とした。depth／Battery／WaveHitの選択read基盤は同梱するが、独立runtime統合は次工程として未完を維持する。実機FPSは未確認。
 
 △コード棚卸し後に着手。直近の⑨指定を優先し、damageは全削除せずイベント全受付を維持、snapshot再構築・出力のみ既存1Hz枠へ乗せる。現行players strict indexとdamage cacheの共通読取りを崩さない。
 
-depth／Battery／WaveHitについては、合同probeの内部で読むcomponentを個別に選べる基盤を準備中。これだけでは独立samplerのruntime統合完了とはしない。既定呼出しは従来どおり、全群非dueではcollection/component read0、Battery非dueでもdepth／WaveHitは別々に採取できることをoffline確認する。
+depth／Battery／WaveHitについては、合同probeの内部で読むcomponentを個別に選べる基盤を0.3.36へ同梱済み。これだけでは独立samplerのruntime統合完了とはしない。既定呼出しは従来どおり、全群非dueではcollection/component read0、Battery非dueでもdepth／WaveHitは別々に採取できることをoffline確認済み。
 
 独立化の初期方針：専用opt-inは既定OFF・collection必須とし、depthとWaveHitはcore周期、Batteryは共通1Hz枠を使う。全てOFFなら従来どおり詳細診断だけが読み、明示ON時は詳細診断一式を要求しない。同時dueなら1つのsample-local facade／合同呼出しへまとめ、同名collection getterを増やさない。gun reloadの独立化は別途、既存modifier getEntity探索を高頻度で繰り返さない設計が必要（[△棚卸し](CODE_AUDIT_PARTIAL_ITEMS.ja.md)）。
 
-- [ ] damage集計の用途・consumer・vehicle/player対応との依存を分け、不要な集計・イベント・出力だけを撤去する。
+- [x] damageの依存を分け、イベント・ID対応を維持して不要な非due snapshot生成／出力を省略する（0.3.36）。イベント自体の撤去は行わない。
 - [ ] 自艦depth／Battery／ping／装填を独立sampleへ整理し、実用情報のために詳細診断一式をONにしなくてよい構成へする。
 - [ ] HP・avatar／ships観測の重複payloadは、観測範囲を失わないこととconsumer契約を優先して検討する。
-- [ ] 0.3.31較正最適化の小reservoir固定費を評価する。現在の比較削減をFPS改善済みとは扱わない。
+- [x] 0.3.31較正最適化の小reservoir固定費をホスト合成比較で評価。下記の限定条件では0～8件でindex固定費が不利、16件以上で有利。実機FPS改善とは扱わず、切替の追加実装は保留。
+
+小reservoir比較（Python3.11、5反復中央値、256候補×4回／反復、map格子0.06間隔、既存と同一sqrt・閾値判定、全候補結果一致）：reservoir件数0/4/8/16/32/64/128/256に対するindexed µsは5.018/5.322/5.479/5.597/5.655/5.739/5.855/5.904、旧linear判定µsは0.132/2.199/4.691/8.257/16.769/33.442/65.502/137.580。候補の重複早期returnがない疎な配置の検索単体であり、fit費用・getter・state全体・ゲームPython2・FPSは測っていない。小件数でbruteへ切り替えるなら別途密集／early return条件と実runtimeで評価し、B44再生のsnapshot／reservoir／RNG同一性を再確認する。今回このためのゲーム試験は求めない。
 
 <a id="fps-validation"></a>
 ## D：完了判定・検証

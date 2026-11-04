@@ -1,7 +1,9 @@
 # WowsExtractor 魚雷出力版：実機テスト用パッケージ
 
 作成日：2026-11-04（日本時間）
-modバージョン：`0.3.36-damage-cadence` / ModsAPI：`API_v1.0`（source only・未導入／未実機）
+modバージョン：`0.3.37-independent-submarine` / ModsAPI：`API_v1.0`（source only・未導入／未実機）
+
+0.3.37：`self_depth_sampling_enabled`／`battery_sampling_enabled`／`wave_hit_sampling_enabled`を個別に追加（既定false・collection必須）。詳細診断OFFでも自艦深度／WaveHitはcore周期、Batteryは比較共通1Hzで採取できる。群別sampling時刻を確認し、上位probe時刻を非due Batteryの取得時刻に使わない。gun軽量helperは基盤だけで独立runtime未接続。実機未確認。
 
 0.3.36はdamageイベント受付を維持し、台帳snapshot生成・出力だけを共通1Hz枠へ移す。非dueはdamage省略＋damageSampling、終了時は最新台帳を強制出力。潜水艦probeの個別read選択基盤も追加したが、独立runtime設定はまだ未統合。
 

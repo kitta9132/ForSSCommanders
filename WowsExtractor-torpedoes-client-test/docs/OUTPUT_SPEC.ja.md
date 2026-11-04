@@ -1,5 +1,16 @@
 # WowsExtractor 魚雷出力版（WoWSクライアント用mod）
 
+## 0.3.37：自艦深度・Battery・WaveHitの独立取得
+
+- collection有効時の専用設定`self_depth_sampling_enabled`／`battery_sampling_enabled`／`wave_hit_sampling_enabled`を追加（全て既定false）。深度・WaveHitはcore周期（標準0.2秒）、Batteryは既存比較共通1秒期限。heavy diagnosticsは不要。
+- 専用設定ONの群はそのcadenceを優先し、heavy dueでも非due Batteryを読み直さない。専用OFFの群は従来のheavy due取得を維持する。全てOFF時は従来のheavy出力形状を維持。
+- いずれか専用ONなら`selfSubmarineProbe.sampling.depth`／`.battery`、`waveHitProbe.sampling`に`{status:sampled|notSampled|disabled,sampleTs:now|null,intervalSeconds,source:core|comparison|diagnostics|scheduling|config...}`を付加する。sampledは試行で、raw statusのavailableを保証しない。上位self probeのsampleTsはその呼出し時刻であり、非due Batteryの取得時刻ではない。
+- 非due componentはnotSampled、過去rawを持ち越さない。同tickのcollection列挙は既存sample-local facadeを共有する。WaveHit identityCandidatesはheavy dueかつ同frame取得時だけ従来の候補照合を行う。独立取得を対象namespace確定やTTL保証へ昇格しない。
+- collection無効時は専用設定を無効化し追加APIを呼ばない。終了frameは従来の終了契約で、潜水艦raw最終sampleを捏造しない。
+- gun helperの`resolve_references=False`は直接collection観測を維持しつつmodifierのgetEntityを省略、references=[]・getEntity.status=notSampled・attempted=0。既定は従来True。gun独立runtimeはまだ未接続。gun／submarine列挙の不要なenumerate builtin依存を除去した。
+
+schema=1/apiVersion=1.0維持。実機FPS・新設定による実機取得は未確認。
+
 ## 0.3.36：damage snapshot 1Hz
 
 - damageイベント受付・既存台帳更新は維持。snapshot生成と出力のみavatar比較と同じ1秒dueへ同期する。位置5Hz・HP平均2Hzは変更しない。

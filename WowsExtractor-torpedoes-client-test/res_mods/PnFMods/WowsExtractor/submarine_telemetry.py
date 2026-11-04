@@ -166,7 +166,7 @@ def _collection(hub, name, limit, stop_on_second=False):
         return result, []
     found = []
     try:
-        for _, entity in enumerate(entities):
+        for entity in entities:
             found.append(entity)
             if stop_on_second and len(found) == 2:
                 result.update(status='unknown', complete=False, count=2,

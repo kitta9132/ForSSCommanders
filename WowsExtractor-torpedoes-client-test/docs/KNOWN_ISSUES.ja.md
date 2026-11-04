@@ -1,5 +1,7 @@
 # 既知の問題と実用化の到達点
 
+0.3.37：[FPS C](FPS_TASKS.ja.md#fps-other)の自艦深度／Battery／WaveHitを診断から独立化（既定OFF）。群ごとのsampleTsと非dueを参照する。WaveHit対象namespace／TTL・装填数／管IDは未解決のまま。gun独立runtimeと実機FPS確認は未完、退避継続。
+
 0.3.36：[FPS C](FPS_TASKS.ja.md#fps-other)のdamage snapshot生成・出力1Hz化を実装。イベント全受付・終了時最新台帳を維持する。潜水艦の個別read選択は基盤のみで独立runtimeは未完。ゲーム導入・FPS検証は保留継続。
 
 0.3.35更新：HP群平均2Hz・avatar比較1Hzを実装。位置と必要IDは5Hz維持し、非dueのHPを現在値として持ち越さない。付属viewerの過去HP表示はsample時刻付き。実機FPSは未確認。[△コード棚卸し](CODE_AUDIT_PARTIAL_ITEMS.ja.md)では未知を閉じる新実測はなく、装填・修理timer・WaveHit対象候補・TTLを分離して記録した。

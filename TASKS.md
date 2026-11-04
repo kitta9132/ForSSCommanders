@@ -1,5 +1,9 @@
 # 開発タスク
 
+0.3.37親検証：全545 passed（Python3.11、私有replay含む）、9 moduleのPython2 grammar／collector checker成功。導入・実機取得・FPS確認は未実施。
+
+最新ソース：**0.3.37-independent-submarine**（未導入・実機未確認）。自艦深度／Battery／WaveHitの独立runtimeを統合。専用設定は既定OFF、深度とWaveHitはcore周期、Batteryは共通1Hz、同tick facade共有・群別sampling metadata。装填は参照解決を省略できるhelper基盤のみ、独立runtimeは次工程。制限builtinsを実際に適用するテストでgun／submarineのenumerate依存も除去。以下は旧版履歴。
+
 0.3.36最終検証：Python3.11全519 passed（私有replay含む）、9 moduleのPython2 grammar／collector checker成功。実機未確認、mod退避継続。
 
 最新ソース：**0.3.36-damage-cadence**（未導入・実機未確認）。FPS Cのdamage snapshot生成・出力を共通比較1Hz枠へ移し、非due省略とdamageSamplingを追加。イベント・台帳更新・strict player indexは維持し、終了時は周期外の最終イベントも出力する。潜水艦probeの選択read基盤を追加したが独立runtimeは未統合。以下の版別記述は履歴。

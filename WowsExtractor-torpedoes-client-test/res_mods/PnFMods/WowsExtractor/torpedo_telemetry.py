@@ -1119,6 +1119,14 @@ def _gun_component_fields(component, fields, prefix):
     return values, statuses
 
 
+def _gun_indexed(items):
+    # WoWS may expose a restricted builtin namespace without enumerate.
+    index = 0
+    for item in items:
+        yield index, item
+        index += 1
+
+
 def _gun_collection(hub, components, name, component_name, fields):
     key_status, key = _probe_component_key(components, component_name)
     getter_status = _getter_status(hub, 'getEntityCollections')
@@ -1142,7 +1150,7 @@ def _gun_collection(hub, components, name, component_name, fields):
         return out
     out['callStatus'] = 'available'
     try:
-        for index, entity in enumerate(entities):
+        for index, entity in _gun_indexed(entities):
             if index >= 32:
                 out['truncated'] = True
                 break
@@ -1197,7 +1205,7 @@ def _gun_collection(hub, components, name, component_name, fields):
                             row[member] = [_gun_scalar(
                                 'gun.%s.%s[%d]' % (modifier_name, member, n),
                                 'available', value)
-                                for n, value in enumerate(arr[:GUN_REFS_PER_MODIFIER])]
+                                for n, value in _gun_indexed(arr[:GUN_REFS_PER_MODIFIER])]
                         else:
                             row[member + 'Status'] = 'unknown'
                     else:
@@ -1210,7 +1218,7 @@ def _gun_collection(hub, components, name, component_name, fields):
     return out
 
 
-def gun_reload_probe(hub, components):
+def gun_reload_probe(hub, components, resolve_references=True):
     """Bounded raw candidates for UI gun/reload-bar routes; no inferred joins."""
     result = {'source': 'dataHub UI gun reload candidates',
               'status': 'unknown', 'semantics': 'unverified',
@@ -1223,6 +1231,16 @@ def gun_reload_probe(hub, components):
     for name, (component, fields) in specs.items():
         result['collections'][name] = _gun_collection(
             hub, components, name, component, fields)
+    if not resolve_references:
+        # Direct collection observations remain current. Unresolved modifier
+        # references are deliberately not retried on this lightweight path.
+        result['references'] = []
+        result['getEntity'].update(status='notSampled', attempted=0,
+                                   remainingBudget=GUN_REF_BUDGET)
+        statuses = [v['status'] for v in result['collections'].values()]
+        result['status'] = ('available' if 'available' in statuses else
+                            ('partial' if 'partial' in statuses else 'unknown'))
+        return result
     refs, seen, budget = [], set(), [GUN_REF_BUDGET]
     for row in result['collections']['gun']['rows']:
         for member in ('barrels', 'serialLoads'):
@@ -1269,9 +1287,9 @@ def gun_reload_probe(hub, components):
     return result
 
 
-def safe_gun_reload_probe(hub, components):
+def safe_gun_reload_probe(hub, components, resolve_references=True):
     try:
-        return gun_reload_probe(hub, components)
+        return gun_reload_probe(hub, components, resolve_references)
     except Exception:
         return {'source': 'dataHub UI gun reload candidates', 'status': 'unknown',
                 'semantics': 'unverified', 'collections': {}, 'references': [],
