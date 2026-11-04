@@ -77,6 +77,14 @@ def test_full_capture_preserves_health_non_due_and_avatar_comparison_status(tmp_
     assert 'alive' not in result['ships'][0]
 
 
+def test_full_capture_preserves_damage_non_due_without_inventing_an_empty_ledger(tmp_path):
+    status = {'status': 'notSampled', 'sampleTs': None, 'intervalSeconds': 1.}
+    write(tmp_path / 'state.json', damageSampling=status)
+    result = rec.poll_files(tmp_path, {})[0]['data']
+    assert result['damageSampling'] == status
+    assert 'damage' not in result
+
+
 def test_cannot_overwrite_source_or_existing_recording(tmp_path):
     source = tmp_path / 'state.json'
     write(source)

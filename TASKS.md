@@ -1,5 +1,9 @@
 # 開発タスク
 
+0.3.36最終検証：Python3.11全519 passed（私有replay含む）、9 moduleのPython2 grammar／collector checker成功。実機未確認、mod退避継続。
+
+最新ソース：**0.3.36-damage-cadence**（未導入・実機未確認）。FPS Cのdamage snapshot生成・出力を共通比較1Hz枠へ移し、非due省略とdamageSamplingを追加。イベント・台帳更新・strict player indexは維持し、終了時は周期外の最終イベントも出力する。潜水艦probeの選択read基盤を追加したが独立runtimeは未統合。以下の版別記述は履歴。
+
 0.3.35最終検証：Python3.11全505テスト成功（私有record replayを含む）、9 moduleのPython2 grammar／collector checker成功。ソース検証のみで実機FPSは未確認。
 
 最新ソース：**0.3.35-health-cadence**（未導入・実機未確認）。HP・生存値取得を共通平均2Hz、avatar照合／集計を1Hzへ分離。位置・visibility・必要IDは5Hz維持。HP非dueはraw fieldsを省略し、群別sampleTsとnotSampledを出力。合成fixtureではHP component read60%減、getter再列挙なし。FPSは未計測。△装填／ping／初回性能の[コード棚卸し](WowsExtractor-torpedoes-client-test/docs/CODE_AUDIT_PARTIAL_ITEMS.ja.md)も完了、次はFPSタスクC。

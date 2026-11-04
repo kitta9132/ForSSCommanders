@@ -6,7 +6,7 @@
 
 API_VERSION = 'API_v1.0'
 MOD_NAME = 'WowsExtractor'
-MOD_VERSION = '0.3.35-health-cadence'
+MOD_VERSION = '0.3.36-damage-cadence'
 
 # ---------------------------------------------------------------------------
 # WowsExtractor -- observations for an external submarine-combat map.
@@ -1045,6 +1045,8 @@ class Collector(object):
                     'source': 'config.collection_enabled'}, 'ts': _now(),
                 'healthSampling': {'status': 'disabled', 'sampleTs': None,
                                    'intervalSeconds': 0.5},
+                'damageSampling': {'status': 'disabled', 'sampleTs': None,
+                                   'intervalSeconds': 1.0},
                 'ships': [], 'self': None, 'torpedoes': [], 'damage': {},
                 'avatarObservations': _empty_avatar_observations(
                     'disabled', 'config.collection_enabled')})
@@ -1083,17 +1085,29 @@ class Collector(object):
         # write one final snapshot marking the battle inactive (through the same
         # single writer, so it can't race a still-queued "active" frame)
         try:
+            quit_ts = _now()
+            collection_enabled = getattr(self, '_collectionEnabled', False) is True
+            damage_sampling = {
+                'status': 'sampled' if collection_enabled else 'disabled',
+                'sampleTs': quit_ts if collection_enabled else None,
+                'intervalSeconds': getattr(
+                    self, '_comparisonSamplingInterval', 1.0)}
+            # Flush the latest event ledger regardless of the regular 1 Hz
+            # cadence. Collection-off lifecycle frames must not touch it.
+            damage_snapshot = (_try(lambda: self._damage.snapshot())
+                               if collection_enabled else {})
             snap = {'schema': SCHEMA_VERSION, 'apiVersion': WIRE_API_VERSION,
-                    'battleId': self._battleId, 'active': False, 'ts': _now(),
+                    'battleId': self._battleId, 'active': False, 'ts': quit_ts,
                     'healthSampling': {'status': 'notSampled', 'sampleTs': None,
                                        'intervalSeconds': 0.5},
+                    'damageSampling': damage_sampling,
                     'ships': [], 'self': None,
                     'torpedoes': [],
                     'torpedoStatus': {'available': False, 'status': 'unknown'},
                     'torpedoArmament': {'available': False},
                     'avatarObservations': _empty_avatar_observations(
                         'notSampled', 'lifecycle', 'battleEnded'),
-                    'damage': self._damage.snapshot()}
+                    'damage': damage_snapshot}
             if not self._collectionEnabled:
                 snap['collection'] = {'status': 'disabled',
                                       'source': 'config.collection_enabled'}
@@ -2220,13 +2234,26 @@ class Collector(object):
             armament_systems = (
                 _try(lambda: self._torpedoes.armament(self_ship), {'available': False}),
                 _try(lambda: self._torpedoes.systems(self_ship), {'status': 'unknown'}))
-        return {
+        damage_collection_enabled = _get(self, '_collectionEnabled', True) is True
+        damage_sampling = {
+            'status': ('disabled' if not damage_collection_enabled else
+                       'sampled' if comparison_due else 'notSampled'),
+            'sampleTs': (now if damage_collection_enabled and comparison_due
+                         else None),
+            'intervalSeconds': _get(self, '_comparisonSamplingInterval', 1.0)}
+        # DamageTracker receives every event, but snapshot construction and its
+        # JSON payload share the existing comparison 1 Hz gate. A snapshot
+        # failure remains unknown (None), never an empty/zero ledger.
+        damage_snapshot = (_try(lambda: self._damage.snapshot())
+                           if damage_collection_enabled and comparison_due else None)
+        state = {
             'schema': SCHEMA_VERSION,
             'apiVersion': WIRE_API_VERSION,
             'battleId': self._battleId,
             'active': bool(self._active),
             'ts': now,
             'healthSampling': health_sampling,
+            'damageSampling': damage_sampling,
             'self': self_state,
             'ships': ships,
             'avatarObservations': avatar_observations,
@@ -2244,9 +2271,11 @@ class Collector(object):
             'gameClockProbe': game_clock,
             'torpedoArmament': armament_systems[0],
             'selfSystems': armament_systems[1],
-            'damage': self._damage.snapshot(),
             'diag': diag,
         }
+        if damage_collection_enabled and comparison_due:
+            state['damage'] = damage_snapshot
+        return state
 
     def _torpedo_sampling_context(self, self_state, diag):
         """Use only this snapshot's self position and validated numeric fit.

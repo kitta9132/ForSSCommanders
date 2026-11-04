@@ -1,5 +1,15 @@
 # WowsExtractor 魚雷出力版（WoWSクライアント用mod）
 
+## 0.3.36：damage snapshot 1Hz
+
+- damageイベント受付・既存台帳更新は維持。snapshot生成と出力のみavatar比較と同じ1秒dueへ同期する。位置5Hz・HP平均2Hzは変更しない。
+- `damageSampling={status:sampled|notSampled|disabled,sampleTs:now|null,intervalSeconds:1.0}`。sampledは取得試行であり成功保証ではない。例外時のdamageはnullとし、0や空台帳へ偽装しない。
+- 非dueはdamageキーを省略し、過去台帳を現在sampleとして再出力しない。consumerは全snapshot置換として読み、合計やvictim帰属の減少を許容する。差分を単純加算しない。
+- collection有効の終了frameは周期を無視して最新damageを出す。collection無効の開始／終了ではsnapshotを呼ばず、damage={}とdisabled metadataを出す。
+- submarine helperにdepth／Battery／WaveHitの個別read選択を追加。既定呼出しは従来どおりであり、専用runtime設定・独立scheduleを実装済みとはしない。全選択OFFではcollection/component readを行わない。
+
+schema=1/apiVersion=1.0を維持。実機FPS改善・初回性能取得の実機可用性は未確認。
+
 ## 0.3.35：共通HP群2Hz、avatar比較群1Hz
 
 位置・yaw・visibility・必要IDの5Hz取得を維持し、HP・生存値のreadを共通0.5秒期限へ、avatarのAPI範囲比較／candidateConsistency／coverage集計を1.0秒期限へ分離する。0.2秒tickへ量子化するためHPは0.4/0.6秒相当の交互で平均約2Hz、比較は約1Hz。実際の取得時刻を使い、周期を厳密保証しない。

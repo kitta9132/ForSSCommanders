@@ -239,6 +239,16 @@ AP通常経路は1 stateあたり照準getter最大2回、条件次第でimpact 
 <a id="fps-other"></a>
 ## C：その他の削減候補
 
+0.3.36親検証：全519 passed（私有replay含む）、9 module checker成功。damage非dueのrecorder保存、選択probeの全群OFF read0とshared facade予算も確認した。
+
+0.3.36：damage snapshot生成／出力を既存comparison1Hz枠へ統合。イベント受付と台帳更新は変更せず、終了時の最新出力、非due snapshot呼出し0、collection OFF呼出し0、例外nullを回帰対象とした。depth／Battery／WaveHitの選択read基盤は同梱するが、独立runtime統合は次工程として未完を維持する。実機FPSは未確認。
+
+△コード棚卸し後に着手。直近の⑨指定を優先し、damageは全削除せずイベント全受付を維持、snapshot再構築・出力のみ既存1Hz枠へ乗せる。現行players strict indexとdamage cacheの共通読取りを崩さない。
+
+depth／Battery／WaveHitについては、合同probeの内部で読むcomponentを個別に選べる基盤を準備中。これだけでは独立samplerのruntime統合完了とはしない。既定呼出しは従来どおり、全群非dueではcollection/component read0、Battery非dueでもdepth／WaveHitは別々に採取できることをoffline確認する。
+
+独立化の初期方針：専用opt-inは既定OFF・collection必須とし、depthとWaveHitはcore周期、Batteryは共通1Hz枠を使う。全てOFFなら従来どおり詳細診断だけが読み、明示ON時は詳細診断一式を要求しない。同時dueなら1つのsample-local facade／合同呼出しへまとめ、同名collection getterを増やさない。gun reloadの独立化は別途、既存modifier getEntity探索を高頻度で繰り返さない設計が必要（[△棚卸し](CODE_AUDIT_PARTIAL_ITEMS.ja.md)）。
+
 - [ ] damage集計の用途・consumer・vehicle/player対応との依存を分け、不要な集計・イベント・出力だけを撤去する。
 - [ ] 自艦depth／Battery／ping／装填を独立sampleへ整理し、実用情報のために詳細診断一式をONにしなくてよい構成へする。
 - [ ] HP・avatar／ships観測の重複payloadは、観測範囲を失わないこととconsumer契約を優先して検討する。

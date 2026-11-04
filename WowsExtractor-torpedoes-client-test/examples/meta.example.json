@@ -4,7 +4,7 @@
   "battleId": "synthetic-example-only",
   "mod": {
     "name": "WowsExtractor",
-    "version": "0.3.35-health-cadence"
+    "version": "0.3.36-damage-cadence"
   },
   "ts": 120.0,
   "battleType": null,

@@ -1,7 +1,9 @@
 # WowsExtractor 魚雷出力版：実機テスト用パッケージ
 
 作成日：2026-11-04（日本時間）
-modバージョン：`0.3.35-health-cadence` / ModsAPI：`API_v1.0`（source only・未導入／未実機）
+modバージョン：`0.3.36-damage-cadence` / ModsAPI：`API_v1.0`（source only・未導入／未実機）
+
+0.3.36はdamageイベント受付を維持し、台帳snapshot生成・出力だけを共通1Hz枠へ移す。非dueはdamage省略＋damageSampling、終了時は最新台帳を強制出力。潜水艦probeの個別read選択基盤も追加したが、独立runtime設定はまだ未統合。
 
 0.3.35は共通HP・生存値の取得を平均2Hz、avatar照合／集計を1Hzへ分離。位置・visibility・必要IDは5Hz維持。HP非dueのraw fieldを省略し、群別sample状態・時刻を出す。付属viewerは取得時刻付きの前回HP表示に対応。実機性能は未確認。以下は旧版履歴。
 

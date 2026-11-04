@@ -1,5 +1,7 @@
 # ForSSCommanders
 
+最新ソース：**0.3.36-damage-cadence**（未導入・実機未確認）。damageイベント受付は維持し、snapshot生成・出力を1Hz化。終了時は最新台帳を出力。潜水艦probeの独立化は選択read基盤のみでruntime未統合。以下は旧版履歴。
+
 最新ソース：**0.3.35-health-cadence**（未導入・実機未確認）。共通HP群平均2Hz、avatar照合・集計1Hz、位置・visibility・必要IDは5Hz維持。非dueと取得不能・HP0を分けて出力。以下は旧版履歴。
 
 最新ソース：**0.3.34-initial-torpedo-parameters**（未導入・実機未確認）。魚雷性能・弾薬paramsは戦闘初回のみ、meta.torpedoInitialParamsへ移動。動的補正はマップ側へ。HP2Hz／他情報1Hz化は[依存・取り逃し調査](WowsExtractor-torpedoes-client-test/docs/RESEARCH_SLOW_GROUPS.ja.md)のみ完了し、周期はまだ変更していない。以下の旧版説明は履歴。

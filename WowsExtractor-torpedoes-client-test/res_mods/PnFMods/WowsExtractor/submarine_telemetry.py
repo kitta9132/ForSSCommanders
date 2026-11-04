@@ -286,8 +286,19 @@ def _empty_component(name, status, reason=None):
             'fieldType': dict((key, None) for key in names)}
 
 
-def self_submarine_probe(hub, cc, sample_ts=None):
+def self_submarine_probe(hub, cc, sample_ts=None,
+                         sample_depth=True, sample_battery=True):
     """Read selfVehicle only after a complete singleton collection observation."""
+    requested = (('submarine', SUBMARINE_FIELDS, sample_depth),
+                 ('battery', BATTERY_FIELDS, sample_battery))
+    if not sample_depth and not sample_battery:
+        return {'source': 'dataHub.selfVehicle', 'status': 'notSampled',
+                'semantics': 'unverified', 'sampleTs': None,
+                'collection': {'status': 'notSampled', 'complete': False,
+                               'count': None, 'truncated': False},
+                'entityIdCandidate': None,
+                'components': dict((name, _empty_component(name, 'notSampled'))
+                                   for name, fields, enabled in requested)}
     collection, entities = _collection(hub, 'selfVehicle', SELF_LIMIT,
                                        stop_on_second=True)
     result = {'source': 'dataHub.selfVehicle', 'status': 'unknown',
@@ -296,15 +307,18 @@ def self_submarine_probe(hub, cc, sample_ts=None):
               'components': {}}
     if collection['status'] != 'available' or not collection['complete']:
         result['status'] = collection['status']
-        for name in ('submarine', 'battery'):
-            result['components'][name] = _empty_component(name, 'unknown',
-                                                          collection.get('reason'))
+        for name, fields, enabled in requested:
+            result['components'][name] = _empty_component(
+                name, 'unknown' if enabled else 'notSampled',
+                collection.get('reason') if enabled else None)
         return result
     if collection['count'] == 0:
         result['status'] = 'unknown'
         result['collection']['reason'] = 'empty'
-        for name in ('submarine', 'battery'):
-            result['components'][name] = _empty_component(name, 'unknown', 'selfVehicleMissing')
+        for name, fields, enabled in requested:
+            result['components'][name] = _empty_component(
+                name, 'unknown' if enabled else 'notSampled',
+                'selfVehicleMissing' if enabled else None)
         return result
 
     entity = entities[0]
@@ -312,8 +326,10 @@ def self_submarine_probe(hub, cc, sample_ts=None):
     if id_status == 'available':
         result['entityIdCandidate'] = _candidate(entity_id)
     component_statuses = []
-    for name, fields in (('submarine', SUBMARINE_FIELDS),
-                         ('battery', BATTERY_FIELDS)):
+    for name, fields, enabled in requested:
+        if not enabled:
+            result['components'][name] = _empty_component(name, 'notSampled')
+            continue
         key_status, key = _component_key(cc, name)
         if key_status != 'available':
             comp = _empty_component(name, key_status,
@@ -387,10 +403,12 @@ def wave_hit_probe(hub, cc, sample_ts=None):
     return result
 
 
-def safe_submarine_probe(hub, cc, sample_ts=None):
+def safe_submarine_probe(hub, cc, sample_ts=None, sample_depth=True,
+                         sample_battery=True, sample_wave_hit=True):
     """Contain all probe failures so an integrating Main can keep its state."""
     try:
-        submarine = self_submarine_probe(hub, cc, sample_ts)
+        submarine = self_submarine_probe(hub, cc, sample_ts,
+                                         sample_depth, sample_battery)
     except Exception:
         submarine = {'source': 'dataHub.selfVehicle', 'status': 'unknown',
                      'semantics': 'unverified', 'sampleTs': _candidate(sample_ts),
@@ -400,7 +418,15 @@ def safe_submarine_probe(hub, cc, sample_ts=None):
                                     'reason': 'probeFailed'},
                      'entityIdCandidate': None, 'components': {}}
     try:
-        wave_hit = wave_hit_probe(hub, cc, sample_ts)
+        if sample_wave_hit:
+            wave_hit = wave_hit_probe(hub, cc, sample_ts)
+        else:
+            wave_hit = {'source': 'dataHub.waveHit', 'status': 'notSampled',
+                        'semantics': 'unverified', 'sampleTs': None,
+                        'collection': {'status': 'notSampled', 'complete': False,
+                                       'count': None, 'truncated': False},
+                        'componentKeyStatus': 'notSampled', 'rows': [],
+                        'truncated': False, 'partial': False}
     except Exception:
         wave_hit = {'source': 'dataHub.waveHit', 'status': 'unknown',
                     'semantics': 'unverified', 'sampleTs': _candidate(sample_ts),
