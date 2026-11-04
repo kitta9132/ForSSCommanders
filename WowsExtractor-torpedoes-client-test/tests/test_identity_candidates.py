@@ -314,7 +314,7 @@ def test_real_wave_hit_producer_shape_integrates_without_extra_api_calls():
 def test_main_state_assembly_calls_safe_identity_candidates():
     main = (ROOT / 'res_mods/PnFMods/WowsExtractor/Main.py').read_text(
         encoding='utf-8')
-    assert "MOD_VERSION = '0.3.33-torpedo-sampling-groups'" in main
+    assert "MOD_VERSION = '0.3.34-initial-torpedo-parameters'" in main
     assert 'safe_identity_candidates' in main
     assert 'self_state = self._build_self(ui_hp, self_info, self_ship)' in main
     assert ("safe_identity_candidates(ships, self_state, torpedoes,\n"

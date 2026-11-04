@@ -1,7 +1,9 @@
 # WowsExtractor 魚雷出力版：実機テスト用パッケージ
 
 作成日：2026-11-04（日本時間）
-modバージョン：`0.3.33-torpedo-sampling-groups` / ModsAPI：`API_v1.0`（source only・未導入／未実機）
+modバージョン：`0.3.34-initial-torpedo-parameters` / ModsAPI：`API_v1.0`（source only・未導入／未実機）
+
+0.3.34は魚雷性能・弾薬paramsの定期取得を撤去し、戦闘ごとの初回結果だけをmeta.torpedoInitialParamsへ保存する。動的補正は外部マップ責務。初回取得不能はunknownのまま固定し、周期retryしない。艦HP2Hz・他情報1Hz化は[依存調査](docs/RESEARCH_SLOW_GROUPS.ja.md)の段階で、まだ周期を変えていない。
 
 0.3.33は魚雷を5秒ごとに距離分類し、近距離5Hz／遠距離平均2Hzでsampleする版。新規・分類不能は暫定5Hz。`torpedoes[]`は今回sampleのみであり、非掲載だけで消失と扱わず`torpedoStatus`の全体membership・sampling状態を参照する必要がある。マップ一辺（長方形は短辺）の1/3を半径とし、同座標単位の較正scaleから算出する推定値。実機未確認。以下は旧版履歴。
 

@@ -4,12 +4,28 @@
   "battleId": "synthetic-example-only",
   "mod": {
     "name": "WowsExtractor",
-    "version": "0.2.0-torpedoes"
+    "version": "0.3.34-initial-torpedo-parameters"
   },
   "ts": 120.0,
   "battleType": null,
   "gameMode": null,
   "selfPlayerId": null,
   "map": {},
-  "roster": []
+  "roster": [],
+  "torpedoInitialParams": {
+    "sampleTs": 120.0,
+    "policy": "oncePerBattle",
+    "status": "sampled",
+    "valueKind": "initialObservation",
+    "liveAdjusted": false,
+    "dynamicAdjustments": "externalMap",
+    "ammunition": {
+      "available": false,
+      "selectedAmmoStatus": "unknown",
+      "selectedAmmoId": null,
+      "ammoParamsStatus": "unknown",
+      "ammoParams": null
+    },
+    "ttx": {"status": "unknown", "variants": {}}
+  }
 }

@@ -6,7 +6,7 @@
 
 API_VERSION = 'API_v1.0'
 MOD_NAME = 'WowsExtractor'
-MOD_VERSION = '0.3.33-torpedo-sampling-groups'
+MOD_VERSION = '0.3.34-initial-torpedo-parameters'
 
 # ---------------------------------------------------------------------------
 # WowsExtractor -- observations for an external submarine-combat map.
@@ -71,7 +71,7 @@ try:
         TorpedoMotion, TorpedoSamplingGroups, sampling_wire_payload, safe_weapon_hub_probe,
         safe_weapon_context_probe, safe_game_clock_probe,
         safe_gun_reload_probe, safe_selected_torpedo_params_probe,
-        safe_torpedo_tooltip_parameter_probe, safe_identity_candidates,
+        safe_identity_candidates,
         shared_diagnostic_snapshot, ui_torpedo_probe_without_state,
         ui_torpedo_depth_probe,
         ui_torpedo_state_probe, attach_ui_depth_state,
@@ -81,7 +81,7 @@ except:
         TorpedoMotion, TorpedoSamplingGroups, sampling_wire_payload, safe_weapon_hub_probe,
         safe_weapon_context_probe, safe_game_clock_probe,
         safe_gun_reload_probe, safe_selected_torpedo_params_probe,
-        safe_torpedo_tooltip_parameter_probe, safe_identity_candidates,
+        safe_identity_candidates,
         shared_diagnostic_snapshot, ui_torpedo_probe_without_state,
         ui_torpedo_depth_probe,
         ui_torpedo_state_probe, attach_ui_depth_state,
@@ -819,6 +819,7 @@ class Collector(object):
         self._load_config()
         self._damage = DamageTracker(resolve=self._live_vehicle_player)
         self._torpedoes = TorpedoTelemetry(battle, constants)
+        self._initialTorpedoParameters = None
         self._torpedoMotion = TorpedoMotion()
         self._torpedoSamplingGroups = TorpedoSamplingGroups()
         self._mapCalibration = MapCalibration()
@@ -942,6 +943,8 @@ class Collector(object):
         self._resolve_paths()
         self._mapCalibration.clear()
         self._torpedoMotion.clear()
+        if hasattr(self, '_initialTorpedoParameters'):
+            self._initialTorpedoParameters = None
         sampling = getattr(self, '_torpedoSamplingGroups', None)
         if sampling is not None:
             sampling.clear()
@@ -1014,6 +1017,8 @@ class Collector(object):
                     'disabled', 'config.collection_enabled')})
             logInfo('collection disabled by config')
             return
+        if hasattr(self, '_initialTorpedoParameters'):
+            self._capture_initial_torpedo_parameters(_now())
         self._metaRetryUntil = _now() + META_RETRY_SECONDS
         self._remember_roster_vehicles()
         self._refresh_meta(force=True)
@@ -1613,7 +1618,34 @@ class Collector(object):
             'map': self._build_map_info(battleInfo),
             'roster': self._build_roster(),
         }
+        initial = getattr(self, '_initialTorpedoParameters', None)
+        if initial is not None:
+            meta['torpedoInitialParams'] = initial
         return meta
+
+    def _capture_initial_torpedo_parameters(self, now):
+        """Exactly one initial attempt per battle, including failed attempts.
+
+        Only JSON-safe observations are kept. Nothing is refreshed on ammo or
+        weapon changes; future modifiers belong to the external map.
+        """
+        if self._initialTorpedoParameters is not None:
+            return
+        self._initialTorpedoParameters = {
+            'sampleTs': now, 'policy': 'oncePerBattle', 'status': 'unknown',
+            'valueKind': 'initialObservation', 'liveAdjusted': False,
+            'dynamicAdjustments': 'externalMap'}
+        initial = self._initialTorpedoParameters
+        initial['ammunition'] = _try(lambda: self._torpedoes.ammunition(),
+            {'available': False, 'selectedAmmoStatus': 'unknown',
+             'selectedAmmoId': None, 'ammoParamsStatus': 'unknown', 'ammoParams': None})
+        hub = _try(lambda: shared_diagnostic_snapshot(dataHub), dataHub)
+        context = _try(lambda: safe_weapon_context_probe(hub, CC), {})
+        weapons = _try(lambda: safe_weapon_hub_probe(hub, CC), {})
+        initial['ttx'] = _try(
+            lambda: safe_selected_torpedo_params_probe(hub, CC, context, weapons),
+            {'status': 'unknown', 'reason': 'initialProbeFailed', 'variants': {}})
+        initial['status'] = 'sampled'
 
     def _build_map_info(self, battleInfo=None):
         """Collect the map's identity (for server-side recognition) and, when
@@ -1984,25 +2016,6 @@ class Collector(object):
                 {'source': 'dataHub UI gun reload candidates', 'status': 'unknown',
                  'semantics': 'unverified', 'collections': {}, 'references': [],
                  'error': 'probeFailed'})
-            selected_torpedo_params = _try(
-                lambda: safe_selected_torpedo_params_probe(
-                    diagnostic_hub, CC, weapon_context, weapon_probe),
-                {'source': 'dataHub selfVehicle shipTTX torpedo candidates',
-                 'status': 'unknown', 'semantics': 'unverified',
-                 'selection': {'status': 'unknown', 'descriptor': None},
-                 'selfVehicle': {'status': 'unknown'}, 'variant': None,
-                 'fields': {}, 'variants': {}, 'error': 'probeFailed'})
-            torpedo_tooltip_parameter = _try(
-                lambda: safe_torpedo_tooltip_parameter_probe(
-                    diagnostic_hub, CC, selected_torpedo_params),
-                {'source': 'dataHub playerAvatar owner + parameter candidates',
-                 'status': 'unknown', 'semantics': 'unverified',
-                 'ownerEntityId': {'status': 'unknown'},
-                 'parameterCollection': {'status': 'unknown', 'rows': []},
-                 'selectedParameter': {'status': 'unknown',
-                    'reason': 'probeFailed', 'fields': {}},
-                 'stages': {'owner': 'unknown', 'parameterCollection': 'unknown',
-                    'match': 'unknown'}})
             submarine_probes = _try(lambda: safe_submarine_probe(diagnostic_hub, CC, now),
                 {'selfSubmarineProbe': {'source': 'dataHub.selfVehicle',
                     'status': 'unknown', 'semantics': 'unverified',
@@ -2021,8 +2034,6 @@ class Collector(object):
             weapon_context = dict(state)
             game_clock = dict(state)
             gun_reload = dict(state)
-            selected_torpedo_params = dict(state)
-            torpedo_tooltip_parameter = dict(state)
             submarine_probes = {'selfSubmarineProbe': dict(state),
                                 'waveHitProbe': dict(state)}
         if profiler is not None and diagnostic_due:
@@ -2042,8 +2053,7 @@ class Collector(object):
             identity_candidates_state = dict(unsampled if diagnostic_enabled else disabled)
         if diagnostic_due:
             for _sample in (probe, weapon_probe, weapon_context, game_clock,
-                            gun_reload, selected_torpedo_params,
-                            torpedo_tooltip_parameter,
+                            gun_reload,
                             submarine_probes['selfSubmarineProbe'],
                             submarine_probes['waveHitProbe'],
                             identity_candidates_state):
@@ -2079,8 +2089,6 @@ class Collector(object):
             'weaponHubProbe': weapon_probe,
             'gunReloadProbe': gun_reload,
             'weaponContextProbe': weapon_context,
-            'selectedTorpedoParamsProbe': selected_torpedo_params,
-            'torpedoTooltipParameterProbe': torpedo_tooltip_parameter,
             'selfSubmarineProbe': submarine_probes['selfSubmarineProbe'],
             'waveHitProbe': submarine_probes['waveHitProbe'],
             'gameClockProbe': game_clock,

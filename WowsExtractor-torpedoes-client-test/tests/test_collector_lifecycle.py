@@ -107,6 +107,33 @@ def test_sampling_group_membership_is_cleared_at_both_battle_boundaries(harness)
     assert calls.count('sampling-clear') == 2
 
 
+def test_initial_torpedo_parameters_reset_for_the_next_battle(harness):
+    c, _, _ = harness
+    c._initialTorpedoParameters = {'sampleTs': 1., 'policy': 'oncePerBattle'}
+    c._on_battle_start()
+    assert c._initialTorpedoParameters is None
+
+
+def test_initial_performance_is_captured_once_before_metadata_and_not_on_double_start(harness):
+    c, calls, _ = harness
+    c._initialTorpedoParameters = None
+
+    def capture(now):
+        calls.append('initial-parameters')
+        c._initialTorpedoParameters = {'sampleTs': now, 'policy': 'oncePerBattle'}
+
+    c._capture_initial_torpedo_parameters = capture
+    c._on_battle_start()
+    c._on_battle_shown()
+    c._start_collection()
+    assert calls.count('initial-parameters') == 1
+    assert calls.index('initial-parameters') < calls.index(('write', 'meta.json'))
+    c._on_battle_quit()
+    c._on_battle_start()
+    c._on_battle_shown()
+    assert calls.count('initial-parameters') == 2
+
+
 def test_failed_meta_write_remains_retryable_and_does_not_report_success(harness):
     c, calls, ns = harness
     c._on_battle_start()

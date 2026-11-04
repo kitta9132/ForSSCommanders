@@ -302,6 +302,8 @@ def test_disabled_start_tick_double_start_and_quit_do_not_poll_game_apis():
     c = type('C', (), {})()
     c._active = False
     c._collectionEnabled = False
+    c._initialTorpedoParameters = None
+    c._capture_initial_torpedo_parameters = lambda now: calls.append('initial-ammo-api')
     c._start_collection = lambda: start(c)
     c._battleStarted = c._battleShown = False
     c._battleId = 'offline'
@@ -333,7 +335,7 @@ def test_disabled_start_tick_double_start_and_quit_do_not_poll_game_apis():
     assert disabled['collection']['status'] == 'disabled'
     assert not any(x in calls for x in ('schedule',
                                          'build-state', 'meta-poll', 'arena-api',
-                                          'player-api', 'roster-api'))
+                                          'player-api', 'roster-api', 'initial-ammo-api'))
     quit_battle(c)
     assert calls[-1]['collection']['status'] == 'disabled'
 
@@ -345,7 +347,7 @@ def test_diagnostic_calls_are_gated_but_opt_in_path_keeps_probe_payload():
     for fn in ('safe_weapon_hub_probe', 'safe_weapon_context_probe',
                'safe_game_clock_probe', 'safe_gun_reload_probe',
                'safe_selected_torpedo_params_probe',
-               'safe_torpedo_tooltip_parameter_probe', 'safe_submarine_probe',
+               'safe_submarine_probe',
                'safe_identity_candidates'):
         assert SOURCE.count(fn + '(') >= 1
     assert "'source': 'config.diagnostics_enabled'" in SOURCE

@@ -1,5 +1,7 @@
 # 開発タスク
 
+最新ソース：**0.3.34-initial-torpedo-parameters**（未導入・実機未確認）。⑧魚雷性能・弾薬paramsの定期取得とTTX／tooltip性能probeを撤去し、戦闘初回の結果だけmetaへ保存。全Python3.11回帰491 passed（私有replay含む）、9 module checker成功。①HP群2Hz・②③④⑤⑥⑦⑨⑩1Hz化は[依存・取り逃し調査](WowsExtractor-torpedoes-client-test/docs/RESEARCH_SLOW_GROUPS.ja.md)完了、周期変更は未実装。①②の共通HP源、④⑤短期状態、⑥故障timer未観測等の判断が残る。以下の旧版記述は履歴。
+
 現行ソース：**0.3.33-torpedo-sampling-groups**（未導入・実機未確認）。5秒距離再分類・high5Hz／low平均2Hz・新規暫定highを実装。今回sampleと全体membershipを分け、far非dueの位置・owner・派生処理を省略。Python3.11全pytest485 passed（B43/B44私有replayを明示ONして含む）、9 module checker成功。位置read削減はB43約9.88%／B44約18.62%だが、ホストの安価getterではnear中心時に管理固定費で遅くなりFPS改善は未確認。通常導入保留。砲弾道計算は0.3.32で全撤去済み。最新進捗は[FPS専用タスク](WowsExtractor-torpedoes-client-test/docs/FPS_TASKS.ja.md)を参照。
 
 実用化に向けた既知の問題・優先度・到達点は[既知の問題一覧](WowsExtractor-torpedoes-client-test/docs/KNOWN_ISSUES.ja.md)を参照。ユーザー方針（2026-11-04）：完全性の断言ではなく、既知の問題を整理し実用で問題のない水準へ詰める。
@@ -8,6 +10,8 @@
 
 <a id="task-performance"></a>
 ## 緊急優先：通常プレイのFPS低下
+
+- 最新の低頻度化指定と依存調査：[10項目の調査](WowsExtractor-torpedoes-client-test/docs/RESEARCH_SLOW_GROUPS.ja.md)、[実装タスクE](WowsExtractor-torpedoes-client-test/docs/FPS_TASKS.ja.md#fps-slow-groups)。①HP群2Hzと②avatar1Hzは共有HP源のため分割が必要。④⑤は短期状態取り逃し、⑥故障timerは実測根拠不足。⑧は初回取得のみへ変更済み。他群の周期はまだ変更していない。
 
 FPS改善の実施順・詳細タスクは[専用タスクファイル](WowsExtractor-torpedoes-client-test/docs/FPS_TASKS.ja.md)へ集約。砲弾道計算は撤去済み、距離枠による魚雷5Hz／平均2Hzもソース実装済み。位置判定は5秒ごと、全件列挙・最小IDは通常tick。実機速度は未検証。
 

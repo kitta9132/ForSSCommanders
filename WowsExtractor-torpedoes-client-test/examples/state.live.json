@@ -40,11 +40,7 @@
   "torpedoArmament": {
     "available": true,
     "modulesStatus": "available",
-    "modules": [],
-    "selectedAmmoStatus": "unknown",
-    "selectedAmmoId": null,
-    "ammoParamsStatus": "unknown",
-    "ammoParams": null
+    "modules": []
   },
   "damage": {
     "inflicted": {},

@@ -1,5 +1,17 @@
 # WowsExtractor 魚雷出力版（WoWSクライアント用mod）
 
+## 0.3.34：魚雷性能は戦闘初回のみ
+
+`meta.torpedoInitialParams`へ戦闘初回の弾薬・TTX候補を移す。`sampleTs`は取得時のゲーム時計、`policy=oncePerBattle`、`valueKind=initialObservation`、`liveAdjusted=false`、`dynamicAdjustments=externalMap`。`status=sampled`は初回試行が完了したことだけを示し、field取得成功は`ammunition`／`ttx`内のstatusで判断する。
+
+- `ammunition`：初回のselectedAmmoStatus/selectedAmmoId/ammoParamsStatus/ammoParams/available。`getSelectedAmmoId(TORPEDO)`と有効ID時の`getAmmoParams()`は1戦1回の初回経路だけ。
+- `ttx`：初回のstrict selection・固定variant・speed/maxDistのvalue/delta候補と取得状態。単位は従来のUI hint。ammo IDとGUI variantを推測joinしない。初回時点で選択不明でも固定variantの取得結果は残す。
+- 初回API未準備・欠測・空辞書を成功した性能値へ変換しない。失敗も初回結果として固定し、選択変更・診断ON・meta再構築でも再取得しない。次の戦闘開始でresetする。
+- 通常stateの`torpedoArmament`はavailable/modulesStatus/modulesのみ。selectedAmmoStatus/selectedAmmoId/ammoParamsStatus/ammoParamsを毎stateへ出さない。
+- `selectedTorpedoParamsProbe`と`torpedoTooltipParameterProbe`の定期呼出し・stateキーも撤去。動的tooltip値の収集は行わない。
+
+消耗品・装填・module状態・魚雷位置等は維持。今回、他の1Hz／2Hz候補は調査のみで周期変更していない。初回観測の値が全補正を除いた純baseである保証、マップ側の補正式・必要入力の完成を意味しない。既存consumerはmetaの初回観測へ対応し、取得時刻を現在へ書き換えない。schema=1/apiVersion=1.0を維持し、変更境界はmod.versionとfieldの有無で読む。
+
 ## 0.3.33：魚雷の周期別sample
 
 `torpedoes[]`は今回実際にsampleした魚雷行だけとなる。**配列にないことは消失ではない。** `torpedoStatus.available/status`は全体API列挙の成否、`membershipComplete`と`membership`は全件識別の観測、`sampling`は群別sampleの状態を表す。`membershipFields=["uiId","ownerId","shotId"]`の順に、membershipは`[[uiId,ownerId,shotId], ...]`を出す。重複／不明IDがあればcomplete=falseと件数を出し、match可能なIDのみをmembershipへ出す。far非dueで空rowsでも魚雷0本と判断しない。旧consumerは対応が必要。schema=1/apiVersion=1.0を維持し、変更境界はmeta.mod.versionとsampling有無で判定する。

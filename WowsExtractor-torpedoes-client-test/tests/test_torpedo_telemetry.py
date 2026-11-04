@@ -621,6 +621,9 @@ def test_module_fields_selected_ammo_and_all_public_params():
                 getAmmoParams=lambda aid: ammo if aid == 123 else None)
     out = a.armament()
     assert out['modules'] == [dict(vars(module), position=[1., 2., 3.])]
+    assert out['available'] is True
+    assert 'ammoParams' not in out
+    out = a.ammunition()
     assert out['selectedAmmoId'] == 123
     assert out['ammoParams'] == {'id': 123, 'torpedoSpeed': 70., 'nested': {'value': 1}}
     assert out['ammoParamsStatus'] == 'available'
@@ -634,6 +637,7 @@ def test_module_empty_success_is_not_missing_and_invalid_ammo_is_not_queried():
     out = a.armament()
     assert out['modulesStatus'] == 'available'
     assert out['modules'] == []
+    out = a.ammunition()
     assert out['selectedAmmoStatus'] == 'unknown'
     assert out['selectedAmmoId'] is None
     assert adapter().armament()['available'] is False

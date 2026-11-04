@@ -1,5 +1,20 @@
 # FPS改善専用タスク：潜水艦戦闘補助に必要な負荷へ絞る
 
+<a id="fps-slow-groups"></a>
+## E：情報群の低頻度化（最新指定）
+
+[10項目の依存・取り逃し調査](RESEARCH_SLOW_GROUPS.ja.md)を参照。①HP・生存値2Hz、②③④⑤⑥⑦⑨⑩は1Hzの適性を調査、⑧の性能・弾薬paramsは初回取得のみへ変更する。
+
+- [x] ①②のHP源重複、avatar位置／識別依存、③遠距離位置と⑩較正modelの分離を調査。
+- [x] ④⑤の短期状態、⑥故障timerの根拠不足、⑦Battery独立化、⑨イベント受付とsnapshot頻度の分離を調査。
+- [ ] ①②はHP群2Hz・照合／coverage1Hzの分割案を確定し実装。avatarの全列挙・必要ID・位置まで1Hzへ落とさない。
+- [ ] ③の全位置1Hzかworld/yawのみ1Hzか、距離閾値・重要対象例外を決定して実装。
+- [ ] ④⑤は短期遷移取り逃し・作動検知遅延を明記して1Hz群を設計。
+- [ ] ⑥は1Hz化可能でも故障・修理の検出保証は未確認とする。
+- [ ] ⑦をdepth/WaveHitから分離、⑨はイベント全受付・終了時最新集計を維持して1Hz化。
+- [ ] ⑩はlive model更新を維持し、診断／coverageだけ1Hz化。
+- [x] ⑧の初回のみ取得・定期経路撤去を0.3.34で実装。全Python3.11回帰491 passed（私有replay含む）、9 module checker成功。初回失敗時はunknownを固定し周期retryしない制約を明記。未導入・FPS未確認。
+
 0.3.33ソース実装・独立検証完了：新規・不明は暫定5Hzをユーザー承認。5秒枠再分類、far非dueの位置／owner／派生処理skip、membershipとsampleの分離を実装。実機未確認、導入は行っていない。最終Python3.11全pytestはWOWS_SAMPLING_REPLAY=1で485 passed（B43/B44私有recordの2件も含む）。checkerは9 moduleのPython2 grammarと較正成立後の実sampler／motion／wire／UI抑止の連続tickを確認。sampler内部の判断件数不整合も正常空一覧ではなく取得unknownに落ちることをtest。
 
 ### 0.3.33の実装replay・負荷の限界

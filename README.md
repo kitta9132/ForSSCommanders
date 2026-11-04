@@ -1,5 +1,7 @@
 # ForSSCommanders
 
+最新ソース：**0.3.34-initial-torpedo-parameters**（未導入・実機未確認）。魚雷性能・弾薬paramsは戦闘初回のみ、meta.torpedoInitialParamsへ移動。動的補正はマップ側へ。HP2Hz／他情報1Hz化は[依存・取り逃し調査](WowsExtractor-torpedoes-client-test/docs/RESEARCH_SLOW_GROUPS.ja.md)のみ完了し、周期はまだ変更していない。以下の旧版説明は履歴。
+
 現行ソース：**0.3.33-torpedo-sampling-groups**（未導入・実機未確認）。魚雷を5秒ごとに距離分類、近距離5Hz／遠距離平均2Hz、新規・不明は暫定5Hz。魚雷配列は今回sampleであり、全体membershipと非due状態を区別する。砲弾道計算は撤去済み。以下の旧版説明は履歴。
 
 現行ソース：**0.3.31-calibration-spatial-index**（未導入・実機未確認）。較正の距離比較候補を絞り、B44再生で旧実装との同値を確認。FPS改善は未確認、mod退避継続。以下の0.3.30説明は旧版の機能履歴です。[検証と制約](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_B44_TORPEDO_PROFILE.ja.md)。

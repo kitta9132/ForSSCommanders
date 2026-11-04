@@ -3541,6 +3541,11 @@ class TorpedoTelemetry(object):
             except Exception:
                 modules_status = 'unknown'
                 module_rows = []
+        return {'available': modules_status == 'available',
+                'modulesStatus': modules_status, 'modules': module_rows}
+
+    def ammunition(self):
+        """One initial ammunition observation; the collector owns its lifetime."""
         weapon_type = _get(_get(self.constants, 'WeaponType'), 'TORPEDO')
         ammo_status, ammo_id = ('unsupported', None)
         if weapon_type is not None:
@@ -3554,8 +3559,7 @@ class TorpedoTelemetry(object):
             if params is None and params_status == 'available':
                 params_status = 'unknown'
         return {
-            'available': modules_status == 'available' or ammo_status == 'available',
-            'modulesStatus': modules_status, 'modules': module_rows,
+            'available': ammo_status == 'available',
             'selectedAmmoStatus': ammo_status, 'selectedAmmoId': public_data(ammo_id),
             'ammoParamsStatus': params_status, 'ammoParams': params,
         }
