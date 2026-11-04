@@ -51,9 +51,6 @@
     "received": {},
     "teamTotal": {}
   },
-  "ballistics": {
-    "available": false
-  },
   "diag": {
     "totalShips": 0,
     "allies": 0,

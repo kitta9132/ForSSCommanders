@@ -100,7 +100,7 @@ ATM isSpotted=trueを80フレーム取得、残り294フレームはunknown（fa
 | meta.roster艦名/艦種/tier/team等 | 実機取得済み | 個人名・IDが含まれるため記録共有に注意 |
 | roster.consumables title/abilityId/params | 実機で値あり | 動的残回数/クールダウンを取得したという意味ではない |
 | damage inflicted/received/teamTotal | 出力・変化あり | 魚雷専用の戦果ではない。命中イベントの確定判定に流用しない |
-| ballistics砲弾各値 | 実装あり、潜水艦試験ではavailable:false | 魚雷パラメーターではない。今回の取得成功には含めない |
+| ballistics砲弾各値 | 0.3.32で計算・専用イベント・出力を全撤去 | 潜水艦戦闘補助の対象外。過去試験ではavailable:false |
 | schema/apiVersion/battleId/active/ts/mod.version | 実機取得済み | tsはゲーム由来時刻。battleIdの途中昇格は許容 |
 | 約10Hz収集・終了フレーム | 実機確認済み | 全tick保存の保証なし。0.2.1以降の開始時保存修正は2戦確認済み |
 

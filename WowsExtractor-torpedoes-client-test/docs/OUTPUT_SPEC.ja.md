@@ -1,5 +1,9 @@
 # WowsExtractor 魚雷出力版（WoWSクライアント用mod）
 
+## 0.3.32：砲弾道計算の全撤去
+
+潜水艦戦闘補助に不要なBallisticsTracker、砲弾／航空弾薬選択の専用イベント、着弾速度・貫通・跳弾・信管計算を削除した。通常stateにも`ballistics`キーを出力しない。disabled互換枠・再有効化設定はない。従来このキーを必須としたconsumerは修正が必要。schema=1/apiVersion=1.0は他契約と同じままで、撤去境界はmeta.mod.version（0.3.32以降）とキー有無で判定する。魚雷ammoParams／TTX、装填、潜水艦状態、damage集計は撤去しない。下記の旧版時点のballistics説明は履歴であり現行契約ではない。実機性能改善は未確認。
+
 ### B41後のstate候補の供給元訂正
 
 `mods_DataComponent`はmodがui APIで追加・更新する領域です。0.3.29の`torpedoStateProbe`はこの領域の外部mod候補readerであって、ゲーム／サーバーの生の誘導・被発見状態を取得するAPIではありません。ATMなしのB41では実体Noneで両flags未取得でした。ATM等の導出値を扱う場合も直接取得値とは分け、producerをfield名だけでATMと確定しません。同試験は再要求しません。詳細：[供給元調査](RESEARCH_B41_MOD_DATA_PRODUCER.ja.md)。
@@ -338,7 +342,6 @@ ATM由来の誘導・被発見状態はuiStateに分離し、type文字列から
 | `gameClockProbe` | オブジェクト | UI参照のraw clock候補と派生残時間候補。終了フレームでは省略 |
 | `selfSystems` | オブジェクト | 自艦の消耗品・索敵装置の公開状態。終了フレームでは省略 |
 | `damage` | オブジェクト | 既存のダメージ集計 |
-| `ballistics` | オブジェクト | 既存の砲弾／航空機弾種の情報。魚雷誘導情報ではない |
 | `diag` | オブジェクト | 既存の艦船収集に関する診断値 |
 | `performance` | オブジェクト | `profiler_enabled=true`時のみ。5秒集約ができたときだけphase payloadを持ち、その他は小さなstatus metadata。profiler disabledのstateには追加しない |
 
@@ -466,11 +469,9 @@ UI参照に基づくread-only診断であり、正式なPython/dataHub契約で�
 
 上は形の説明用です。実際のキーはIDを文字列にしたものです。未集計では3表とも空です。既存の補助推定・重複抑制のロジックを継承しており、魚雷だけを分類した戦果表ではありません。
 
-### ballistics（元プロジェクト継承）
+### ballistics（0.3.32で撤去）
 
-未取得時は `{"available": false}`。
-取得時の候補は `available`, `squadronMode`, `ammoType`, `ammoId`, `penetration`, `impactSpeed`, `impactAngle`。
-AP/CSでは `startRicochet`, `alwaysRicochet`, `overmatch`、APでは `detonatorDelay`, `detonatorThreshold`も候補になります。砲弾用情報・計算値であり、魚雷の速度や誘導停止距離として流用しません。
+通常・disabled・終端stateいずれにも出力しない。過去記録に残る砲弾情報を魚雷性能として利用しない。
 
 ### diag（元プロジェクト継承）
 

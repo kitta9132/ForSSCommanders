@@ -6,7 +6,7 @@
 
 API_VERSION = 'API_v1.0'
 MOD_NAME = 'WowsExtractor'
-MOD_VERSION = '0.3.31-calibration-spatial-index'
+MOD_VERSION = '0.3.32-remove-ballistics'
 
 # ---------------------------------------------------------------------------
 # WowsExtractor -- in-game data collector for the "8111 for WoWS" project.
@@ -780,110 +780,6 @@ def _looks_like_space(v):
 
 
 # ===========================================================================
-# ballistics tracker (best-effort; mirrors PenetrationCalculator)
-# ===========================================================================
-class BallisticsTracker(object):
-    def __init__(self):
-        self._ammo = None
-        self._modifiers = None
-        self._squadron = False
-
-    def start(self):
-        self._modifiers = _try(lambda: battle.getAmmoModifiers())
-        self._squadron = False
-        self._refresh_selected()
-
-    def stop(self):
-        self._ammo = None
-        self._modifiers = None
-        self._squadron = False
-
-    def _refresh_selected(self):
-        wt = _try(lambda: constants.WeaponType.ARTILLERY)
-        ammoId = _try(lambda: battle.getSelectedAmmoId(wt), INVALID)
-        self.on_ammo_changed(ammoId)
-
-    def on_ammo_changed(self, ammoId):
-        if ammoId is None or ammoId == INVALID:
-            self._ammo = None
-            return
-        if self._ammo is None or _try(lambda: self._ammo.id) != ammoId:
-            self._ammo = _try(lambda: battle.getAmmoParams(ammoId))
-
-    def on_weapon_changed(self, weaponType):
-        wt = _try(lambda: constants.WeaponType.ARTILLERY)
-        if weaponType == wt:
-            self.on_ammo_changed(_try(lambda: battle.getSelectedAmmoId(weaponType), INVALID))
-        else:
-            self._ammo = None
-
-    def on_squadron(self, bombParamsId):
-        self._squadron = True
-        self.on_ammo_changed(bombParamsId)
-
-    def on_squadron_off(self, *a):
-        self._squadron = False
-        self.on_ammo_changed(INVALID)
-
-    def snapshot(self):
-        ammo = self._ammo
-        if ammo is None:
-            return {'available': False}
-        data = {'available': True, 'squadronMode': bool(self._squadron)}
-        data['ammoType'] = _try(lambda: ammo.ammoType)
-        data['ammoId'] = _try(lambda: ammo.id)
-        hoop = _try(lambda: battle.getSelfHoopRanging())
-        impactSpeed = self._impact_speed(ammo, hoop)
-        data['penetration'] = self._penetration(ammo, impactSpeed)
-        data['impactSpeed'] = impactSpeed
-        data['impactAngle'] = _try(lambda: __import__('math').degrees(hoop.pitch)) if hoop is not None else None
-        isAP = data['ammoType'] == 'AP'
-        isCS = data['ammoType'] == 'CS'
-        if isAP or isCS:
-            data['startRicochet'] = _try(lambda: ammo.bulletRicochetAt)
-            data['alwaysRicochet'] = _try(lambda: ammo.bulletAlwaysRicochetAt)
-            data['overmatch'] = _try(lambda: __import__('math').floor(ammo.bulletDiametr * 1000 / 14.3))
-        if isAP:
-            data['detonatorDelay'] = _try(lambda: ammo.bulletDetonator)
-            data['detonatorThreshold'] = _try(lambda: ammo.bulletDetonatorThreshold)
-        return data
-
-    def _impact_speed(self, ammo, hoop):
-        if self._squadron:
-            return _try(lambda: ammo.bulletSpeed) if _try(lambda: ammo.ammoType) == 'AP' else None
-        if hoop is None:
-            return None
-        gunPos = _try(lambda: hoop.gunPos)
-        gunDir = _try(lambda: hoop.gunDir)
-        if gunPos is None or gunDir is None:
-            return None
-        if _try(lambda: gunPos.y, 0) >= 0.001:
-            return _try(lambda: battle.getAmmoImpactSpeed(ammo, gunPos, gunDir))
-        return None
-
-    def _penetration(self, ammo, impactSpeed):
-        atype = _try(lambda: ammo.ammoType)
-        if atype == 'HE':
-            return _try(lambda: int(ammo.alphaPiercingHE))
-        if atype == 'CS':
-            return _try(lambda: int(ammo.alphaPiercingCS))
-        if atype == 'AP' and impactSpeed:
-            def calc():
-                import math
-                krupp = battle.getBulletKrupp(ammo, self._modifiers)
-                raw = (krupp * (ammo.bulletMass * impactSpeed * impactSpeed) ** 0.69
-                       * ammo.bulletDiametr ** (-1.07) * 0.0000001)
-                if self._squadron:
-                    return int(raw)
-                normalize = math.radians(ammo.bulletCapNormalizeMaxAngle)
-                hoop = battle.getSelfHoopRanging()
-                angle = max(0, abs(hoop.pitch) - normalize)
-                return int(raw * math.cos(angle))
-            return _try(calc)
-        return None
-
-
-# ===========================================================================
 # main collector
 # ===========================================================================
 class Collector(object):
@@ -922,7 +818,6 @@ class Collector(object):
         self._metaProbeLastNow = None # last clock value, for rollback detection
         self._load_config()
         self._damage = DamageTracker(resolve=self._live_vehicle_player)
-        self._ballistics = BallisticsTracker()
         self._torpedoes = TorpedoTelemetry(battle, constants)
         self._torpedoMotion = TorpedoMotion()
         self._mapCalibration = MapCalibration()
@@ -945,11 +840,6 @@ class Collector(object):
         events.onBattleQuit(self._on_battle_quit)
         events.onReceiveDamagesOnShip(self._on_damages)
         _try(lambda: events.onReceiveShellInfo(self._on_shell_info))
-        # ballistics (best effort; some builds may not expose all of these)
-        _try(lambda: events.onArtilleryAmmoChanged(self._on_artillery_ammo_changed))
-        _try(lambda: events.onWeaponTypeChanged(self._on_weapon_type_changed))
-        _try(lambda: events.onSquadronActivated(self._on_squadron_activated))
-        _try(lambda: events.onSquadronDeactivated(self._on_squadron_deactivated))
         logInfo('loaded v{} (state interval {}s)'.format(MOD_VERSION, self._stateInterval))
 
     # -- config -------------------------------------------------------------
@@ -1120,7 +1010,6 @@ class Collector(object):
                     'disabled', 'config.collection_enabled')})
             logInfo('collection disabled by config')
             return
-        self._ballistics.start()
         self._metaRetryUntil = _now() + META_RETRY_SECONDS
         self._remember_roster_vehicles()
         self._refresh_meta(force=True)
@@ -1139,8 +1028,6 @@ class Collector(object):
         self._mapCalibration.clear()
         self._torpedoMotion.clear()
         self._stop_tick()
-        if self._collectionEnabled:
-            self._ballistics.stop()
         self._mapTransform = None
         # write one final snapshot marking the battle inactive (through the same
         # single writer, so it can't race a still-queued "active" frame)
@@ -1390,22 +1277,6 @@ class Collector(object):
                        *args):
         if self._collectionEnabled and self._active:
             _try(lambda: self._damage.on_shell(victimId, shooterId, damage))
-
-    def _on_artillery_ammo_changed(self, *args):
-        if self._collectionEnabled and self._active:
-            _try(lambda: self._ballistics.on_ammo_changed(*args))
-
-    def _on_weapon_type_changed(self, *args):
-        if self._collectionEnabled and self._active:
-            _try(lambda: self._ballistics.on_weapon_changed(*args))
-
-    def _on_squadron_activated(self, *args):
-        if self._collectionEnabled and self._active:
-            _try(lambda: self._ballistics.on_squadron(*args))
-
-    def _on_squadron_deactivated(self, *args):
-        if self._collectionEnabled and self._active:
-            _try(lambda: self._ballistics.on_squadron_off(*args))
 
     # -- state output -------------------------------------------------------
     def _write_state(self, snap):
@@ -2153,7 +2024,6 @@ class Collector(object):
             'torpedoArmament': armament_systems[0],
             'selfSystems': armament_systems[1],
             'damage': self._damage.snapshot(),
-            'ballistics': _try(lambda: self._ballistics.snapshot(), {'available': False}),
             'diag': diag,
         }
 

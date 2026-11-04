@@ -1,5 +1,7 @@
 # ForSSCommanders
 
+現行ソース：**0.3.32-remove-ballistics**（未導入・実機未確認）。潜水艦戦闘補助に不要な砲弾道tracker・イベント・計算・`ballistics`出力を撤去。魚雷収集は維持、距離別2Hz化は未実装。以下の旧版説明は履歴。
+
 現行ソース：**0.3.31-calibration-spatial-index**（未導入・実機未確認）。較正の距離比較候補を絞り、B44再生で旧実装との同値を確認。FPS改善は未確認、mod退避継続。以下の0.3.30説明は旧版の機能履歴です。[検証と制約](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_B44_TORPEDO_PROFILE.ja.md)。
 
 - [開発タスク・残課題](TASKS.md)（仮マップはパラメーター確認用。本番マップはmod完成後に別途開発）

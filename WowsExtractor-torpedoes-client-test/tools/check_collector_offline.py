@@ -49,7 +49,6 @@ def main():
     collector._damage = Obj(snapshot=lambda: {'inflicted': {}, 'received': {}, 'teamTotal': {}})
     collector._mapCalibration = Obj(clear=lambda: None)
     collector._torpedoMotion = Obj(clear=lambda: None)
-    collector._ballistics = Obj(snapshot=lambda: {'available': False}, stop=lambda: None)
     collector._active = True
     collector._collectionEnabled = True
     collector._diagnosticsEnabled = True
@@ -67,7 +66,15 @@ def main():
     collector._torpedoDepthSamplingEnabled = True
     collector._torpedoDepthSamplingDue = True
     collector._torpedoDepthSamplingInterval = 1.0
+    removed_api_calls = []
+    ns['battle'] = Obj()
+    for name in ('getAmmoModifiers', 'getSelfHoopRanging',
+                 'getAmmoImpactSpeed', 'getBulletKrupp'):
+        setattr(ns['battle'], name,
+                lambda *args, _name=name: removed_api_calls.append(_name))
     snap = collector._build_state(1.)
+    assert 'ballistics' not in snap
+    assert not removed_api_calls, removed_api_calls
     assert ns['dataHub'] is original_data_hub
     duplicated = sorted(name for name in set(collection_calls)
                         if collection_calls.count(name) > 1)

@@ -139,7 +139,6 @@ def test_depth_sampler_can_run_without_heavy_diagnostics_and_joins_current_rows(
     c._mapCalibration = type('Map', (), {'world_to_map': lambda *args: None})()
     c._build_self = lambda hp, info=None, ship=None: {}
     c._damage = type('Damage', (), {'snapshot': lambda self: {}})()
-    c._ballistics = type('Ballistics', (), {'snapshot': lambda self: {}})()
 
     snapshot = build(c, 2.0)
     assert calls == ['torpedo']
@@ -300,7 +299,6 @@ def test_disabled_start_tick_double_start_and_quit_do_not_poll_game_apis():
     quit_battle = method('_on_battle_quit', ns)
     battle_start = method('_on_battle_start', ns)
     battle_shown = method('_on_battle_shown', ns)
-    ammo_changed = method('_on_artillery_ammo_changed', ns)
     c = type('C', (), {})()
     c._active = False
     c._collectionEnabled = False
@@ -309,8 +307,6 @@ def test_disabled_start_tick_double_start_and_quit_do_not_poll_game_apis():
     c._battleId = 'offline'
     c._tickHandle = None
     c._stateFile = 'state.json'
-    c._ballistics = type('B', (), {'start': lambda self: calls.append('ballistics-start'),
-                                   'stop': lambda self: calls.append('ballistics-stop')})()
     c._write_state = lambda state: calls.append(state)
     c._damage = type('D', (), {'snapshot': lambda self: {},
                                'clear': lambda self: None})()
@@ -325,25 +321,21 @@ def test_disabled_start_tick_double_start_and_quit_do_not_poll_game_apis():
     c._find_arena_id = lambda: calls.append('arena-api')
     c._remember_player_vehicle = lambda *args: calls.append('player-api')
     c._remember_roster_vehicles = lambda: calls.append('roster-api')
-    c._ballistics.on_ammo_changed = lambda *args: calls.append('ballistics-event-api')
     c._stateInterval = .1
     c._lastWrite = 0.
     battle_start(c)
     battle_shown(c)
-    ammo_changed(c, 1)
     start(c)
     start(c)
     tick(c)
     assert sum(isinstance(x, dict) for x in calls) == 1
     disabled = next(x for x in calls if isinstance(x, dict))
     assert disabled['collection']['status'] == 'disabled'
-    assert not any(x in calls for x in ('schedule', 'ballistics-start',
+    assert not any(x in calls for x in ('schedule',
                                          'build-state', 'meta-poll', 'arena-api',
-                                         'player-api', 'roster-api',
-                                         'ballistics-event-api'))
+                                          'player-api', 'roster-api'))
     quit_battle(c)
     assert calls[-1]['collection']['status'] == 'disabled'
-    assert 'ballistics-stop' not in calls
 
 
 def test_diagnostic_calls_are_gated_but_opt_in_path_keeps_probe_payload():
@@ -396,7 +388,6 @@ def test_diagnostics_off_builds_fresh_disabled_shapes_without_probe_calls():
     c._mapCalibration = type('M', (), {'world_to_map': lambda *args: None})()
     c._build_self = lambda hp, info=None, ship=None: {}
     c._damage = type('D', (), {'snapshot': lambda self: {}})()
-    c._ballistics = type('B', (), {'snapshot': lambda self: {}})()
     snapshot = build(c, 1.)
     assert not calls
     assert snapshot['weaponHubProbe'] == {
@@ -581,7 +572,6 @@ def test_build_state_shares_fresh_core_snapshot_even_when_diagnostics_off():
     c._mapCalibration = type('M', (), {'world_to_map': lambda *args: None})()
     c._build_self = lambda hp, info=None, ship=None: {}
     c._damage = type('D', (), {'snapshot': lambda self: {}})()
-    c._ballistics = type('B', (), {'snapshot': lambda self: {}})()
     complete = build(c, 1.)
     assert 'performance' not in complete
     assert [row[0] for row in calls] == ['roster', 'health', 'ships']
@@ -672,7 +662,6 @@ def test_main_state_reuses_actual_self_producers_once_and_never_across_frames():
     c._build_self = MethodType(build_self, c)
     c._self_team = MethodType(self_team, c)
     c._damage = type('Damage', (), {'snapshot': lambda self: {}})()
-    c._ballistics = type('Ballistics', (), {'snapshot': lambda self: {}})()
 
     first = build(c, 1.0)
     assert (calls['info'], calls['ship'], calls['team']) == (1, 1, 0)

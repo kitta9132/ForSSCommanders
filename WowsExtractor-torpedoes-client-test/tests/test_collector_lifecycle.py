@@ -43,7 +43,6 @@ def harness():
     c._damage = Obj(clear=lambda: None, snapshot=lambda: {})
     c._mapCalibration = Obj(clear=lambda: None)
     c._torpedoMotion = Obj(clear=lambda: None)
-    c._ballistics = Obj(start=lambda: calls.append('ballistics'), stop=lambda: None)
     c._remember_player_vehicle = lambda p: None
     c._remember_roster_vehicles = lambda: None
     c._battleIdentity = Obj(start=lambda *args: 'new-battle', is_arena=True)

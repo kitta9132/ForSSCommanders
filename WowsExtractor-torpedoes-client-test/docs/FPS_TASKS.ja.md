@@ -1,6 +1,8 @@
 # FPS改善専用タスク：潜水艦戦闘補助に必要な負荷へ絞る
 
-更新：2026-11-04。基準ソース0.3.31。**本書は設計・実施タスクであり、以下の周期変更・削除は未実装。** 汎用WoWSテレメトリ収集器ではなく、潜水艦の攻撃・回避・潜航判断を優先する。
+0.3.32更新：Bの砲弾道撤去を実装。tracker・専用イベント・計算・出力を削除。魚雷距離別cadence（A）は引き続き未実装。
+
+更新：2026-11-04。現行ソース0.3.32。**Bの砲弾道撤去は実装済み、Aの周期変更は設計段階。** 汎用WoWSテレメトリ収集器ではなく、潜水艦の攻撃・回避・潜航判断を優先する。
 
 関連：[既知の問題](KNOWN_ISSUES.ja.md)、[用途の絞り込み](../../TASKS.md#task-scope)、[性能実績](../../TASKS.md#task-performance)、[B44計測](PERFORMANCE_B44_TORPEDO_PROFILE.ja.md)。FPS改善作業の詳細・チェック欄は本書へ集約する。
 
@@ -105,7 +107,7 @@ else:
 
 ### 何を計算しているか
 
-`Main.py:BallisticsTracker`は**飛翔中の全砲弾を追跡する機能ではない**。選択中の砲弾／一部航空爆弾のparamsと自艦照準情報から、着弾・貫通関連値を作る機能。魚雷の速度・射程・誘導計算とは独立。
+以下は0.3.31以前の撤去対象の記録。`Main.py:BallisticsTracker`は**飛翔中の全砲弾を追跡する機能ではない**。選択中の砲弾／一部航空爆弾のparamsと自艦照準情報から、着弾・貫通関連値を作っていた。魚雷の速度・射程・誘導計算とは独立。0.3.32では全撤去。
 
 | タイミング | 実処理 |
 |---|---|
@@ -138,11 +140,11 @@ AP通常経路は1 stateあたり照準getter最大2回、条件次第でimpact 
 
 ### Bのタスク
 
-- [ ] Main内tracker生成／start／stop／snapshotと弾種・武装・squadronイベントの購読／解除を追跡する。
-- [ ] recorder・HTTP server・仮マップ・tests・schema文書の`ballistics`参照を調査する。
-- [ ] 撤去時は`ballistics`を突然欠落させるか、理由付きdisabled互換枠を残すかをconsumerと合わせて決める。不要機能の再有効化設定は原則追加しない。
-- [ ] BallisticsTrackerの処理・専用イベントを撤去し、魚雷ammoParams／TTX・装填・ping・探知・damageが影響を受けないことをtestする。
-- [ ] collection OFFだけでなくONでも、撤去対象の照準／着弾速度／Krupp API追加呼出しが0であることを検証する。
+- [x] Main内tracker生成／start／stop／snapshotと弾種・武装・squadron専用イベントを全撤去。
+- [x] recorder・HTTP server・仮マップの実行コードにballistics参照なし。testsの旧stubを削除、exampleとschema文書を更新。旧版調査資料は履歴として残す。
+- [x] ユーザーの全削除指定に従い`ballistics`キー自体を撤去。disabled互換枠・再有効化設定なし。mod.versionで変更境界を明記。
+- [x] 全回帰で魚雷ammoParams／TTX・装填・ping・探知・damageを検証。Python3.11で431 passed、checkerで9 moduleのPython2 grammar・collector integration成功。
+- [x] collection ONでも撤去対象の照準／着弾速度／Krupp／ammo modifiers API追加呼出し0とballisticsキー不在をcheckerで検証。専用イベントと計算コードの不在も回帰testで確認。
 
 <a id="fps-other"></a>
 ## C：その他の削減候補

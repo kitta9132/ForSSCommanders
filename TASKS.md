@@ -1,5 +1,7 @@
 # 開発タスク
 
+最新ソース：**0.3.32-remove-ballistics**（未導入・実機未確認）。砲弾道tracker・専用イベント・計算API・ballistics出力を全撤去。魚雷ammoParams／TTX・装填・ping・探知・damageは維持。Python3.11全回帰431 passed、9 moduleのPython2 grammar／checker成功。FPS改善は未確認。遠距離2Hz化は未実装。最新進捗は[FPS専用タスクB](WowsExtractor-torpedoes-client-test/docs/FPS_TASKS.ja.md#fps-ballistics)参照。
+
 実用化に向けた既知の問題・優先度・到達点は[既知の問題一覧](WowsExtractor-torpedoes-client-test/docs/KNOWN_ISSUES.ja.md)を参照。ユーザー方針（2026-11-04）：完全性の断言ではなく、既知の問題を整理し実用で問題のない水準へ詰める。
 
 現行正本は **0.3.31-calibration-spatial-index**（未導入・実機未確認）。親の独立検証は427 passed・1 skipped、Python3.11 checker成功（9 moduleのPython2 grammarを含む）。下記の旧版時点の「作業版」「未実機」記述は履歴として読み、現況は本行と最新項目を優先する。

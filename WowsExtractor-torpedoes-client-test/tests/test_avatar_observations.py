@@ -644,7 +644,6 @@ def test_main_state_reuses_existing_getter_budget_for_24_avatars_and_20_ships():
         'status': 'available'}), armament=lambda ship=None: {},
         systems=lambda ship=None: {})
     c._torpedoMotion = Obj(update=lambda *args: None)
-    c._ballistics = Obj(snapshot=lambda: {'available': False})
 
     state = c._build_state(44.0)
     assert calls == {'avatar': 1, 'playersInfo': 1, 'players': 0,
@@ -684,7 +683,7 @@ def test_disabled_collection_and_terminal_frame_never_retain_observations():
     c = Obj(_active=False, _collectionEnabled=False, _battleId='fixture',
             _damage=Obj(snapshot=lambda: {}), _mapCalibration=Obj(clear=lambda: None),
             _torpedoMotion=Obj(clear=lambda: None), _stop_tick=lambda: None,
-            _ballistics=Obj(stop=lambda: None), _write_state=calls.append)
+            _write_state=calls.append)
     start(c)
     assert calls[-1]['avatarObservations']['status'] == 'disabled'
     assert calls[-1]['avatarObservations']['rows'] == []
