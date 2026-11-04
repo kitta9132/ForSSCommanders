@@ -2,6 +2,7 @@
 
 ## 緊急優先：通常プレイのFPS低下
 
+- B42追加確認：8:30の発射時はHUD深度30mとユーザー確認済み。魚雷depth候補は43行とも0.14で、浮上B40と同値。自艦発射深度の指標とは解釈せず、実魚雷深度／別用途の区別・単位は未確定。同じ30m発射の再試験は不要。
 - B42（2026-11-04）：0.3.30・1対1、8:30発射／8:00深度0m／4:28装置作動／効果終了前退出、minFPS60以上・カクつきなし。depth43行raw0.14/exactUiId、発射時HUD深度は未報告。locatorと消耗品state6→0→3、workTimeLeft60→27.879を取得。作動162sampleでendTime-ts=workTimeLeftだがendTimeは約1秒変動し不変deadline外挿不可。終了/cooldown・HUD残秒は未確認、330秒待機を直ちに再要求しない。停止・13fileshash照合退避済み。[B42記録](WowsExtractor-torpedoes-client-test/docs/VALIDATION_B42_DEPTH_LOCATOR.ja.md)。
 - ATM連携後の棚卸し：新probeは不要。B08 locator/search・消耗品state6→0、endTime-ts330→0は記録内で整合候補と確認したが、HUD/timebase契約ではない。次は既存core＋depth samplerで非浮上深度の魚雷・locator表示遷移を1戦へまとめる。敵魚雷は現れた場合だけowner観測、味方ownerは単独戦で未確認を保持。成功済みping/浮上発射は繰返さない。[残項目確認計画](WowsExtractor-torpedoes-client-test/docs/RESEARCH_POST_ATM_REMAINING_VALIDATION.ja.md)。
 - ATMありB08（2026-11-04、with-atm-b08）：0.3.30・1対1、minFPS60以上・カクつきなし。候補418行exactUiId、component/data available278・none140、ATM homing判定true162/false116、spotted推定true108/false170を取得。最初の斉射でflag供給が約22秒遅れ、操作時刻との対応・意味は未確定。collector平均cycle2.981msはATM処理を含まない。停止後collector13＋ATM専用3 filesをhash照合退避済み。同試験の再要求は不要、残項目棚卸しへ。[ATM B08記録](WowsExtractor-torpedoes-client-test/docs/VALIDATION_WITH_ATM_B08_0.3.30.ja.md)。
