@@ -1,5 +1,7 @@
 # ForSSCommanders
 
+最新実機状況：[B46・0.3.38](WowsExtractor-torpedoes-client-test/docs/VALIDATION_B46_0.3.38.ja.md)は限定条件でminFPS約50以上・カクつきなし。HP／比較／damage周期と独立計測phaseを確認、遠距離・大量魚雷のFPSは未検証。試験後collector退避済み。以下の未実機表記は各版公開時の履歴。
+
 最新ソース：**0.3.38-independent-gun-reload**（未導入・実機未確認）。装填raw／progressを重い診断から独立取得可能にした（既定OFF・collection必須）。modifier参照探索なし、同tick二重probeなし。以下は旧版履歴。
 
 最新ソース：**0.3.37-independent-submarine**（未導入・実機未確認）。自艦深度／WaveHitをcore周期、Batteryを1Hzで詳細診断から独立取得可能にした。専用設定は全て既定OFF・collection必須。以下は旧版履歴。

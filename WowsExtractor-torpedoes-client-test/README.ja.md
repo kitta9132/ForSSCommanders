@@ -1,7 +1,9 @@
 # WowsExtractor 魚雷出力版：実機テスト用パッケージ
 
 作成日：2026-11-04（日本時間）
-modバージョン：`0.3.38-independent-gun-reload` / ModsAPI：`API_v1.0`（source only・未導入／未実機）
+modバージョン：`0.3.38-independent-gun-reload` / ModsAPI：`API_v1.0`（[B46限定実機確認](docs/VALIDATION_B46_0.3.38.ja.md)・試験後退避済み）
+
+B46はユーザー報告minFPS約50以上・カクつきなし。HP平均2Hz／比較・damage平均1Hzと非due省略、独立profiler phaseを確認した。遠距離2Hz・多数魚雷のFPSと全項目の意味保証は未確認。以下の未実機記述は版公開時の履歴。
 
 0.3.38：`gun_reload_sampling_enabled=false`を追加。明示ON時はheavy診断なしでcore周期のgun raw／progressを採取し、modifier参照探索は省く。heavy同tickもprobeは1回。装填数・物理管ID・修理timerの意味確定ではない。独立gun／submarineのprofiler phase登録漏れも修正。
 

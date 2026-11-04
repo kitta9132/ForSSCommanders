@@ -271,6 +271,8 @@ depth／Battery／WaveHitについては、合同probeの内部で読むcomponen
 <a id="fps-validation"></a>
 ## D：完了判定・検証
 
+B46：heavy OFFの独立4群構成でminFPS約50以上・カクつきなしと報告。HP平均2Hz／比較・damage1Hzと非due省略を実機記録で確認、独立phase計上。通常参考48窓cycle平均3.763ms／最大7.359ms。魚雷は最大6本でlow0のため、遠距離2Hzと多数本数のFPS効果は未確認。[B46](VALIDATION_B46_0.3.38.ja.md)。collectorは停止確認後13fileshash照合退避済み。
+
 - [ ] 変更ごとに全pytest、Python3.11 checker、Python2 grammar、diff・公開schema整合を確認し、版を更新して親がcommitする。
 - [ ] 既存B43規模216魚雷／22owner fixtureで、近距離保持・遠距離cadence・総API予算を確認する。byte削減と処理時間・FPSを分けて報告する。
 - [ ] 実機が必要になった段階でのみ限定試験を準備し、near/farの実sample間隔・phase・取得範囲と体感をまとめて確認する。悪化時は中止・退避する。
