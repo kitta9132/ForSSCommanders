@@ -15,7 +15,7 @@
 
 - `Main.py` L1212-L1227は公開battle APIの魚雷列挙、`ui_torpedo_probe`、位置差分、地図位置を組み立てる。L1232-L1249で`selfSystems`と`torpedoArmament`を出力する。潜水艦ping/深度専用の処理はない。
 - 自艦データは`Main.py` L1260-L1285。`getSelfPlayerInfo().shipGameData`からhealth/maxHealth/yaw/speed等、自艦shipからposition/health/maxHealth/yawを読むが、depthやbatteryは読んでいない。L1288以降のgeneric ship positionにあるx/zからのy補完は地表用fallbackであり深度に転用不可。
-- `torpedo_telemetry.py` L114-L181の`ui_torpedo_probe`は`dataHub.getEntityCollections('torpedo')`を最大64行で読み、`type`と`mods_DataComponent.data.isHoming/isSpotted`候補を読むだけ。L184-L205の結合キーは一意なexact UI IDだけ。誘導先艦ID・ping対象・命中区画・消滅理由を取得しない。`apiUiIds`はAPIの`uiId`一覧で、GUI側IDとの同一名前空間も一般保証ではない。
+- 旧`ui_torpedo_probe`は`dataHub.getEntityCollections('torpedo')`から`type`と`mods_DataComponent.data.isHoming/isSpotted`候補を読む。現行0.3.29のMain heavy pathはstate flagsを読まず、専用1Hz probeだけが固定2 flagsをsampleする（本書下部の0.3.29追記）。どちらも誘導先艦ID・ping対象・命中区画・消滅理由は取得しない。API `uiId`とGUI entity IDのnamespace同一性は一般保証ではない。
 - **魚雷位置のyと魚雷深度は別候補**：現行魚雷行は公開API `position` のXYZを出力する（`torpedo_telemetry.py` L506-L535）。GUI抽出`Components.xml` L2277-L2286には別属性`Torpedo.depth:Number`があるが`sync=false`（L2279-L2281）。抽出定義からPythonアクセス可否や意味・単位を確定できない。position[1]を魚雷深度として命名せず、`depth`専用値が取れない間はunknown。
 - `systems()`（`torpedo_telemetry.py` L476-L504）は自艦に対し、公開ModsAPIの`getConsumablesState`からicon/num/currentState/endTime、レーダー／水中聴音／潜水艦探知装置APIからdistShip/state/workTimeLeftを読み出す。結果は`Main.py` L1246-L1248の`selfSystems`へ出る。公開資料上のAPI経路は存在するが、endTimeの時刻基準、distShip単位、state列挙値の意味は未確定。これはping被弾状態や敵艦装置情報ではない。
 
@@ -26,7 +26,7 @@
 | 自艦・対象艦の深度／深度差 | GUI `Components.xml` L4896-L4912に`Submarine.depthIndex/depthRanges/depth/showDepth/depthValues`。`main_hud.unbound` L67-L70は自艦entity `CC.selfVehicle.submarine.depthIndex`。`telegraph.unbound` L944-L965もdepthIndex/ranges/depthValuesを参照。敵マーカーは`markers_elements.unbound` L952-L972でsubmarine.depthとshowDepthを読む。 | 現行Python未取得。UI定義上、対象艦側の深度値も表示経路あり。ただしマーカーは`showDepth`で表示を制限し、全艦に見えるわけではない。深度差は両者の同時・同単位の直接値が得られるまでunknown。y=0補完、地図座標からの推測は禁止。 |
 | 魚雷深度 | GUI `Components.xml` L2277-L2286の`Torpedo.depth:Number sync=false`。現行API魚雷行にはpositionあり（`torpedo_telemetry.py` L506-L535）が明示`depth` fieldなし。 | 定義候補あり、Python取得・実機値・意味いずれも未確認。GUIのsync=falseはPython不可の証明でも可の証明でもない。XYZのyを別名depthとして出さない。 |
 | Ping対象・命中区画・一重／二重 | GUI `Components.xml` L2111-L2126の`WaveHit.targetID`（コメントはWaved vehicle ID）、lifeTime/maxLifeTime/alertTime/hitCount/isActive/weaponType。`slot_pinger_info.unbound` L3-L10は`CC.waveHit`件数とTTX maxTargetsを表示、L34-L42は件数/maxを描画。 | PythonにwaveHit列挙／取得がない。targetIDは対象IDの有力候補だが紐付け契約未確認。hitCountは一重／二重表示候補だが意味を断定しない。命中区画・具体的被弾位置の定義は上記限定検索範囲で未確認。`lifeTime/alertTime`はUIタイマー候補であり更新・失効・実残時間の意味は未確定。 |
-| 誘導先・誘導停止 | GUI `Torpedo` componentの抽出定義はid/ownerID/shotID/depth/typeのみ（`Components.xml` L2277-L2286）。`torpedo_marker.unbound` L1-L13はtorpedo.typeによるアイコン分岐。現行UI probeは別経路で`isHoming/isSpotted`（`torpedo_telemetry.py` L150-L173）。 | isHoming候補のみ診断対象。誘導先ID、停止距離／地点／理由の静的根拠は今回読んだ範囲で未確認。魚雷と最寄り艦の距離joinで誘導先を作らない。typeやisHomingから停止理由を推定しない。 |
+| 誘導先・誘導停止 | GUI `Torpedo` componentの抽出定義はid/ownerID/shotID/depth/typeのみ（`Components.xml` L2277-L2286）。`torpedo_marker.unbound` L1-L13はtorpedo.typeによるアイコン分岐。0.3.29の独立probeは別経路で`isHoming/isSpotted`を候補sampleする。 | isHoming候補は誘導先ID、停止距離／地点／理由の静的根拠ではない。魚雷と最寄り艦の距離joinで誘導先を作らず、typeやisHomingから停止理由を推定しない。 |
 | 魚雷消滅理由 | GUI抽出の`Torpedo` componentに消滅理由event/propertyなし（上記L2277-L2286）。現行APIは毎frameの列挙結果のみ（`torpedo_telemetry.py` L506-L535）。 | 命中・射程切れ・破壊・一覧欠落・列挙失敗は識別不能。行が消えたら「一覧から未観測／消失」だけを示し、理由をunknownとする。WaveHitイベント等を魚雷命中に直結させない。 |
 | 潜航能力（battery） | GUI `Components.xml` L4914-L4929にBattery.value/burnedValue/maxCapacity/baseSpendRate/baseRegenRate/currentRate/burnRate/batteryState/isPotentiallyBurning。`submarine_battery.unbound` L49-L67は`CC.selfVehicle.battery`からvalue/rates/state読み、L66ではcountdown.endTime−timer.currentTimeを表示。`telegraph.unbound` L955-L968はbatteryState EMPTYをdepth rulerに反映。 | Python未取得。state/単位・rate符号・時間基準は未確認。GUI表示式は取得API契約ではなく、静的定数/表示既定値を欠測補完に使わない。 |
 | ソナー・レーダー・潜水艦探知装置 | 公開ModsAPI `Ship` methodsと現行`systems()` L489-L503が自艦情報を読む。 | ソースに読取処理あり。個別実機値／shape／搭載なしとAPI欠落の区別、単位・state意味は現行記録では未確認。API戻り値Noneはunknown、method不在はunsupported。敵艦情報へ拡張しない。 |
@@ -69,21 +69,22 @@ TTX（静的諸元）との区別：`structs/ttx.xml` L137-L147はPingerTTXのre
 3. **P1中**：魚雷明示`depth`、誘導先・停止、命中区画、魚雷消滅理由は一次根拠の探索を継続。現時点では未知扱いを維持。
 4. **P1中**：Minotaurで既存公開APIの消耗品／search fieldsの実機値、state・単位・endTime基準を照合。自艦以外へ取得範囲を広げない。
 
-## 2026-11-03追記：0.3.28魚雷depth sampling
+## 2026-11-04追記：0.3.29魚雷state sampling
 
-本書冒頭の0.3.4時点の調査状態に対する実装追記。ゲーム起動・実機取得は行わず、ローカルGUI抽出物をread-onlyで再確認し、ソースのみを変更した。
+本書冒頭の0.3.4時点の調査状態に対するsource-only実装追記。0.3.28のdepth-only samplerを維持し、heavy diagnosticsから`isHoming`/`isSpotted`固定2候補を独立1Hz samplerへ分けた。ゲーム起動・新featureの実機取得は行わず、ローカルGUI抽出物と既存記録をread-onlyで参照した。
 
 - GUI根拠はローカル `../mino-smoke/research/extracted/gui/data/Components.xml` の `<component name="Torpedo">`（L2277-L2286）。`id:String pk=true`、`ownerID:Integer sync=false`、`shotID:Integer sync=false`、`depth:Number sync=false`、`type:String`。これは候補名の存在根拠で、Python/dataHub公開性・同期・取得値・単位・意味は保証しない。
-- 0.3.28は `torpedo_depth_sampling_enabled` 専用opt-in（collection必須、diagnostics非依存）、interval既定/invalid/minimum 1秒で `CC.torpedo.depth` のみを最大64 entity sampleする。iterationは65件目をtruncation検出に使って停止。既存のheavy `uiTorpedoProbe`経路ではdepthを読まない。heavy diagnosticsも同sample dueならsample-local `DiagnosticCollectionSnapshot`によりtorpedo collection getter／元collection iterationを共有する。
-- 同一state内のAPI `uiId`とGUI entity `id`のstrict型・scalar値一致を、両側一意かつcollection complete時に限定して `uiState.depth`へ付ける。partial/truncated/unknown/重複/不一致では付与しない。rawは有限numeric（bool除外）のみ、unitはnull。過去値・position.y・ownerID/ownerId/playerId推測joinは禁止。
-- B37（0.3.26）はdepth sampler OFFで、今回の実機depth証拠には使えない。次の確認は通常の魚雷発射recordにdepth取得可否だけ相乗りし、潜水深度操作・ping試験を追加要求しない。Python実機可用性、値の意味・単位、FPS影響は未確認。
+- 0.3.28は `torpedo_depth_sampling_enabled` 専用opt-in（collection必須、diagnostics非依存）、interval既定/invalid/minimum 1秒で `CC.torpedo.depth` のみを最大64 entity sampleする。B40では262 rows raw `0.14`を取得したがunit/semanticsは未確認でunit=nullを維持する。既存のMain heavy `uiTorpedoProbe`経路ではdepthを読まない。
+- 0.3.29は`torpedo_state_sampling_enabled`専用opt-in（collection必須、diagnostics非依存）、interval既定/invalid/minimum 1秒で`CC.mods_DataComponent.data.isHoming/isSpotted`だけを最大64 entity sampleする。GUI/UI参照と既存ATM実測はフィールド名候補の根拠だが、Python/dataHub field availability・producerはunknown、semantics unverified。data objectのkey列挙はしない。flagは厳密boolだけavailableで、false/None/nonBoolean/missing/readErrorを分ける。
+- 同一state内のAPI `uiId`とGUI entity `id`がscalar・strict same-type/valueで全件一意の場合に限り`uiState`へstate flags/depthを付与する。state flagsはGUI/API双方の全IDがvalid・unique、collection complete時だけjoinし、partial/truncated/ID None・不正/API unavailable/duplicateでは候補のみ保持する。過去値・ownerID/ownerId/playerId推測joinは禁止。`isHoming`はtargetID/stop reasonではなく、flagsをserver state一般へ拡張しない。
+- heavy diagnostics・depth・stateが同じframeでdueなら、sample-local `DiagnosticCollectionSnapshot`がtorpedo collection getterと元collection iterationを共有する。state samplerは最大64 row + 1 truncation probe、entity ID/component/data/各flagの固定read上限を持ち、off時追加probe/API callsは0。0.3.29 source-onlyで、新featureのPython実機可用性・FPS影響は未確認。
 
-### 魚雷戦テレメトリの取得棚卸し（0.3.28 source）
+### 魚雷戦テレメトリの取得棚卸し（0.3.29 source）
 
 | 項目 | 現在の経路・根拠 | 判定／不足 |
 |---|---|---|
 | 魚雷個体と位置 | core `TorpedoTelemetry.torpedoes()` は公式ModsAPI `getAllTorpedoes()`から`uiId/ownerId/ownerTeamId/ownerType/shotId/type`と`position`を直接読む。B37で魚雷最大6本を含む1,306魚雷rowを記録。 | 直接取得あり。`position.y`は深度へ読み替えない。`shotId`共有範囲・uiId再利用・全条件の取得完全性は未確定。 |
 | 発射元／owner | `ownerId`は `getAllTorpedoes()` rowの公開field。次段で同じ値を `getTorpedoOwnerById(ownerId)`へ渡し、戻りobjectから固定 `OWNER_FIELDS` を読む。現行collectorに`ownerShip` field readや`ownerShip` joinはない。`isOwn`は返却ownerの`isPlayer`が厳密boolの場合だけ出力し、それ以外null。ownerTeamIdは自艦teamとのrelation候補で、自艦owner確定ではない。 | ownerId/ownerTeamId/ownerTypeは過去実機取得済み（0.3.1記録374/374行）。owner API objectの一部fieldはnull。ownerIdとplayerId/vehicleId/GUI `ownerID` namespaceの一般契約は未確認で推測joinしない。GUI `Components.xml` の`ownerID:Integer sync=false`は`ownerShip`の根拠ではない。 |
-| 誘導状態／誘導先 | `diagnostics_enabled`時の既存UI diagnosticが`CC.mods_DataComponent.data.isHoming/isSpotted`候補を最大64 rows調べる。通常core魚雷行へコピーするのは一意UI-ID候補が一致した場合だけ。B01系のATM条件に限る取得記録は既存`ACQUISITION_STATUS`等を参照。 | `isHoming/isSpotted`はUI/ATM診断候補で、diagnostics OFFではsampleされない。typeからhomingを推定しない。誘導先ID、停止距離／地点／理由はGUI Torpedo component（`id/ownerID/shotID/depth/type`）と現行APIに候補なし。最寄り艦joinは禁止。 |
-| 明示魚雷depth | 0.3.28の独立opt-in `dataHub.torpedo.depth` fixed-field probe。GUI抽出 `Torpedo.depth:Number sync=false` が候補名の根拠。 | 実機Python取得・値・意味・unitは未確認。unit=null。B37はprobe OFF。 |
+| 誘導状態／誘導先 | 0.3.29専用opt-inが`CC.mods_DataComponent.data.isHoming/isSpotted`を最大64 rowsの固定fieldとしてsample。通常core魚雷行へ付与するのはcomplete collectionおよびGUI/API双方の全IDがstrict scalar/type/value uniqueの場合だけ。ATMあり等の過去取得範囲は[ACQUISITION_STATUS](ACQUISITION_STATUS.ja.md)。 | 新samplerのPython/dataHub availability・producerは未確認/unknown。semantics unverified。falseとunknownを区別するが、`isHoming`は誘導先ID・停止理由ではなくサーバー状態一般も保証しない。最寄り艦joinは禁止。 |
+| 明示魚雷depth | 0.3.28の独立opt-in `dataHub.torpedo.depth` fixed-field probe。GUI抽出 `Torpedo.depth:Number sync=false`が候補名の根拠。B40で262行raw `0.14`を取得。 | 値のunit/semantics未確認。unit=null。position.yから補わない。 |
 | 残射程／残存寿命 | 現行coreには直接fieldなし。`TorpedoMotion.observedDistance/Age`はcollector観測開始後の派生区間値。選択TTXのspeed/maxDistは静的性能候補。local GUI `Torpedo`定義にもborn/lifetime/remaining-range fieldなし。 | 直接取得経路は未発見・取得不能とは断定しない。TTX maxDist−observedDistance、速度×経過時間、WaveHit.lifeTime等で魚雷残量を推定しない。詳細は[残射程・寿命調査](RESEARCH_TORPEDO_RANGE_LIFETIME.ja.md)。 |

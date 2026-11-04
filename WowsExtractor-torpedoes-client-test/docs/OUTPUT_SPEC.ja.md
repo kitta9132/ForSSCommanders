@@ -1,5 +1,7 @@
 # WowsExtractor 魚雷出力版（WoWSクライアント用mod）
 
+0.3.29のstate候補で128文字を超える非boolean文字列が返った場合、短縮した値をrawとは表示せず、raw=null・reason=stringLimit・rawLengthで取得制限を明示します。正常なbooleanの扱いは変えません。
+
 `0.3.25`は、0.3.24の`diag.playerReads`とindex join契約を維持します。`sampleStatus`（players一覧取得のcomplete/partial/unavailable、direct call時notProvided）、`indexHits`、`vehicleLookups`（試行数、成功数ではない）は引き続きships sample内の個別lookupだけを数え、新しいgame APIや時計読取りは追加しません。
 
 `0.3.26-avatar-observations`は`0.3.25`までの`ships`契約を維持し、同じframeでcaptureしたavatar entityの観測値を独立したトップレベル`avatarObservations`へ追加します。rosterからAPI艦行を合成せず、API列挙の範囲とavatar側で見えた値を混ぜません。
@@ -318,6 +320,7 @@ ATM由来の誘導・被発見状態はuiStateに分離し、type文字列から
 | `torpedoArmament` | オブジェクト | 自艦の魚雷発射管と選択弾の情報 |
 | `uiTorpedoProbe` | オブジェクト | UI魚雷の読み取り診断。終了フレームでは省略 |
 | `torpedoDepthProbe` | オブジェクト | 専用opt-inの魚雷depth候補sample。disabled/notSampledを含み、過去値を再利用しない |
+| `torpedoStateProbe` | オブジェクト | 専用opt-inの固定UI魚雷state候補sample（isHoming/isSpotted）。disabled/notSampledを含み、過去値を再利用しない |
 | `weaponHubProbe` | オブジェクト | UI由来の装填候補を読むread-only診断。終了フレームでは省略 |
 | `gunReloadProbe` | オブジェクト | gun/reloadBar/gunBarrel UI候補のread-only診断。終了フレームでは省略 |
 | `weaponContextProbe` | オブジェクト | selfVehicle/controller context候補。終了フレームでは省略 |
@@ -542,4 +545,15 @@ metaは戦闘表示時に書き、遅れて到着する地図情報等のため�
 - `torpedoes[].uiState.depth`への付与は同じstate内のAPI rowsとGUI rowsの両側で、IDがscalarかつ同じPython型・値で、各側一意、GUI collection complete (`available`)、API列挙availableの場合だけです。API rowsが64件を超える場合も一意性確認を打ち切り付与しません。`1`と`"1"`、bool/int、float/intは一致させません。重複・型違い・不一致・API unavailable・partial/truncatedでは付与しません。owner／playerID名前空間の推測joinは禁止です。
 - `uiTorpedoProbe`の既存公開関数signatureは維持します。Mainのheavy diagnostic経路ではdepthを読まないdepth-free helperを使い、独立samplerが有効なdue sampleでだけdepthを読みます。単独呼出しの既存`ui_torpedo_probe` helperは後方互換のため従来のcandidate fieldを出せますが、Mainでは使いません。
 
-B37ではdepth専用sampleがOFFだったため取得実績はありません。0.3.28はsource only・未導入であり、次回は通常の魚雷発射記録に同乗するdepth候補の取得可否確認だけが必要です。単位・基準面・`position.y`との関係、対象艦深度・深度差は未確定です。新moduleは追加せず既存9 module構成を維持します。
+B37ではdepth専用sampleがOFFでした。後続B40で0.3.28 depth samplerから262行のraw `0.14`を実機取得しましたが、単位・意味・基準面・`position.y`との関係、対象艦深度・深度差は未確定です。同条件のdepth再試験は不要です。新moduleは追加せず既存9 module構成を維持します。
+
+## 魚雷UI state候補（0.3.29-torpedo-state-sampling、source only）
+
+`torpedo_state_sampling_enabled=true`かつ`collection_enabled=true`の場合、heavy `diagnostics_enabled`とは独立して固定2 fieldだけを最大1Hzでsampleします。設定intervalは既定・最小1秒、invalid値は1秒です。`state_interval`にも制約され、catch-upやframe間cacheはありません。既定OFFのため、未設定・collection無効時の追加probe/API callは0回です。
+
+- due時だけ`dataHub.getEntityCollections('torpedo')`から最大64 entityを列挙し、各rowの固定ID候補、`CC.mods_DataComponent` component、`data`、`isHoming`、`isSpotted`だけを読取ります。65件目はtruncation検出だけに使います。data objectの`dir()`、公開key一覧／全data列挙、owner/誘導先/停止理由の推測取得はありません。entity objectはsample内だけで破棄します。
+- top-level／collection statusは`disabled`／`notSampled`／`unsupported`／`unknown`／`available`／`partial`／`truncated`を区別します。due時のみ`sampleTs`が設定され、非due時はrowsを空にして前回値を再利用しません。collection取得・列挙failureは現frame unknown/partialとして出し、API出力全体の失敗へ波及させません。
+- 同じstate sampleでheavy diagnostics／depth samplerもdueなら、3 probeは同じ`DiagnosticCollectionSnapshot`を利用し、`getEntityCollections('torpedo')` getterと元collection列挙を共有します。Mainのheavy diagnostics経路はこの版からhoming/spotted fieldを読まず、専用samplerのdue時だけ同fieldを読みます。既存`ui_torpedo_probe`と`ui_torpedo_probe_without_depth`の単独呼出signatureおよび候補出力は後方互換で維持します。
+- `torpedoStateProbe.source`は`ui.mods_DataComponent.data`、`producer=unknown`、`semantics=unverified`です。各rowの`flags.isHoming`／`flags.isSpotted`は`source/status/raw/type/semantics`を持ち、厳密boolだけstatus=`available`でrawを保持します。bool以外は`nonBoolean`で、有限数値・128文字以下stringのみraw候補に残します。`none`／`missing`／`readError`／component `unsupported`等をfalseへ置換しません。GUI/ATMからこのPython key/componentを取得できる保証はなく、現機能は実機未確認です。
+- `torpedoes[].uiState`へflagsを付与するのは、GUI collectionが完全（status=`available`）でGUI/API両側が64行以下、**全行**のIDがscalar・同じPython型の値・一意で、API torpedo statusもavailableの場合だけです。partial/truncated、ID None/不正、重複、API unavailableではcandidate rowsだけを保持してjoinを全体停止します。ownerID/playerID等の推測joinはありません。API/UI ID namespaceの同一性を一般保証するものでもありません。
+- `isHoming`は誘導先ID・停止距離・停止理由ではなく、`isSpotted`もサーバー確定の発見状態を一般保証しません。falseとunknownを区別し、producer/source fieldの表示は由来の証明ではありません。B40では独立depth samplerから262 rowsのraw `0.14`を取得しましたが、単位・意味は未確認で`unit=null`です。0.3.29はこの既存B40結果を変更・再解釈せず、新state sampler自体は未実機です。

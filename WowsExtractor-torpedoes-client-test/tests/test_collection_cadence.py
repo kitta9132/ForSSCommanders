@@ -75,6 +75,9 @@ class _TickHarness(object):
         collector._torpedoDepthSamplingEnabled = False
         collector._torpedoDepthSamplingDue = False
         collector._torpedo_depth_sampling_due = lambda now: False
+        collector._torpedoStateSamplingEnabled = False
+        collector._torpedoStateSamplingDue = False
+        collector._torpedo_state_sampling_due = lambda now: False
         collector._refresh_meta = self._refresh_meta
         collector._stateInterval = self.interval
         collector._lastWrite = 0.0
@@ -119,6 +122,7 @@ def test_default_state_interval_is_five_hz_and_explicit_point_one_is_kept():
     example = (ROOT / 'res_mods/PnFMods/WowsExtractor/config.example.ini').read_text(
         encoding='utf-8')
     assert 'state_interval = 0.2' in example
+    assert 'torpedo_state_sampling_enabled = false' in example
 
 
 def test_depth_sampling_interval_is_opt_in_and_has_a_one_second_floor():
@@ -173,6 +177,71 @@ def test_independent_depth_scheduler_is_one_hz_no_catchup_and_rollback_safe():
     collector._torpedoDepthSamplingEnabled = False
     assert due(collector, 4.2) is False
     assert collector._torpedoDepthSamplingNextDue is None
+
+
+def test_state_sampling_config_and_independent_one_hz_scheduler():
+    config = {'collection_enabled': 'true',
+              'torpedo_state_sampling_enabled': 'true'}
+
+    def cfg_float(values, key, fallback):
+        try:
+            value = values.get(key)
+            return fallback if value in (None, '') else float(value)
+        except Exception:
+            return fallback
+
+    load_config = _method('_load_config', {
+        '_load_mod_config': lambda: config, '_cfg_float': cfg_float,
+        'STATE_INTERVAL': .2, 'PerformanceProfiler': _DisabledProfiler})
+    collector = type('C', (), {'_performanceProfiler': None,
+                               '_profilerEnabled': False})()
+    load_config(collector)
+    assert collector._torpedoStateSamplingEnabled is True
+    assert collector._torpedoStateSamplingInterval == 1.0
+    for invalid in ('bad', 'nan', 'inf', '-inf', '0.2', '-4'):
+        config['torpedo_state_sampling_interval'] = invalid
+        load_config(collector)
+        assert collector._torpedoStateSamplingInterval == 1.0
+    config['torpedo_state_sampling_interval'] = '2.5'
+    load_config(collector)
+    assert collector._torpedoStateSamplingInterval == 2.5
+    config['collection_enabled'] = 'false'
+    load_config(collector)
+    assert collector._torpedoStateSamplingEnabled is False
+
+    due_diagnostics = _method('_diagnostics_due', {
+        '_get': lambda obj, key, default=None: getattr(obj, key, default)})
+    due_depth = _method('_torpedo_depth_sampling_due', {
+        '_get': lambda obj, key, default=None: getattr(obj, key, default)})
+    due_state = _method('_torpedo_state_sampling_due', {
+        '_get': lambda obj, key, default=None: getattr(obj, key, default)})
+    collector._diagnosticsEnabled = True
+    collector._diagnosticsInterval = 1.0
+    collector._diagnosticsNextDue = None
+    collector._diagnosticsLastSampleTs = None
+    collector._diagnosticsLastNow = None
+    collector._torpedoDepthSamplingEnabled = True
+    collector._torpedoDepthSamplingInterval = 1.0
+    collector._torpedoDepthSamplingNextDue = None
+    collector._torpedoDepthSamplingLastNow = None
+    collector._torpedoStateSamplingEnabled = True
+    collector._torpedoStateSamplingInterval = 1.0
+    collector._torpedoStateSamplingNextDue = None
+    collector._torpedoStateSamplingLastNow = None
+    assert all((due_diagnostics(collector, 0.0), due_depth(collector, 0.0),
+                due_state(collector, 0.0)))
+    assert not any((due_diagnostics(collector, .2), due_depth(collector, .2),
+                    due_state(collector, .2)))
+    assert all((due_diagnostics(collector, 1.0), due_depth(collector, 1.0),
+                due_state(collector, 1.0)))
+    assert due_state(collector, 5.0) is True
+    assert due_state(collector, 5.1) is False
+    assert due_state(collector, 4.0) is True
+    assert due_state(collector, float('nan')) is False
+    assert collector._torpedoStateSamplingNextDue is None
+    collector._torpedoStateSamplingEnabled = False
+    assert due_state(collector, 4.1) is False
+    assert collector._torpedoStateSamplingNextDue is None
 
 
 def test_per_tick_callback_builds_and_writes_only_on_due_five_hz_frames():

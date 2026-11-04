@@ -12,7 +12,11 @@ from torpedo_telemetry import TorpedoTelemetry, public_data, vector, ui_torpedo_
 from torpedo_telemetry import attach_ui_state, TorpedoMotion
 from torpedo_telemetry import (ui_torpedo_depth_probe,
                                attach_ui_depth_state,
-                               ui_torpedo_probe_without_depth)
+                               ui_torpedo_probe_without_depth,
+                               ui_torpedo_probe_without_state,
+                               ui_torpedo_state_probe,
+                               attach_ui_torpedo_state,
+                               shared_diagnostic_snapshot)
 import torpedo_telemetry
 from torpedo_telemetry import weapon_hub_probe, safe_weapon_hub_probe
 from torpedo_telemetry import (weapon_context_probe, safe_weapon_context_probe,
@@ -98,6 +102,16 @@ def ttx_fixture(descriptor='torpedo', selected=2, slot_type=2, slot_id=7,
     hub = Hub()
     result = safe_selected_torpedo_params_probe(hub, {'selfVehicle': 'sv-key'}, ctx, wh)
     return result, hub
+
+
+def test_state_flag_long_string_is_not_silently_reported_as_shortened_raw():
+    value = 'x' * 129
+    field = torpedo_telemetry._state_flag(
+        {'isHoming': value}, 'available', 'isHoming')
+    assert field['status'] == 'nonBoolean'
+    assert field['raw'] is None
+    assert field['reason'] == 'stringLimit'
+    assert field['rawLength'] == len(value)
 
 
 def test_selected_torpedo_ttx_routes_exact_descriptor_and_preserves_deltas():
@@ -689,6 +703,9 @@ def test_ui_probe_does_not_keep_previous_value_and_bounds_enumeration():
     out = ui_torpedo_probe(hub, keys, [])
     assert len(out['rows']) == 64
     assert out['rows'][0]['isHoming'] is None
+    api_rows = [{'uiId': 1}]
+    attach_ui_state(api_rows, out)
+    assert api_rows[0]['uiState']['matchStatus'] == 'unknown'
 
 
 def test_ui_probe_discards_partial_enumeration_on_failure():
@@ -720,8 +737,9 @@ def test_ui_join_keeps_false_and_rejects_ambiguous_ids():
         {'entityIdCandidate': 4, 'isHoming': False, 'homingStatus': 'available'},
         {'entityIdCandidate': 5}, {'entityIdCandidate': 5}]}
     attach_ui_state(rows, probe)
-    assert rows[0]['uiState']['isHoming'] is False
-    assert rows[0]['uiState']['matchStatus'] == 'exactUiId'
+    # Any duplicate in a supposedly complete UI ID set blocks the whole join.
+    assert rows[0]['uiState']['isHoming'] is None
+    assert rows[0]['uiState']['matchStatus'] == 'unknown'
     assert rows[1]['uiState']['matchStatus'] == 'unknown'
 
 
@@ -902,6 +920,333 @@ def test_legacy_ui_probe_signature_stays_usable_and_depth_free_path_skips_field_
     legacy = ui_torpedo_probe(hub, keys, [])
     assert component.reads == 1
     assert legacy['rows'][0]['depth']['raw'] == 1.5
+
+
+@pytest.mark.parametrize('name,value,status,raw', [
+    ('isHoming', False, 'available', False),
+    ('isHoming', True, 'available', True),
+    ('isHoming', None, 'none', None),
+    ('isHoming', 0, 'nonBoolean', 0),
+    ('isHoming', 'false', 'nonBoolean', 'false'),
+    ('isSpotted', False, 'available', False),
+    ('isSpotted', 0, 'nonBoolean', 0),
+])
+def test_independent_torpedo_state_probe_keeps_only_strict_bool_values(
+        name, value, status, raw):
+    fields = {'isHoming': True, 'isSpotted': False}
+    fields[name] = value
+    calls = []
+    probe = ui_torpedo_state_probe(
+        Obj(getEntityCollections=lambda key: calls.append(key) or
+            [{'id': 8, 'm': {'data': fields}}]),
+        {'mods_DataComponent': 'm'})
+    candidate = probe['rows'][0]['flags'][name]
+    assert calls == ['torpedo']
+    assert candidate['status'] == status and candidate['raw'] == raw
+    assert candidate['source'] == 'ui.mods_DataComponent.data.' + name
+    assert candidate['semantics'] == 'unverified'
+    assert probe['producer'] == 'unknown'
+    assert probe['semantics'] == 'unverified'
+    json.dumps(probe, allow_nan=False)
+
+
+def test_independent_torpedo_state_distinguishes_missing_none_and_read_errors():
+    class BrokenData(object):
+        @property
+        def isHoming(self):
+            raise RuntimeError('do not expose this')
+
+        @property
+        def isSpotted(self):
+            raise RuntimeError('do not expose this')
+
+    entities = [
+        {'id': 1, 'm': {'data': {}}},
+        {'id': 2, 'm': {'data': {'isHoming': None, 'isSpotted': False}}},
+        {'id': 3, 'm': {'data': BrokenData()}},
+        {'id': 4, 'm': {}},
+        {'id': 5},
+        {'id': 6, 'm': None},
+    ]
+    probe = ui_torpedo_state_probe(
+        Obj(getEntityCollections=lambda name: entities),
+        {'mods_DataComponent': 'm'})
+    assert [row['flags']['isHoming']['status'] for row in probe['rows']] == [
+        'missing', 'none', 'readError', 'missing', 'missing', 'none']
+    assert [row['flags']['isSpotted']['status'] for row in probe['rows']] == [
+        'missing', 'available', 'readError', 'missing', 'missing', 'none']
+    assert all(row['flags']['isHoming']['raw'] is None for row in probe['rows'])
+    assert 'do not expose' not in repr(probe)
+
+
+def test_independent_torpedo_state_nonfinite_and_unsupported_stay_unknown():
+    probe = ui_torpedo_state_probe(
+        Obj(getEntityCollections=lambda name: [
+            {'id': 1, 'm': {'data': {'isHoming': float('nan'),
+                                    'isSpotted': float('inf')}}}]),
+        {'mods_DataComponent': 'm'})
+    flags = probe['rows'][0]['flags']
+    assert flags['isHoming']['status'] == flags['isSpotted']['status'] == 'nonBoolean'
+    assert flags['isHoming']['raw'] is flags['isSpotted']['raw'] is None
+    assert flags['isHoming']['reason'] == flags['isSpotted']['reason'] == 'nonFinite'
+    unsupported = ui_torpedo_state_probe(
+        Obj(getEntityCollections=lambda name: [{'id': 2}]), Obj())
+    assert unsupported['componentKeyStatus'] == 'unsupported'
+    assert unsupported['rows'][0]['flags']['isHoming']['status'] == 'unsupported'
+    assert unsupported['producer'] == 'unknown'
+    json.dumps({'probe': probe, 'unsupported': unsupported}, allow_nan=False)
+
+
+def test_independent_state_join_requires_complete_unique_strict_id_sets():
+    def probe_for(entities):
+        return ui_torpedo_state_probe(
+            Obj(getEntityCollections=lambda name: entities),
+            {'mods_DataComponent': 'm'})
+
+    candidate = probe_for([
+        {'id': 4, 'm': {'data': {'isHoming': False, 'isSpotted': True}}},
+        {'id': 5, 'm': {'data': {'isHoming': True, 'isSpotted': False}}}])
+    api_rows = [{'uiId': 4, 'uiState': {'depth': {'raw': 2.}}},
+                {'uiId': 5}]
+    attach_ui_torpedo_state(api_rows, candidate, 'available')
+    assert candidate['joinStatus'] == 'exactUiId'
+    assert candidate['rows'][0]['apiMatchStatus'] == 'exactUiId'
+    assert api_rows[0]['uiState']['isHoming'] is False
+    assert api_rows[0]['uiState']['isSpotted'] is True
+    assert api_rows[0]['uiState']['producer'] == 'unknown'
+    assert api_rows[0]['uiState']['semantics'] == 'unverified'
+    assert api_rows[0]['uiState']['depth']['raw'] == 2.
+
+    blocked_cases = [
+        (probe_for([{'id': None, 'm': {'data': {'isHoming': True}}}]),
+         [{'uiId': 0}], 'available', 'uiIdIncomplete'),
+        (probe_for([{'id': 3, 'm': {'data': {'isHoming': True}}},
+                    {'id': 3, 'm': {'data': {'isHoming': False}}}]),
+         [{'uiId': 3}], 'available', 'ambiguousUiId'),
+        (probe_for([{'id': 3, 'm': {'data': {'isHoming': True}}}]),
+         [{'uiId': 3}, {'uiId': 3}], 'available', 'ambiguousApiUiId'),
+        (probe_for([{'id': 3, 'm': {'data': {'isHoming': True}}}]),
+         [{'uiId': None}], 'available', 'apiUiIdIncomplete'),
+        (probe_for([{'id': 3, 'm': {'data': {'isHoming': True}}}]),
+         [{'uiId': 3}], 'unknown', 'apiUnavailable'),
+        (probe_for([{'id': 3, 'm': {'data': {'isHoming': True}}}]),
+         [{'uiId': '3'}], 'available', 'noMatch'),
+    ]
+    for candidate, rows, api_status, expected in blocked_cases:
+        attach_ui_torpedo_state(rows, candidate, api_status)
+        assert candidate['joinStatus'] == expected
+        assert all('uiState' not in row for row in rows)
+
+    def partial_entities():
+        yield {'id': 7, 'm': {'data': {'isHoming': True}}}
+        raise RuntimeError('partial')
+    partial = probe_for(partial_entities())
+    partial_rows = [{'uiId': 7}]
+    attach_ui_torpedo_state(partial_rows, partial, 'available')
+    assert partial['status'] == 'partial'
+    assert partial['rows'][0]['apiMatchStatus'] == 'collectionIncomplete'
+    assert 'uiState' not in partial_rows[0]
+
+    truncated = probe_for([{'id': i, 'm': {'data': {'isHoming': True}}}
+                           for i in range(65)])
+    truncated_rows = [{'uiId': i} for i in range(64)]
+    attach_ui_torpedo_state(truncated_rows, truncated, 'available')
+    assert truncated['status'] == 'truncated'
+    assert truncated['collection']['count'] == 64
+    assert all('uiState' not in row for row in truncated_rows)
+
+
+def test_independent_state_uses_bounded_fixed_reads_without_data_enumeration():
+    counts = {'entity': 0, 'component': 0, 'data': 0,
+              'isHoming': 0, 'isSpotted': 0, 'getter': 0, 'ccKey': 0}
+
+    class FixedData(object):
+        @property
+        def isHoming(self):
+            counts['isHoming'] += 1
+            return False
+
+        @property
+        def isSpotted(self):
+            counts['isSpotted'] += 1
+            return True
+
+        def __dir__(self):
+            raise AssertionError('data fields must not be enumerated')
+
+    class Component(object):
+        @property
+        def data(self):
+            counts['data'] += 1
+            return FixedData()
+
+    class Entity(dict):
+        def __getitem__(self, key):
+            if key == 'm':
+                counts['component'] += 1
+            elif key == 'id':
+                counts['entity'] += 1
+            return dict.__getitem__(self, key)
+
+    entities = [Entity(id=index, m=Component()) for index in range(70)]
+    consumed = []
+
+    def entity_rows():
+        for entity in entities:
+            consumed.append(entity)
+            yield entity
+    class Components(object):
+        @property
+        def mods_DataComponent(self):
+            counts['ccKey'] += 1
+            return 'm'
+
+    class Hub(object):
+        def getEntityCollections(self, name):
+            counts['getter'] += 1
+            return entity_rows()
+
+    probe = ui_torpedo_state_probe(Hub(), Components())
+    assert probe['status'] == 'truncated'
+    assert probe['collection']['count'] == 64
+    assert len(consumed) == 65  # 64 sampled rows plus one bounded cutoff check
+    assert counts == {'entity': 64, 'component': 64, 'data': 64,
+                      'isHoming': 64, 'isSpotted': 64,
+                      'getter': 1, 'ccKey': 1}
+
+
+def test_independent_state_probe_survives_restricted_builtin_namespace():
+    original = torpedo_telemetry.__dict__['__builtins__']
+    restricted = dict(original)
+    for name in ('enumerate', 'iter', 'next', 'AttributeError', 'TypeError'):
+        restricted.pop(name, None)
+    torpedo_telemetry.__dict__['__builtins__'] = restricted
+    try:
+        probe = ui_torpedo_state_probe(
+            Obj(getEntityCollections=lambda name: [
+                {'id': 9, 'm': {'data': {'isHoming': False,
+                                        'isSpotted': True}}}]),
+            {'mods_DataComponent': 'm'})
+        rows = [{'uiId': 9}]
+        attach_ui_torpedo_state(rows, probe, 'available')
+        assert rows[0]['uiState']['isHoming'] is False
+        assert rows[0]['uiState']['isSpotted'] is True
+    finally:
+        torpedo_telemetry.__dict__['__builtins__'] = original
+
+
+def test_three_due_probes_share_one_collection_getter_and_source_iteration():
+    calls, consumed = [], []
+    counts = {'data': 0, 'homing': 0, 'spotted': 0}
+
+    class Data(object):
+        @property
+        def isHoming(self):
+            counts['homing'] += 1
+            return False
+
+        @property
+        def isSpotted(self):
+            counts['spotted'] += 1
+            return True
+
+    class ModComponent(object):
+        @property
+        def data(self):
+            counts['data'] += 1
+            return Data()
+
+    class Entity(dict):
+        def __getitem__(self, key):
+            if key == 't':
+                return {'type': 'normal', 'depth': 0.5}
+            return dict.__getitem__(self, key)
+
+    def entities():
+        for index in range(3):
+            consumed.append(index)
+            yield Entity(id=index, m=ModComponent(), t='t')
+
+    class Hub(object):
+        def getEntityCollections(self, name):
+            calls.append(name)
+            return entities()
+
+    hub = shared_diagnostic_snapshot(Hub())
+    components = {'torpedo': 't', 'mods_DataComponent': 'm'}
+    # The independent fake-clock scheduler test confirms these three gates can
+    # be due together; run all their adapters against that one state snapshot.
+    heavy = ui_torpedo_probe_without_state(hub, components, [])
+    depth = ui_torpedo_depth_probe(hub, components)
+    state = ui_torpedo_state_probe(hub, components)
+    api_rows = [{'uiId': index} for index in range(3)]
+    attach_ui_torpedo_state(api_rows, state, 'available')
+    assert calls == ['torpedo']
+    assert consumed == [0, 1, 2]
+    assert len(heavy['rows']) == len(depth['rows']) == len(state['rows']) == 3
+    assert all('isHoming' not in row and 'isSpotted' not in row
+               for row in heavy['rows'])
+    assert counts == {'data': 3, 'homing': 3, 'spotted': 3}
+    assert all(row['uiState']['isHoming'] is False for row in api_rows)
+
+
+def test_shared_state_collection_stops_after_64_rows_plus_one_truncation_probe():
+    calls, consumed = [], []
+
+    def entities():
+        for index in range(100000):
+            consumed.append(index)
+            yield {'id': index, 'm': {'data': {'isHoming': True}}}
+
+    hub = shared_diagnostic_snapshot(Obj(getEntityCollections=lambda name:
+        calls.append(name) or entities()))
+    probe = ui_torpedo_state_probe(
+        hub, {'mods_DataComponent': 'm'})
+    assert calls == ['torpedo']
+    assert probe['status'] == 'truncated'
+    assert probe['collection']['count'] == 64
+    assert len(consumed) == 65
+
+
+def test_state_probe_off_heavy_probe_and_legacy_signature_budget():
+    reads = {'data': 0, 'homing': 0, 'spotted': 0}
+
+    class Data(object):
+        @property
+        def isHoming(self):
+            reads['homing'] += 1
+            return True
+
+        @property
+        def isSpotted(self):
+            reads['spotted'] += 1
+            return False
+
+    class Component(object):
+        @property
+        def data(self):
+            reads['data'] += 1
+            return Data()
+
+    class CC(object):
+        torpedo = 't'
+
+        @property
+        def mods_DataComponent(self):
+            raise AssertionError('heavy path must not read state key')
+
+    entity = {'id': 1, 't': {'type': 'magnetic'}, 'm': Component()}
+    hub = Obj(getEntityCollections=lambda name: [entity])
+    heavy = ui_torpedo_probe_without_state(hub, CC(), [])
+    assert heavy['status'] == 'available'
+    assert reads == {'data': 0, 'homing': 0, 'spotted': 0}
+    legacy = ui_torpedo_probe(hub, Obj(torpedo='t', mods_DataComponent='m'), [])
+    assert legacy['rows'][0]['isHoming'] is True
+    assert legacy['rows'][0]['isSpotted'] is False
+    assert reads == {'data': 1, 'homing': 1, 'spotted': 1}
+    assert ui_torpedo_probe_without_depth(hub, Obj(
+        torpedo='t', mods_DataComponent='m'), [])['rows'][0]['isHoming'] is True
+    assert reads == {'data': 2, 'homing': 2, 'spotted': 2}
 
 
 def test_torpedo_depth_join_requires_unique_ui_id_and_does_not_reuse_frames():

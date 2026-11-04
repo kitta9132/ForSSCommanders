@@ -59,8 +59,8 @@ ATM isSpotted=trueを80フレーム取得、残り294フレームはunknown（fa
 | isOwn | nullを観測、判定未成立 | owner.isPlayerだけを読む旧実装。名前空間・意味の検証が必要 |
 | torpedoStatus | 実機取得済み | availableと正常な空配列、終了時unknownを区別 |
 | UI側type / エンティティID | 0.2.2で実機取得済み | 試験した魚雷では全フレームAPI uiId/typeと一致。全ケース保証ではない |
-| isHoming | ATMありで実機取得済み | 診断枠uiTorpedoProbe内。true/false/nullを区別。停止・再誘導を観測 |
-| isSpotted | 0.2.3で抽出追加、実機未確認 | ATM dataにキーが存在することは実測済み。被発見表示用のATM判定で、サーバー確定検出ではない |
+| isHoming | ATMありで限定実機取得済み | 過去記録では診断枠からtrue/false/nullを観測。現行0.3.29 sourceは専用opt-in probeへ分離したが、新経路は実機未確認 |
+| isSpotted | 過去の取得範囲限定 | ATM dataにキーが存在することは過去記録で実測。false遷移・現行0.3.29専用probeの取得は未確認 |
 | 誘導先ID / ping対象・命中区画 | 未取得・未実装 | typeや距離から決めつけない |
 | ping残時間・開始/命中/失効時刻 | 未取得・未実装 | 操作の申告と状態変化時刻だけでは厳密なタイマーにならない |
 | 誘導停止距離・停止理由 | 未取得・未実装 | 距離制限と期限切れは観測上の候補。確定理由フィールドにしない |
@@ -68,10 +68,9 @@ ATM isSpotted=trueを80フレーム取得、残り294フレームはunknown（fa
 | 最大射程 / 残存射程 / 寿命 | 未取得・未実装 | ammoParamsが空。未観測の発射位置から推測しない |
 | 命中/消滅理由 | 直接判定未実装 | 一覧からの消滅は観測可能。命中・射程切れ等は同義ではない |
 
-isHoming/isSpottedの取得経路は `ui.mods_DataComponent`。
-ATM無効ではisHoming未供給を観測した。isSpottedも欠損時はnullとする。
-共通UIデータ領域なのでフィールドだけから供給者を証明できるわけではなく、
-試験構成上ATM由来として区別する。ゲーム生フラグと表記しない。
+現行0.3.29 sourceの候補経路は `ui.mods_DataComponent.data.isHoming/isSpotted`。
+専用`torpedo_state_sampling_enabled`で最小1秒、固定2 fieldsだけをsampleするが、Python/dataHubからの取得保証はない。出力producerはunknown、semanticsはunverified。
+過去記録のATM条件を現行samplerの実機取得結果へ流用しない。共通UIデータ領域のフィールドだけでは供給者を証明できず、ATM条件・ゲーム生フラグ・サーバー状態一般として表記しない。`isHoming`は誘導先IDや停止理由でもない。
 
 ## 自艦魚雷兵装
 

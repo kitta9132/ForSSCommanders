@@ -98,10 +98,10 @@ class DiagnosticCollectionSnapshot(object):
         failure = None
         cap = _DIAGNOSTIC_COLLECTION_LIMITS[name] + 1
         try:
-            for index, entity in enumerate(entities):
-                if index >= cap:
-                    break
+            for entity in entities:
                 rows.append(entity)
+                if len(rows) >= cap:
+                    break
         except Exception as error:
             failure = error
         replay = _ReplayRows(rows, failure)
@@ -201,14 +201,16 @@ def _call(obj, name, *args):
         return 'unknown', None
 
 
-def _ui_torpedo_probe(hub, components, api_rows, include_depth):
+def _ui_torpedo_probe(hub, components, api_rows, include_depth,
+                      include_state=True):
     """Read-only diagnostic, not an authoritative homing/identity adapter.
 
     Collection spelling comes from ATM UI markup; Python availability is untested.
     No values are cached, joined to API rows or written back to the UI.
     """
-    keys = dict((name, _get(components, name))
-                for name in ('torpedo', 'mods_DataComponent'))
+    names = (('torpedo', 'mods_DataComponent') if include_state else
+             ('torpedo',))
+    keys = dict((name, _get(components, name)) for name in names)
     out = {'source': 'dataHub.torpedo', 'producer': 'unknown',
            'status': 'unknown', 'componentKeys': dict(
                (name, public_data(key)) for name, key in keys.items()),
@@ -253,7 +255,7 @@ def _ui_torpedo_probe(hub, components, api_rows, include_depth):
                             else:
                                 depth['raw'] = depth_value
                         row['depth'] = depth
-                else:
+                elif include_state:
                     data = (_MISSING if component is _MISSING else
                             _get(component, 'data', _MISSING))
                     value = (_MISSING if data is _MISSING else
@@ -296,6 +298,11 @@ def ui_torpedo_probe(hub, components, api_rows):
 def ui_torpedo_probe_without_depth(hub, components, api_rows):
     """Read legacy UI fields without polling depth outside its own cadence."""
     return _ui_torpedo_probe(hub, components, api_rows, False)
+
+
+def ui_torpedo_probe_without_state(hub, components, api_rows):
+    """Heavy UI diagnostics without the separately scheduled state flags."""
+    return _ui_torpedo_probe(hub, components, api_rows, False, False)
 
 
 TORPEDO_DEPTH_PROBE_LIMIT = 64
@@ -441,6 +448,230 @@ def ui_torpedo_depth_probe(hub, components):
     return out
 
 
+TORPEDO_STATE_PROBE_LIMIT = 64
+TORPEDO_STATE_FLAGS = ('isHoming', 'isSpotted')
+
+
+def _state_read(obj, name):
+    """Read one fixed mapping key/attribute and preserve its failure class."""
+    if obj is None:
+        return 'none', None
+    try:
+        if isinstance(obj, dict):
+            if name not in obj:
+                return 'missing', None
+            value = obj[name]
+        else:
+            value = getattr(obj, name)
+    except Exception as error:
+        try:
+            missing = error.__class__.__name__ in ('AttributeError', 'KeyError')
+        except Exception:
+            missing = False
+        return ('missing' if missing else 'readError'), None
+    return ('none', None) if value is None else ('available', value)
+
+
+def _state_component_key(components):
+    status, key = _state_read(components, 'mods_DataComponent')
+    if status == 'missing':
+        return 'unsupported', None
+    if status == 'none':
+        return 'unsupported', None
+    if status != 'available':
+        return status, None
+    return 'available', key
+
+
+def _state_component(entity, key, key_status):
+    if key_status != 'available':
+        return ('unsupported' if key_status == 'unsupported' else key_status), None
+    try:
+        component = entity[key]
+    except Exception as error:
+        try:
+            missing = error.__class__.__name__ in ('AttributeError', 'KeyError')
+        except Exception:
+            missing = False
+        return ('missing' if missing else 'readError'), None
+    return ('none', None) if component is None else ('available', component)
+
+
+def _state_flag(data, data_status, name):
+    result = {'source': 'ui.mods_DataComponent.data.' + name,
+              'status': 'unknown', 'raw': None, 'type': None,
+              'semantics': 'unverified'}
+    if data_status != 'available':
+        result['status'] = data_status
+        return result
+    status, value = _state_read(data, name)
+    if status != 'available':
+        result['status'] = status
+        return result
+    result['type'] = type(value).__name__
+    if type(value) is bool:
+        result['status'] = 'available'
+        result['raw'] = value
+    else:
+        result['status'] = 'nonBoolean'
+        if isinstance(value, STRING_TYPES):
+            if len(value) <= 128:
+                result['raw'] = value
+            else:
+                # Do not label a shortened value as the original raw field.
+                result['reason'] = 'stringLimit'
+                result['rawLength'] = len(value)
+        elif isinstance(value, NUMBER_TYPES) and not isinstance(value, bool):
+            if _finite(value):
+                result['raw'] = value
+            else:
+                result['reason'] = 'nonFinite'
+    return result
+
+
+def ui_torpedo_state_probe(hub, components):
+    """Read only two fixed UI flag candidates, independent of heavy diagnostics."""
+    out = {'source': 'ui.mods_DataComponent.data', 'producer': 'unknown',
+           'semantics': 'unverified', 'status': 'unknown',
+           'componentKeyStatus': 'unknown',
+           'collection': {'status': 'unknown', 'count': 0,
+                          'limit': TORPEDO_STATE_PROBE_LIMIT,
+                          'truncated': False, 'partial': False,
+                          'reason': None},
+           'rows': [], 'joinStatus': 'notAttempted'}
+    key_status, key = _state_component_key(components)
+    out['componentKeyStatus'] = key_status
+    status, entities = _call(hub, 'getEntityCollections', 'torpedo')
+    collection = out['collection']
+    collection['status'] = status
+    out['status'] = status
+    if status != 'available':
+        return out
+    index = 0
+    try:
+        for entity in entities:
+            if index >= TORPEDO_STATE_PROBE_LIMIT:
+                collection['status'] = 'truncated'
+                collection['truncated'] = True
+                collection['reason'] = 'rowLimit'
+                out['status'] = 'truncated'
+                break
+            entity_id_status, entity_id = _depth_id_read(entity)
+            component_status, component = _state_component(
+                entity, key, key_status)
+            data_status, data = (('available', None)
+                                 if component_status == 'available' else
+                                 (component_status, None))
+            if component_status == 'available':
+                data_status, data = _state_read(component, 'data')
+            row = {'entityIdStatus': entity_id_status,
+                   'entityIdCandidate': entity_id,
+                   'componentStatus': component_status,
+                   'dataStatus': data_status,
+                   'flags': {}}
+            for name in TORPEDO_STATE_FLAGS:
+                row['flags'][name] = _state_flag(data, data_status, name)
+            out['rows'].append(row)
+            index += 1
+    except Exception:
+        collection['status'] = 'partial' if out['rows'] else 'unknown'
+        collection['partial'] = bool(out['rows'])
+        collection['reason'] = 'iterationError'
+        out['status'] = collection['status']
+    collection['count'] = len(out['rows'])
+    return out
+
+
+def _strict_ui_index(rows, candidate_rows=False):
+    """Build an all-rows-valid, unique exact-type UI ID index or its blocker."""
+    index = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            return None, 'invalidRow'
+        if candidate_rows:
+            entity_status = row.get('entityIdStatus', _MISSING)
+            if entity_status is not _MISSING and entity_status != 'available':
+                return None, 'missingId'
+            value = row.get('entityIdCandidate')
+        else:
+            value = row.get('uiId')
+        key = _depth_id(value)
+        if key is None:
+            return None, 'missingId'
+        if key in index:
+            return None, 'duplicateId'
+        index[key] = row
+    return index, None
+
+
+def _ui_join_blocker(candidates, status, collection, api_status, api_rows):
+    if collection.get('status') != 'available':
+        return 'collectionIncomplete'
+    if status != 'available':
+        return 'collectionIncomplete'
+    if api_status != 'available':
+        return 'apiUnavailable'
+    try:
+        if len(api_rows) > TORPEDO_STATE_PROBE_LIMIT:
+            return 'apiRowLimit'
+    except Exception:
+        return 'apiUnknown'
+    ui_index, ui_error = _strict_ui_index(candidates, True)
+    if ui_error == 'duplicateId':
+        return 'ambiguousUiId'
+    if ui_error is not None:
+        return 'uiIdIncomplete'
+    api_index, api_error = _strict_ui_index(api_rows, False)
+    if api_error == 'duplicateId':
+        return 'ambiguousApiUiId'
+    if api_error is not None:
+        return 'apiUiIdIncomplete'
+    return None
+
+
+def attach_ui_torpedo_state(rows, probe, api_status='available'):
+    """Join current flag candidates only when both complete ID sets are unique."""
+    rows = rows or []
+    candidates = probe.get('rows', []) if isinstance(probe, dict) else []
+    collection = probe.get('collection', {}) if isinstance(probe, dict) else {}
+    status = probe.get('status') if isinstance(probe, dict) else 'unknown'
+    blocker = _ui_join_blocker(candidates, status, collection,
+                               api_status, rows)
+    if blocker is not None:
+        if isinstance(probe, dict):
+            probe['joinStatus'] = blocker
+        for item in candidates:
+            item['apiMatchStatus'] = blocker
+        return
+    ui_index, _ui_error = _strict_ui_index(candidates, True)
+    api_index, _api_error = _strict_ui_index(rows, False)
+    matched = 0
+    for key, item in ui_index.items():
+        row = api_index.get(key)
+        item['apiMatchStatus'] = 'exactUiId' if row is not None else 'unmatched'
+        if row is None:
+            continue
+        state = row.get('uiState')
+        if not isinstance(state, dict):
+            state = {}
+            row['uiState'] = state
+        state['source'] = 'ui.mods_DataComponent.data'
+        state['producer'] = 'unknown'
+        state['semantics'] = 'unverified'
+        state['matchStatus'] = 'exactUiId'
+        for name in TORPEDO_STATE_FLAGS:
+            field = item.get('flags', {}).get(name, {})
+            state[name] = (field.get('raw') if field.get('status') == 'available'
+                           and type(field.get('raw')) is bool else None)
+            stem = 'homing' if name == 'isHoming' else 'spotted'
+            state[stem + 'Status'] = field.get('status', 'unknown')
+            state[stem + 'Raw'] = field.get('raw')
+            state[stem + 'RawType'] = field.get('type')
+        matched += 1
+    if isinstance(probe, dict):
+        probe['joinStatus'] = 'exactUiId' if matched else 'noMatch'
+
+
 def attach_ui_depth_state(rows, probe, api_status='available'):
     """Attach depth only for complete, strict-type, unique same-sample IDs."""
     rows = rows or []
@@ -506,27 +737,32 @@ def attach_ui_depth_state(rows, probe, api_status='available'):
             state['depth'] = item['depth']
 
 
-def attach_ui_state(rows, probe):
-    """Join only unambiguous exact UI identifiers observed on this build."""
-    index = {}
-    duplicate = set()
-    for item in probe.get('rows', []) if probe.get('status') == 'available' else []:
-        key = item.get('entityIdCandidate')
-        if key is None:
-            continue
-        if key in index:
-            duplicate.add(key)
-        index[key] = item
+def attach_ui_state(rows, probe, api_status='available'):
+    """Keep the legacy UI projection, joining only complete strict unique IDs."""
+    rows = rows or []
+    candidates = probe.get('rows', []) if isinstance(probe, dict) else []
+    default_collection_status = (
+        'truncated' if probe.get('truncated') else probe.get('status'))
+    collection = probe.get('collection', {
+        'status': default_collection_status})
+    blocker = _ui_join_blocker(candidates, probe.get('status'), collection,
+                               api_status, rows)
+    index = None
+    if blocker is None:
+        index, _error = _strict_ui_index(candidates, True)
     for row in rows:
-        key = row.get('uiId')
-        item = index.get(key) if key not in duplicate else None
+        if not isinstance(row, dict):
+            continue
+        key = _depth_id(row.get('uiId'))
+        item = index.get(key) if index is not None and key is not None else None
         state = {'source': 'ui.mods_DataComponent', 'producer': 'unknown',
-                  'matchStatus': 'exactUiId' if item is not None else 'unknown',
-                  'isHoming': None, 'homingStatus': 'unknown',
-                  'isSpotted': None, 'spottedStatus': 'unknown', 'uiType': None,
-                  'depth': {'source': 'dataHub.torpedo.depth',
-                            'status': 'unknown', 'type': None, 'raw': None,
-                            'unit': None, 'semantics': 'unverified'}}
+                   'matchStatus': 'exactUiId' if item is not None else 'unknown',
+                   'isHoming': None, 'homingStatus': 'unknown',
+                   'isSpotted': None, 'spottedStatus': 'unknown', 'uiType': None,
+                   'depth': {'source': 'dataHub.torpedo.depth',
+                             'status': 'unknown', 'type': None, 'raw': None,
+                             'unit': None, 'semantics': 'unverified'},
+                   'semantics': 'unverified'}
         if item is not None:
             for name in ('isHoming', 'homingStatus', 'isSpotted', 'spottedStatus', 'uiType'):
                 state[name] = item.get(name, state[name])

@@ -139,8 +139,10 @@ def test_main_only_constructs_facade_in_due_branch_and_does_not_swap_global_hub(
     with open(os.path.join(ROOT, 'Main.py'), encoding='utf-8') as source:
         text = source.read()
     assert 'lambda: shared_diagnostic_snapshot(dataHub)' in text
-    assert 'if diagnostic_due or depth_sampling_due:' in text
-    assert text.index('if diagnostic_due or depth_sampling_due:') < text.index(
+    assert ('if diagnostic_due or depth_sampling_due or state_sampling_due:'
+            in text)
+    assert text.index(
+        'if diagnostic_due or depth_sampling_due or state_sampling_due:') < text.index(
         'if diagnostic_due:\n            weapon_probe')
     assert 'dataHub = diagnostic_hub' not in text
     assert 'dataHub = shared_diagnostic_snapshot' not in text
