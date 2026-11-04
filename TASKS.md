@@ -1,5 +1,7 @@
 # 開発タスク
 
+実用化に向けた既知の問題・優先度・到達点は[既知の問題一覧](WowsExtractor-torpedoes-client-test/docs/KNOWN_ISSUES.ja.md)を参照。ユーザー方針（2026-11-04）：完全性の断言ではなく、既知の問題を整理し実用で問題のない水準へ詰める。
+
 現行正本は **0.3.31-calibration-spatial-index**（未導入・実機未確認）。親の独立検証は427 passed・1 skipped、Python3.11 checker成功（9 moduleのPython2 grammarを含む）。下記の旧版時点の「作業版」「未実機」記述は履歴として読み、現況は本行と最新項目を優先する。
 
 ## 緊急優先：通常プレイのFPS低下
