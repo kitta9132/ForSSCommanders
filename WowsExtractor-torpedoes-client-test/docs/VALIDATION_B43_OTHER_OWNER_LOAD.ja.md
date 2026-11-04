@@ -28,3 +28,11 @@
 profilerは全activeで出力なし。従ってcollectorのAPI取得・owner lookup・motion／map計算・同期writeの時間値は今回得られていない。state間隔が約5Hzを保つこともFPS影響がない証明ではない。min30台の原因や、過去の6本試験から216本の費用を直線外挿して推定しない。
 
 まずこの記録とsourceを使い、owner APIは既にsame-snapshot共有済みであることを踏まえて、残る意味保存型の削減候補を調査する。フレーム超え位置cache、魚雷の切捨て、owner状態の無期限cacheはしない。開始直後FPS低下は追跡対象外のまま。
+
+## 追加のread-only解析とoffline予算確認
+
+ownerIdと同stateのships.vehicleIdの型厳密一致は93,297行で一意、2,116行で未一致、複数一致なし。22 owner候補はすべて一度は一致した。meta rosterのplayerIdとの一致は0。これは複数ownerでの候補整合性であり、namespace契約の確定joinには昇格しない。
+
+JSONL payloadの平均寄与はtorpedoes約56.1%、ships約20.8%、avatarObservations約16.6%。owner値をstate内のtableへ移す試算では全active約8.69%のbyte削減候補があるが、行内ownerを省くschema変更・consumer対応が必要。FPS改善の根拠はなく、今回は互換性を壊す圧縮を採用しない。
+
+`test_torpedo_high_load_budget.py`で216魚雷・22 ownerのfixtureを追加。coreは216行を切り捨てず順序維持、collection getter1回、各owner lookup1回、失敗ownerも同sampleでは1回、次sampleでは再取得し古いalive/Noneを持ち越さないことを検証する。これはAPI-call予算のテストであって、実機時間・FPS改善の証明ではない。

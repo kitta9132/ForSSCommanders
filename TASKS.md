@@ -2,6 +2,7 @@
 
 ## 緊急優先：通常プレイのFPS低下
 
+- B43 offline補強：ownerId→同state vehicleIdは93,297行で一意候補一致・2,116行未一致、playerId一致0。namespace契約へ昇格しない。216魚雷/22 owner fixtureで全行・順序維持、collection1回・owner各1回、次sample再取得を検証（全pytest424成功・1skip、checker成功）。owner table化は全payload約8.69%削減試算だがschema変更かつFPS効果不明のため採用せず。残負荷の原因特定にはprofiler有効の別目的計測が必要。
 - B43（2026-11-04）：指定2対2でなく11対12・シャトルーノー・自艦未発射、minFPS30以上と報告。active対応roster23、別battleの旧meta24は除外。魚雷同時最大216本/owner22、複合候補350（味方213/敵137）、全95,413行world位置・owner object取得、map95,349/unknown64。profilerOFFで取得/計算/write費用は未計測、通常PvP上限ともmod原因とも断定不可。停止・13fileshash照合退避済み、同条件再試験をすぐ求めず大量記録とsourceで残負荷を調査。[B43大量魚雷](WowsExtractor-torpedoes-client-test/docs/VALIDATION_B43_OTHER_OWNER_LOAD.ja.md)。
 - B42静的照合終了：GUIの魚雷depthはNumber sync=false宣言のみ、公開API意味定義なし。検索した範囲でUI用途根拠なし。locator/search APIのenum契約もint宣言のみなのでGUI状態名候補を確定値へ昇格しない。深度意味・終了/cooldown等の未確認は明示して保留し、同条件再試験しない。次の未検証領域は敵／味方魚雷の公開owner取得と生座標（自艦以外の観測）。
 - B42追加確認：8:30の発射時はHUD深度30mとユーザー確認済み。魚雷depth候補は43行とも0.14で、浮上B40と同値。自艦発射深度の指標とは解釈せず、実魚雷深度／別用途の区別・単位は未確定。同じ30m発射の再試験は不要。
