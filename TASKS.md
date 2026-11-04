@@ -1,5 +1,7 @@
 # 開発タスク
 
+次の実機確認は[0.3.38限定試験計画](WowsExtractor-torpedoes-client-test/docs/VALIDATION_PLAN_0.3.38.ja.md)。初回paramsとheavy OFF独立4群・通常区間FPSを1戦へ集約。555 offline tests成功、ゲーム停止／build実起動履歴／installer dry-runを確認済み。実導入・試験はまだ行っていない。
+
 0.3.38親最終検証：全555 passed（私有replay含む）、Python2 grammar9 module／collector checker成功。profilerの全登録phase予算テストを11phaseへ更新。ゲーム未導入・実機FPS未確認。
 
 最新ソース：**0.3.38-independent-gun-reload**（未導入・実機未確認）。FPS Cの装填raw独立取得を統合。専用ONはcore周期・参照getEntity探索0・heavy同tickもprobe1回。既存helper内barrelsModifierの二重component readを1回へ削減。独立gun／submarineのprofiler phaseを正式登録（0.3.37のsubmarine phaseは未登録で計上されなかった点を修正）。装填数・物理管ID・修理timer・WaveHit対象namespace／TTLは未知を維持。以下は旧版履歴。
