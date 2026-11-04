@@ -5,10 +5,15 @@ set "PS1=%SCRIPT_DIR%install-wowsmod.ps1"
 set "BUILD=13357625"
 set "GAMEROOT=C:\Program Files (x86)\Steam\steamapps\common\World of Warships"
 set "DRYRUN="
+set "WITHATM="
 
 if /I "%~1"=="--dry-run" set "DRYRUN=-DryRun"
 if /I "%~1"=="-dryrun" set "DRYRUN=-DryRun"
 if /I "%~1"=="/dry-run" set "DRYRUN=-DryRun"
+if /I "%~2"=="--dry-run" set "DRYRUN=-DryRun"
+
+if /I "%~1"=="--with-atm" set "WITHATM=-WithAtm"
+if /I "%~2"=="--with-atm" set "WITHATM=-WithAtm"
 
 if /I "%~1"=="--restore-atm" (
   if not exist "%SCRIPT_DIR%restore-atm-13357625.bat" (
@@ -21,7 +26,11 @@ if /I "%~1"=="--restore-atm" (
 
 echo WowsExtractor installer for WoWS build %BUILD%
 echo Target: %GAMEROOT%\bin\%BUILD%
-echo ATM-only files will be moved out of the load paths if present.
+if defined WITHATM (
+  echo ATM mode: keep ^(explicit --with-atm^) - ATM load files will not be moved.
+) else (
+  echo ATM mode: disable - ATM-only files will be moved out of the load paths if present.
+)
 echo.
 
 if not exist "%PS1%" (
@@ -30,7 +39,7 @@ if not exist "%PS1%" (
   goto :failed
 )
 
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%PS1%" -Build "%BUILD%" -GameRoot "%GAMEROOT%" %DRYRUN%
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%PS1%" -Build "%BUILD%" -GameRoot "%GAMEROOT%" %DRYRUN% %WITHATM%
 set "RC=%ERRORLEVEL%"
 
 if not "%RC%"=="0" goto :failed_rc

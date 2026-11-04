@@ -113,3 +113,13 @@ ATM isSpotted=trueを80フレーム取得、残り294フレームはunknown（fa
 ## B41後の訂正（2026-11-04）
 
 isHoming/isSpottedのmods_DataComponent経路は、外部modが供給する候補データの読取りであり、公開Torpedo APIの生状態ではありません。ATMなしのB41では84候補すべてcomponentNoneで取得未達。公式ui APIとGUI定義でmod専用領域と確認したため、操作変更で同試験を再要求しません。ATM由来値は推定／導出の出所を分ける必要があります。[調査根拠](RESEARCH_B41_MOD_DATA_PRODUCER.ja.md)。
+
+## 0.3.30-atm-derived-state（source only・未実機）
+
+0.3.30は、魚雷state候補の供給元を`torpedo_state_provider`で実行時に明示する版です。既定は未指定／`unknown`で、従来のproducer unknown・semantics unverifiedを維持します。`advanced_torpedo_marker`を明示した場合だけATM由来の導出値としてdeclared producerを区別しますが、ATMの導入・実行・書込みを証明せず、ユーザー指定だけではproducer実証になりません。provider出力の厳密なfield schemaは実装側の別作業で確認中で、本表では断定しません。
+
+- `isSpotted`：ATM側の推定・第三者判定。ゲーム／サーバーの確定した被発見boolではない。
+- `isHoming`：第三者由来の判定。誘導先ID・停止距離・停止理由ではない。
+- `torpedo_state_sampling_enabled`：既定false。OFF時は追加probe/API呼出しなし。既定5Hz core、state sampler最小1Hz、heavy OFF、depth OFFを試験条件の基本とする。
+- ATMは実行時の導出state情報源としてのみ必要。自動ダウンロード・同梱はせず、installer既定はATM退避のまま。ATMを残す場合は明示`-WithAtm`（wrapper `--with-atm`）を使い、復元は`restore-atm-13357625.bat`のallowlist strict no-overwrite（conflict時fail closed）に従う。
+- 同じB41操作の再試験は、ATM producerありという新しい条件のため可能だが、現時点でユーザーへ実機依頼しない。実機取得・FPS・実時間・API内部時間は未確認。

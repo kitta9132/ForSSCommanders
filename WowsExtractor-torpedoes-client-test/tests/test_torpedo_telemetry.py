@@ -1056,6 +1056,165 @@ def test_independent_state_join_requires_complete_unique_strict_id_sets():
     assert all('uiState' not in row for row in truncated_rows)
 
 
+def test_declared_atm_keeps_declared_origin_separate_from_runtime_producer():
+    entities = [{'id': 11, 't': {'depth': 0.14},
+                 'm': {'data': {'isHoming': True, 'isSpotted': False}}}]
+    hub = Obj(getEntityCollections=lambda name: entities)
+    probe = ui_torpedo_state_probe(
+        hub, {'mods_DataComponent': 'm'}, 'advanced_torpedo_marker')
+    depth = ui_torpedo_depth_probe(hub, {'torpedo': 't'})
+    assert probe['producer'] == 'unknown'
+    assert probe['declaredProducer'] == 'advanced_torpedo_marker'
+    assert probe['producerVerification'] == 'notVerified'
+    assert probe['valueKind'] == 'thirdPartyDerived'
+    assert probe['semantics'] == 'unverified'
+    homing = probe['rows'][0]['flags']['isHoming']
+    spotted = probe['rows'][0]['flags']['isSpotted']
+    assert homing['declaredProducer'] == spotted['declaredProducer'] == (
+        'advanced_torpedo_marker')
+    assert homing['producerVerification'] == spotted[
+        'producerVerification'] == 'notVerified'
+    assert homing['valueKind'] == 'thirdPartyGuidanceAssessment'
+    assert spotted['valueKind'] == 'clientSideEstimate'
+    assert homing['status'] == 'available' and homing['raw'] is True
+    assert spotted['status'] == 'available' and spotted['raw'] is False
+
+    rows = [{'uiId': 11}]
+    attach_ui_depth_state(rows, depth, 'available')
+    attach_ui_torpedo_state(rows, probe, 'available')
+    state = rows[0]['uiState']
+    # The depth projection keeps its own frame source; state metadata is per flag.
+    assert state['source'] == 'dataHub.torpedo'
+    assert state['depth']['source'] == 'dataHub.torpedo.depth'
+    assert state['depth']['raw'] == 0.14
+    assert state['isHoming'] is True and state['isSpotted'] is False
+    assert state['homingStatus'] == 'available'
+    assert state['spottedStatus'] == 'available'
+    assert state['homingSource'] == 'ui.mods_DataComponent.data.isHoming'
+    assert state['spottedSource'] == 'ui.mods_DataComponent.data.isSpotted'
+    assert state['homingDeclaredProducer'] == 'advanced_torpedo_marker'
+    assert state['spottedDeclaredProducer'] == 'advanced_torpedo_marker'
+    assert state['homingProducerVerification'] == 'notVerified'
+    assert state['spottedProducerVerification'] == 'notVerified'
+    assert state['homingValueKind'] == 'thirdPartyGuidanceAssessment'
+    assert state['spottedValueKind'] == 'clientSideEstimate'
+    json.dumps({'probe': probe, 'depth': depth, 'rows': rows}, allow_nan=False)
+
+
+@pytest.mark.parametrize('provider', [
+    None, '', 'unknown', 'other_mod', 'advanced_torpedo_marker ', 'ATM', 1])
+def test_undeclared_or_invalid_provider_does_not_imply_atm_or_server_raw(provider):
+    probe = ui_torpedo_state_probe(
+        Obj(getEntityCollections=lambda name: [
+            {'id': 12, 'm': {'data': {'isHoming': True, 'isSpotted': False}}}]),
+        {'mods_DataComponent': 'm'}, provider)
+    assert probe['declaredProducer'] == 'unknown'
+    assert probe['producerVerification'] == 'notVerified'
+    assert probe['valueKind'] == 'unknown'
+    assert probe['producer'] == 'unknown'
+    for name in ('isHoming', 'isSpotted'):
+        flag = probe['rows'][0]['flags'][name]
+        assert flag['declaredProducer'] == 'unknown'
+        assert flag['producerVerification'] == 'notVerified'
+        assert flag['valueKind'] == 'unknown'
+    rows = [{'uiId': 12}]
+    attach_ui_torpedo_state(rows, probe, 'available')
+    state = rows[0]['uiState']
+    assert state['homingValueKind'] == state['spottedValueKind'] == 'unknown'
+    assert state['homingDeclaredProducer'] == state[
+        'spottedDeclaredProducer'] == 'unknown'
+    assert state['source'] == 'ui.mods_DataComponent.data'
+
+
+def test_component_none_is_metadata_not_an_observed_false_under_atm_declaration():
+    probe = ui_torpedo_state_probe(
+        Obj(getEntityCollections=lambda name: [{'id': 5, 'm': None}]),
+        {'mods_DataComponent': 'm'}, 'advanced_torpedo_marker')
+    row = probe['rows'][0]
+    assert row['componentStatus'] == 'none'
+    assert row['dataStatus'] == 'none'
+    assert row['dataReason'] == 'missingProviderData'
+    for name in ('isHoming', 'isSpotted'):
+        flag = row['flags'][name]
+        assert flag['status'] == 'none'
+        assert flag['reason'] == 'missingProviderData'
+        assert flag['raw'] is None
+        assert flag['valueKind'] in ('thirdPartyGuidanceAssessment',
+                                     'clientSideEstimate')
+    rows = [{'uiId': 5}]
+    attach_ui_torpedo_state(rows, probe, 'available')
+    state = rows[0]['uiState']
+    assert state['isHoming'] is None and state['isSpotted'] is None
+    assert state['homingStatus'] == state['spottedStatus'] == 'none'
+    assert state['homingRaw'] is state['spottedRaw'] is None
+    json.dumps({'probe': probe, 'rows': rows}, allow_nan=False)
+
+
+def test_declared_atm_nonbool_values_and_ambiguous_ids_do_not_become_state():
+    nonbool = ui_torpedo_state_probe(
+        Obj(getEntityCollections=lambda name: [
+            {'id': 21, 'm': {'data': {'isHoming': 'yes', 'isSpotted': 1}}}]),
+        {'mods_DataComponent': 'm'}, 'advanced_torpedo_marker')
+    rows = [{'uiId': 21}]
+    attach_ui_torpedo_state(rows, nonbool, 'available')
+    state = rows[0]['uiState']
+    assert state['isHoming'] is None and state['isSpotted'] is None
+    assert state['homingStatus'] == state['spottedStatus'] == 'nonBoolean'
+    assert state['homingRaw'] == 'yes' and state['spottedRaw'] == 1
+    # Raw acceptance and semantic class remain separate from bool availability.
+    assert state['homingValueKind'] == 'thirdPartyGuidanceAssessment'
+    assert state['spottedValueKind'] == 'clientSideEstimate'
+
+    ambiguous = ui_torpedo_state_probe(
+        Obj(getEntityCollections=lambda name: [
+            {'id': 3, 'm': {'data': {'isHoming': True}}},
+            {'id': 3, 'm': {'data': {'isHoming': False}}}]),
+        {'mods_DataComponent': 'm'}, 'advanced_torpedo_marker')
+    ambiguous_rows = [{'uiId': 3}]
+    attach_ui_torpedo_state(ambiguous_rows, ambiguous, 'available')
+    assert ambiguous['joinStatus'] == 'ambiguousUiId'
+    assert 'uiState' not in ambiguous_rows[0]
+    assert all(item['apiMatchStatus'] == 'ambiguousUiId'
+               for item in ambiguous['rows'])
+    assert ambiguous['declaredProducer'] == 'advanced_torpedo_marker'
+
+    def partial_entities():
+        yield {'id': 31, 'm': {'data': {'isHoming': True}}}
+        raise RuntimeError('partial')
+    partial = ui_torpedo_state_probe(
+        Obj(getEntityCollections=lambda name: partial_entities()),
+        {'mods_DataComponent': 'm'}, 'advanced_torpedo_marker')
+    partial_rows = [{'uiId': 31}]
+    attach_ui_torpedo_state(partial_rows, partial, 'available')
+    assert partial['status'] == 'partial'
+    assert partial['joinStatus'] == 'collectionIncomplete'
+    assert 'uiState' not in partial_rows[0]
+    json.dumps({'nonbool': nonbool, 'ambiguous': ambiguous, 'partial': partial},
+               allow_nan=False)
+
+
+def test_state_projection_does_not_reuse_a_previous_frame_or_old_ui_state():
+    current = [{'id': 3, 'm': {'data': {'isHoming': True, 'isSpotted': True}}}]
+    hub = Obj(getEntityCollections=lambda name: current)
+    components = {'mods_DataComponent': 'm'}
+    first_rows = [{'uiId': 3}]
+    first = ui_torpedo_state_probe(hub, components, 'advanced_torpedo_marker')
+    attach_ui_torpedo_state(first_rows, first, 'available')
+    assert first_rows[0]['uiState']['isHoming'] is True
+
+    current[:] = [{'id': 4, 'm': {'data': {'isHoming': False, 'isSpotted': False}}}]
+    second_rows = [{'uiId': 4}]
+    second = ui_torpedo_state_probe(hub, components, 'advanced_torpedo_marker')
+    attach_ui_torpedo_state(second_rows, second, 'available')
+    assert second_rows[0]['uiState']['isHoming'] is False
+
+    # A fresh API row for the old ID receives nothing from the earlier sample.
+    stale_rows = [{'uiId': 3}]
+    attach_ui_torpedo_state(stale_rows, second, 'available')
+    assert 'uiState' not in stale_rows[0]
+    assert second['rows'][0]['apiMatchStatus'] == 'unmatched'
+
+
 def test_independent_state_uses_bounded_fixed_reads_without_data_enumeration():
     counts = {'entity': 0, 'component': 0, 'data': 0,
               'isHoming': 0, 'isSpotted': 0, 'getter': 0, 'ccKey': 0}
@@ -1126,11 +1285,14 @@ def test_independent_state_probe_survives_restricted_builtin_namespace():
             Obj(getEntityCollections=lambda name: [
                 {'id': 9, 'm': {'data': {'isHoming': False,
                                         'isSpotted': True}}}]),
-            {'mods_DataComponent': 'm'})
+            {'mods_DataComponent': 'm'}, 'advanced_torpedo_marker')
         rows = [{'uiId': 9}]
         attach_ui_torpedo_state(rows, probe, 'available')
         assert rows[0]['uiState']['isHoming'] is False
         assert rows[0]['uiState']['isSpotted'] is True
+        assert probe['declaredProducer'] == 'advanced_torpedo_marker'
+        assert rows[0]['uiState']['homingValueKind'] == (
+            'thirdPartyGuidanceAssessment')
     finally:
         torpedo_telemetry.__dict__['__builtins__'] = original
 
@@ -1178,7 +1340,7 @@ def test_three_due_probes_share_one_collection_getter_and_source_iteration():
     # be due together; run all their adapters against that one state snapshot.
     heavy = ui_torpedo_probe_without_state(hub, components, [])
     depth = ui_torpedo_depth_probe(hub, components)
-    state = ui_torpedo_state_probe(hub, components)
+    state = ui_torpedo_state_probe(hub, components, 'advanced_torpedo_marker')
     api_rows = [{'uiId': index} for index in range(3)]
     attach_ui_torpedo_state(api_rows, state, 'available')
     assert calls == ['torpedo']
@@ -1187,7 +1349,10 @@ def test_three_due_probes_share_one_collection_getter_and_source_iteration():
     assert all('isHoming' not in row and 'isSpotted' not in row
                for row in heavy['rows'])
     assert counts == {'data': 3, 'homing': 3, 'spotted': 3}
+    assert state['declaredProducer'] == 'advanced_torpedo_marker'
     assert all(row['uiState']['isHoming'] is False for row in api_rows)
+    assert all(row['uiState']['homingDeclaredProducer'] == (
+        'advanced_torpedo_marker') for row in api_rows)
 
 
 def test_shared_state_collection_stops_after_64_rows_plus_one_truncation_probe():

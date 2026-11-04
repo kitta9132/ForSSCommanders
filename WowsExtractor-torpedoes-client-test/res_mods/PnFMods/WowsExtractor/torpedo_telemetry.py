@@ -450,6 +450,31 @@ def ui_torpedo_depth_probe(hub, components):
 
 TORPEDO_STATE_PROBE_LIMIT = 64
 TORPEDO_STATE_FLAGS = ('isHoming', 'isSpotted')
+TORPEDO_STATE_FIELD_VALUE_KINDS = {
+    'isHoming': 'thirdPartyGuidanceAssessment',
+    'isSpotted': 'clientSideEstimate',
+}
+
+
+def normalize_state_provider(value):
+    """Accept only an explicit known declaration; everything else is unknown.
+
+    The declaration names an expected third-party producer. It is never proof
+    that the runtime value came from that producer.
+    """
+    if value == 'advanced_torpedo_marker':
+        return value
+    return 'unknown'
+
+
+def state_provider_metadata(declared_provider):
+    """Separate the declared origin from the unverifiable runtime producer."""
+    provider = normalize_state_provider(declared_provider)
+    return {
+        'declaredProducer': provider,
+        'producerVerification': 'notVerified',
+        'valueKind': ('thirdPartyDerived'
+                      if provider == 'advanced_torpedo_marker' else 'unknown')}
 
 
 def _state_read(obj, name):
@@ -497,12 +522,18 @@ def _state_component(entity, key, key_status):
     return ('none', None) if component is None else ('available', component)
 
 
-def _state_flag(data, data_status, name):
+def _state_flag(data, data_status, name, declared_provider='unknown'):
+    meta = state_provider_metadata(declared_provider)
+    if meta['valueKind'] != 'unknown':
+        meta['valueKind'] = TORPEDO_STATE_FIELD_VALUE_KINDS.get(name, 'unknown')
     result = {'source': 'ui.mods_DataComponent.data.' + name,
               'status': 'unknown', 'raw': None, 'type': None,
               'semantics': 'unverified'}
+    result.update(meta)
     if data_status != 'available':
         result['status'] = data_status
+        if data_status == 'none':
+            result['reason'] = 'missingProviderData'
         return result
     status, value = _state_read(data, name)
     if status != 'available':
@@ -529,8 +560,9 @@ def _state_flag(data, data_status, name):
     return result
 
 
-def ui_torpedo_state_probe(hub, components):
+def ui_torpedo_state_probe(hub, components, declared_provider='unknown'):
     """Read only two fixed UI flag candidates, independent of heavy diagnostics."""
+    provider = normalize_state_provider(declared_provider)
     out = {'source': 'ui.mods_DataComponent.data', 'producer': 'unknown',
            'semantics': 'unverified', 'status': 'unknown',
            'componentKeyStatus': 'unknown',
@@ -539,6 +571,7 @@ def ui_torpedo_state_probe(hub, components):
                           'truncated': False, 'partial': False,
                           'reason': None},
            'rows': [], 'joinStatus': 'notAttempted'}
+    out.update(state_provider_metadata(provider))
     key_status, key = _state_component_key(components)
     out['componentKeyStatus'] = key_status
     status, entities = _call(hub, 'getEntityCollections', 'torpedo')
@@ -569,8 +602,12 @@ def ui_torpedo_state_probe(hub, components):
                    'componentStatus': component_status,
                    'dataStatus': data_status,
                    'flags': {}}
+            # A missing provider object is metadata, not an observed false.
+            if data_status == 'none':
+                row['dataReason'] = 'missingProviderData'
             for name in TORPEDO_STATE_FLAGS:
-                row['flags'][name] = _state_flag(data, data_status, name)
+                row['flags'][name] = _state_flag(
+                    data, data_status, name, provider)
             out['rows'].append(row)
             index += 1
     except Exception:
@@ -635,6 +672,12 @@ def attach_ui_torpedo_state(rows, probe, api_status='available'):
     candidates = probe.get('rows', []) if isinstance(probe, dict) else []
     collection = probe.get('collection', {}) if isinstance(probe, dict) else {}
     status = probe.get('status') if isinstance(probe, dict) else 'unknown'
+    declared_provider = (probe.get('declaredProducer')
+                         if isinstance(probe, dict) else None)
+    producer_verification = (probe.get('producerVerification')
+                             if isinstance(probe, dict) else None)
+    if producer_verification is None:
+        producer_verification = 'notVerified'
     blocker = _ui_join_blocker(candidates, status, collection,
                                api_status, rows)
     if blocker is not None:
@@ -655,7 +698,10 @@ def attach_ui_torpedo_state(rows, probe, api_status='available'):
         if not isinstance(state, dict):
             state = {}
             row['uiState'] = state
-        state['source'] = 'ui.mods_DataComponent.data'
+        # A per-frame projection may already own the top-level source (depth).
+        # Keep it and let each flag expose its own source below.
+        if state.get('source') in (None, ''):
+            state['source'] = 'ui.mods_DataComponent.data'
         state['producer'] = 'unknown'
         state['semantics'] = 'unverified'
         state['matchStatus'] = 'exactUiId'
@@ -667,6 +713,12 @@ def attach_ui_torpedo_state(rows, probe, api_status='available'):
             state[stem + 'Status'] = field.get('status', 'unknown')
             state[stem + 'Raw'] = field.get('raw')
             state[stem + 'RawType'] = field.get('type')
+            state[stem + 'Source'] = field.get('source')
+            state[stem + 'DeclaredProducer'] = (
+                field.get('declaredProducer') or declared_provider or 'unknown')
+            state[stem + 'ProducerVerification'] = (
+                field.get('producerVerification') or producer_verification)
+            state[stem + 'ValueKind'] = field.get('valueKind') or 'unknown'
         matched += 1
     if isinstance(probe, dict):
         probe['joinStatus'] = 'exactUiId' if matched else 'noMatch'

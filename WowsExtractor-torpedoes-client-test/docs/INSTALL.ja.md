@@ -28,7 +28,7 @@
 
 ## 3. mod本体をコピーする
 
-配布物の `res_mods/PnFMods/WowsExtractor/` を丸ごとコピーします。0.3.20の必要Python sourceは9個と、任意の設定ファイルです。
+配布物の `res_mods/PnFMods/WowsExtractor/` を丸ごとコピーします。0.3.30の必要Python sourceは9個と、任意の設定ファイルです。
 
 ```text
 Main.py                  エントリーポイント、イベント、スナップショット、書き込み
@@ -77,20 +77,23 @@ state_interval = 0.2
 `diagnostics_interval` は0.1秒未満を0.1に丸めます。FPS改善を保証する設定ではありません。
 通常の有限な正の数を設定します。不明な設定キーは無視されます。設定は読み込み時と戦闘開始時に読み直されます。戦闘中の変更を即時反映する仕組みではありません。
 
+0.3.30の`torpedo_state_provider`は、魚雷state候補の供給元を実行時に明示する設定です。未指定または`unknown`の既定では従来どおりproducer unknownとして扱い、ATM等の存在を推測しません。`advanced_torpedo_marker`を明示した場合だけ、ATM由来の導出値であることをdeclared producerとして区別します。これはATMの導入・実行・値の実在を証明せず、`isSpotted`は推定・第三者判定、`isHoming`も第三者判定で、ゲーム／サーバーの生boolではありません。provider出力の厳密なfield schemaは実装側で確認中であり、この文書では固定しません。`torpedo_state_sampling_enabled`は既定falseのままで、OFF時は追加probe/API呼出しを行いません。
+
 ## 6. 初回確認
 
 1. 起動して訓練戦に入る。
 2. modフォルダー内に `meta.json` と `state.json` ができるか確認。
 3. `state.json` の更新日時が進むことを確認。
-4. `meta.json` の `mod.version` が `0.3.1-map-motion` であることを確認。
+4. `meta.json` の `mod.version` が `0.3.30-atm-derived-state` であることを確認。
 5. 魚雷発射後に `torpedoes` を確認。[実機テスト手順](TEST_PLAN.ja.md)に進む。
 
 ## ATMとの併用
 
-このmod単体の出力にはATMは不要です。最初はATMなしで確認し、その後、現行クライアントに対応したATMと作者指定の依存modを別途導入して比較します。
+このmod単体のcore出力にはATMは不要です。最初はATMなしで確認し、その後、現行クライアントに対応したATMと作者指定の依存modを別途導入して比較します。
+0.3.30では、ATMを魚雷state候補の**実行時の導出供給元**として明示指定できます。ATMが必要になるのはこの導出state連携のためであり、公開Torpedo APIの基本情報やコア収集のためではありません。ATMの自動ダウンロード・同梱・改変は行いません。
 ATMのファイルや署名は編集しません。本パッケージはATMを読み込ませたり改変したりしません。
 
-同梱の `install-13357625.bat` を使う場合、ATMなし条件のため、ATM専用のロード対象ファイルを `res_mods\_wowsmod_backups\ATM_disabled_<日時>` へ自動で移動します。
+同梱の `install-13357625.bat` の既定は、従来どおりATMなし条件です。ATM専用のロード対象ファイルを `res_mods\_wowsmod_backups\ATM_disabled_<日時>` へ自動で移動します。
 
 ```text
 res_mods\PnFMods\AdvancedTorpedoMarkerPy\
@@ -98,8 +101,19 @@ res_mods\gui\unbound2\PnFMods\AdvancedTorpedoMarker.unbound
 res_mods\gui\unbound2\PnFMods\AdvancedTorpedoMarkerMinimapFix.unbound
 ```
 
-共有依存の `PnFMods\TTaroModUtils` と `PnFModsLoader.py` は移動しません。ATMありのテストへ進むときは `restore-atm-13357625.bat` で戻します。詳細は [バージョン固定インストーラー](INSTALL_BAT.ja.md) を参照してください。
-手動でコピーする場合は、ATMなし条件では上記3つを `PnFMods` 外へ移動してください。
+共有依存の `res_mods\PnFMods\TTaroModUtils` と `res_mods\PnFModsLoader.py` は移動しません。ATM専用schemaと画像も移動しません。ATMありのテストへ進むときは `restore-atm-13357625.bat` で戻します。復元はmanifestに記録されたATM専用パスだけを対象にし、復元先に同名ファイル／フォルダーがある場合は上書きせず停止します（fail closed）。詳細は [バージョン固定インストーラー](INSTALL_BAT.ja.md) を参照してください。
+
+ATMを退避せずcollectorだけを入れる場合は、明示的にoptionを付けます。
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install-wowsmod.ps1 `
+  -Build 13357625 `
+  -GameRoot "C:\Program Files (x86)\Steam\steamapps\common\World of Warships" `
+  -WithAtm -DryRun
+```
+
+`-WithAtm`（別名`-KeepAtm`、wrapperでは`--with-atm`）はATM専用ロードファイルが存在する場合だけ退避を省略します。ATMが見つからない場合は何も残さず、通常のcollector導入を続けます。インストーラーがATMを検出しても、それがstate producerとして動作している証明にはなりません。ATMの有無やユーザー指定だけではproducerを実証できないため、値はdeclared producer／unverifiedとして扱います。
+手動でコピーする場合も、ATMを残すかどうかを明示し、上記3つを勝手に削除・移動しないでください。
 
 ## 削除・元に戻す
 

@@ -1,11 +1,13 @@
 # WowsExtractor 魚雷出力版：実機テスト用パッケージ
 
 作成日：2026-11-04（日本時間）
-modバージョン：`0.3.29-torpedo-state-sampling` / ModsAPI：`API_v1.0`（source only・未導入）
+modバージョン：`0.3.30-atm-derived-state` / ModsAPI：`API_v1.0`（source only・未導入／未実機）
 
 ## 最優先：性能報告と安全設定
 
-0.3.14導入後「自艦が沈むまでminFPS 25、撃沈後110まで回復」と報告されています。因果は未確定です。現行0.3.29はsource only・未導入です。collection/diagnostics/profiler/position fallback/depth/state samplerは既定OFF、state既定0.2秒（約5Hz）・0.1明示10Hz互換・全snapshot一体を維持します。B37ではavatar map/healthは取得できた一方、738 active state全てでstrict `avatar.playerId`がunmatchableでした。0.3.27の`avatar.id` candidateは別namespaceのまま維持し、確定join・既存coverageを変更しません。0.3.28のdepth samplerはB40で262行のraw `0.14`を実機取得しましたが、意味・単位は未確認（unit=null）です。0.3.29は`isHoming`/`isSpotted`の固定2候補のみを独立sampleする専用opt-in（最小1秒、最大64 UI entities）を追加します。Python/dataHubでの可用性・producerは未確認／unknown、値の意味はunverifiedです。完全collectionとAPI/UI ID全件のscalar・同型・一意性が確認できる場合だけ`uiState`へ付与します。誘導先ID・停止距離／理由の値ではなく、サーバー状態一般を保証しません。heavy diagnostics/depth/stateの同時dueはtorpedo collection getter／列挙をsample内共有し、非due値・frame間cache・推測joinはありません。新featureの実機取得、FPS・実時間・API内部時間は未確認です。[出力仕様](docs/OUTPUT_SPEC.ja.md)／[B40深度記録](docs/VALIDATION_B40_0.3.28_TORPEDO_DEPTH.ja.md)
+0.3.30-atm-derived-state（source only・未実機）は、B41で確認した`mods_DataComponent`の供給元限界を受け、ATMを**実行時の導出state供給元として明示指定**できる版です。`config.ini`の`torpedo_state_provider=advanced_torpedo_marker`を明示した場合だけATM由来の導出値として扱います。未指定・`unknown`の既定は従来どおりproducer unknownで、`torpedo_state_sampling_enabled`も既定falseのままです。`isSpotted`はATM側の推定・第三者判定、`isHoming`も第三者由来の判定であり、ゲーム／サーバーの生boolではありません。provider出力の厳密なfield schemaは実装側の別作業で確認中で、本書では断定しません。ATMの有無やユーザー指定だけではproducerを実証できないため、値はdeclared producer／unverifiedとして扱います。ATMは自動ダウンロード・同梱せず、installerの既定もATM退避のままです。ATMを残してcollectorだけ入れる場合は明示`-WithAtm`（wrapperは`--with-atm`）を使い、試験後に必要なら`restore-atm-13357625.bat`で戻します。新機能の実機取得・FPS・実時間・API内部時間は未確認です。[B41供給元調査](docs/RESEARCH_B41_MOD_DATA_PRODUCER.ja.md)／[導入](docs/INSTALL.ja.md)／[バージョン固定インストーラー](docs/INSTALL_BAT.ja.md)
+
+0.3.14導入後「自艦が沈むまでminFPS 25、撃沈後110まで回復」と報告されています。因果は未確定です。現行0.3.30はsource only・未導入です。collection/diagnostics/profiler/position fallback/depth/state samplerは既定OFF、state既定0.2秒（約5Hz）・0.1明示10Hz互換・全snapshot一体を維持します。B37ではavatar map/healthは取得できた一方、738 active state全てでstrict `avatar.playerId`がunmatchableでした。0.3.27の`avatar.id` candidateは別namespaceのまま維持し、確定join・既存coverageを変更しません。0.3.28のdepth samplerはB40で262行のraw `0.14`を実機取得しましたが、意味・単位は未確認（unit=null）です。0.3.29は`isHoming`/`isSpotted`の固定2候補のみを独立sampleする専用opt-in（最小1秒、最大64 UI entities）を追加します。Python/dataHubでの可用性・producerは未確認／unknown、値の意味はunverifiedです。完全collectionとAPI/UI ID全件のscalar・同型・一意性が確認できる場合だけ`uiState`へ付与します。誘導先ID・停止距離／理由の値ではなく、サーバー状態一般を保証しません。heavy diagnostics/depth/stateの同時dueはtorpedo collection getter／列挙をsample内共有し、非due値・frame間cache・推測joinはありません。新featureの実機取得、FPS・実時間・API内部時間は未確認です。[出力仕様](docs/OUTPUT_SPEC.ja.md)／[B40深度記録](docs/VALIDATION_B40_0.3.28_TORPEDO_DEPTH.ja.md)
 
 `config.ini` がない場合・読み込みに失敗した場合も収集停止です。明示的に `collection_enabled = true` のときだけ通常収集を開始します。heavy UI/dataHub probeはさらに `diagnostics_enabled = true`、profilerは独立して `profiler_enabled = true` が必要です。魚雷depth/state samplerはそれぞれ専用opt-inでdiagnostics非依存にできますが、collection opt-inが必須です（全option既定OFF）。intervalは既定・最小1秒、invalid値は1秒へ戻します。同時sampleではheavy/depth/stateのtorpedo collection getter／列挙を共有します。state samplerは`isHoming`/`isSpotted`以外の任意data keyを探索しません。収集停止中はprobe/API poll・定期tickを行わず、戦闘開始時のdisabled stateと終了stateだけを書きます。core収集（既定0.2秒）およびarmament/public_dataの負荷は未評価です。
 
@@ -49,7 +51,7 @@ isHoming/isSpottedを取得します。UI→Flash→Pythonの橋渡しは使用�
 
 ## まずやること
 
-1. ゲームを終了し、既存の `res_mods/PnFMods/WowsExtractor` と `PnFModsLoader.py` をバックアップします。ATMあり環境で `install-13357625.bat` を使う場合、ATM本体とATM専用unboundは自動で退避されます。手動で入れる場合は同じファイルをロード対象外へ移動します（詳細は [バージョン固定インストーラー](docs/INSTALL_BAT.ja.md)）。
+1. ゲームを終了し、既存の `res_mods/PnFMods/WowsExtractor` と `PnFModsLoader.py` をバックアップします。ATMあり環境で `install-13357625.bat` を使う場合、既定ではATM本体とATM専用unboundは自動で退避されます。ATMを残したままcollectorだけを入れる場合は、明示的に `--with-atm`（PowerShellでは `-WithAtm`）を付けます。どちらの場合も `TTaroModUtils` と `PnFModsLoader.py` は動かしません（詳細は [バージョン固定インストーラー](docs/INSTALL_BAT.ja.md)）。
 2. このパッケージの `res_mods/PnFMods/WowsExtractor` を、実際に起動しているbuildの `res_mods/PnFMods/` にコピーします。
 3. `res_mods/PnFModsLoader.py` がなければ、同梱の同名ファイルをコピーします。**既存のものは上書きしません。** 同梱ファイルが0バイトなのは仕様です。
 4. ゲームを起動し、訓練戦で魚雷を発射します。
@@ -77,7 +79,7 @@ World_of_Warships/
 
 `config.example.ini` は必要なら `config.ini` にコピーします。未作成なら収集停止です。`Main.py` 単体では動きません。
 
-導入に必要なPython sourceは9 filesです（0.3.20）：`Main.py`, `battle_identity.py`, `damage_tracker.py`, `emit_guard.py`, `ui_health.py`, `torpedo_telemetry.py`, `submarine_telemetry.py`, `map_calibration.py`, `performance_profiler.py`。installerの明示allowlistと`tools/check_collector_offline.py`の必須module listを同期しています。offline確認は対応するPython 3.10–3.12で`python tools/check_collector_offline.py`、回帰は`python -m pytest -q`。manifest/checksumは生成物で、今回更新せず親セッション管理です。
+導入に必要なPython sourceは9 filesです（0.3.30でも同じ構成）：`Main.py`, `battle_identity.py`, `damage_tracker.py`, `emit_guard.py`, `ui_health.py`, `torpedo_telemetry.py`, `submarine_telemetry.py`, `map_calibration.py`, `performance_profiler.py`。installerの明示allowlistと`tools/check_collector_offline.py`の必須module listを同期しています。offline確認は対応するPython 3.10–3.12で`python tools/check_collector_offline.py`、回帰は`python -m pytest -q`。manifest/checksumは生成物で、今回更新せず親セッション管理です。
 
 ## この版でできること
 
@@ -100,6 +102,7 @@ WebSocketやゲーム操作の自動化は含みません。mod本体にゲー�
 | [導入・削除・設定](docs/INSTALL.ja.md) | コピー先、ローダー、設定、元に戻す手順 |
 | [バージョン固定インストーラー](docs/INSTALL_BAT.ja.md) | build 13357625用。ATM自動退避と復元を含む |
 | [出力仕様](docs/OUTPUT_SPEC.ja.md) | 全トップレベル項目、魚雷関係全フィールド、欠損値、単位、例 |
+| [B41供給元調査](docs/RESEARCH_B41_MOD_DATA_PRODUCER.ja.md) | mods_DataComponentの供給元限界と0.3.30の明示provider方針 |
 | [opt-in性能計測計画](docs/PLAN_PERFORMANCE_PROFILING.ja.md) | 0.3.20 profiler、時計候補、集計境界と未確認事項 |
 | [性能問題記録](docs/PERFORMANCE_INCIDENT_0.3.14.ja.md) | FPS報告・安全措置・未評価領域 |
 | [元仕様との詳細対応表](docs/SPEC_COVERAGE_0.3.1.ja.md) | 取得済み・条件付き・推定・未取得を項目別に整理 |
@@ -120,7 +123,7 @@ WebSocketやゲーム操作の自動化は含みません。mod本体にゲー�
 - `Torpedo.type` とUI側typeは試験範囲で一致しました。両方を別項目として出力し、全状況での同一性は保証しません。
 - ATMでは誘導レベル1→`acoustic`、2→`magnetic`。**`type`だけで現在も誘導中とは断定しません。**
 - `normal` を一律に「誘導不能」、`magnetic` を別の物理的な磁気魚雷、と解釈しません。まずマーカーの生値として保存します。
-- `isHoming/isSpotted` はATM等の供給に依存し、取得不可はnullです。nullや項目欠落はfalseではありません。
+- `isHoming/isSpotted` はATM等の供給に依存し、取得不可はnullです。nullや項目欠落はfalseではありません。0.3.30では`torpedo_state_provider=advanced_torpedo_marker`を明示した場合だけATM由来の導出値として区別し、`isSpotted`は推定・第三者判定、`isHoming`も第三者判定で、ゲーム／サーバーの生状態を保証しません。
 - ファイルは毎回上書きされます。**戦闘終了後の `state.json` だけでは戦闘中の変化は残りません。** 履歴記録を推奨します。
 
 ## 出自・ライセンス

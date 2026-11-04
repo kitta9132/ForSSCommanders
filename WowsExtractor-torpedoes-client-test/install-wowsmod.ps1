@@ -9,6 +9,12 @@ param(
 
     [switch]$DryRun,
 
+    # Explicit opt-in for an ATM-present test. The default stays "disable ATM"
+    # so a normal install cannot silently leave an unverified third-party
+    # producer in the load path. KeepAtm is accepted as an alias for scripts.
+    [Alias('KeepAtm')]
+    [switch]$WithAtm,
+
     [switch]$Elevated
 )
 
@@ -125,8 +131,11 @@ function Invoke-ElevatedSelf {
 
     $command = '& ' + (ConvertTo-SingleQuoted $PSCommandPath) +
         ' -Build ' + (ConvertTo-SingleQuoted $Build) +
-        ' -GameRoot ' + (ConvertTo-SingleQuoted $GameRoot) +
-        ' -Elevated'
+        ' -GameRoot ' + (ConvertTo-SingleQuoted $GameRoot)
+    if ($WithAtm) {
+        $command += ' -WithAtm'
+    }
+    $command += ' -Elevated'
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($command))
     $process = Start-Process -FilePath $psExe `
         -ArgumentList @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', $encoded) `
@@ -519,8 +528,21 @@ if ($DryRun) {
     } else {
         Write-Host "  PnFModsLoader  : no - the bundled file would be copied (0 bytes is normal)"
     }
-    if ($atmItems.Count -gt 0) {
+    if ($WithAtm) {
+        Write-Host "  ATM mode       : keep (explicit -WithAtm)"
+        if ($atmItems.Count -gt 0) {
+            Write-Host "  ATM disable    : no - these ATM-only load files would stay in place:"
+            foreach ($atmItem in $atmItems) {
+                Write-Host ("                   {0}" -f $atmItem.RelativePath)
+            }
+            Write-Host "  ATM restore    : not needed for this install"
+        } else {
+            Write-Host "  ATM disable    : no ATM load files detected - nothing would be moved or kept"
+        }
+        Write-Host "  ATM shared     : PnFModsLoader.py and TTaroModUtils would be left untouched"
+    } elseif ($atmItems.Count -gt 0) {
         $plannedAtmBackup = Get-UniquePath (Join-Path $backupRoot ("ATM_disabled_{0}" -f $timestamp))
+        Write-Host "  ATM mode       : disable (default)"
         Write-Host "  ATM disable    : yes - these ATM-only load files would be moved:"
         foreach ($atmItem in $atmItems) {
             Write-Host ("                   {0}" -f $atmItem.RelativePath)
@@ -529,6 +551,7 @@ if ($DryRun) {
         Write-Host "  ATM keep       : PnFModsLoader.py, TTaroModUtils, ATM schema and images"
         Write-Host "  ATM restore    : restore-atm-13357625.bat (after the no-ATM test)"
     } else {
+        Write-Host "  ATM mode       : disable (default)"
         Write-Host "  ATM disable    : no ATM load files detected - nothing to move"
     }
     if (Test-Path -LiteralPath $resMods -PathType Container) {
@@ -573,6 +596,10 @@ $backupPath = $null
 $failedPath = $null
 $loaderBeforeHash = $null
 $configBeforeHash = $null
+$atmBackupPath = $null
+$atmManifestPath = $null
+$atmDetected = $false
+$atmKept = $false
 
 try {
     Stop-IfGameRunning
@@ -605,9 +632,15 @@ try {
     }
 
     $atmItemsNow = @(Get-AtmItems -ResModsPath $resMods)
-    $atmBackupPath = $null
-    $atmManifestPath = $null
-    if ($atmItemsNow.Count -gt 0) {
+    $atmDetected = $atmItemsNow.Count -gt 0
+    if ($WithAtm) {
+        if ($atmDetected) {
+            $atmKept = $true
+            Write-Info "-WithAtm: ATM load files were left in place. They were not moved or modified."
+        } else {
+            Write-Info "-WithAtm was given, but no ATM load files were detected. Nothing was kept or moved."
+        }
+    } elseif ($atmDetected) {
         $atmResult = Disable-Atm -Items $atmItemsNow -BackupRoot $backupRoot `
             -ResModsPath $resMods -BuildNumber $Build -GameRootPath $gameRootFull `
             -Timestamp $timestamp
@@ -714,10 +747,19 @@ try {
         Write-Host "  ATM           : disabled - ATM-only load files were moved out"
         Write-Host "  ATM backup    : $atmBackupPath"
         Write-Host "  ATM restore   : restore-atm-13357625.bat (run after the no-ATM test)"
+        Write-Host "  ATM shared    : PnFModsLoader.py and TTaroModUtils were left untouched"
+    } elseif ($atmKept) {
+        Write-Host "  ATM           : kept - explicit -WithAtm (ATM load files were not moved)"
+        Write-Host "  ATM restore   : not needed for this install"
+        Write-Host "  ATM shared    : PnFModsLoader.py and TTaroModUtils were left untouched"
+        Write-Host "  ATM note      : ATM presence is not proof of a state producer; values stay derived/unverified"
+    } elseif ($WithAtm) {
+        Write-Host "  ATM           : no ATM load files detected (-WithAtm had nothing to keep)"
+        Write-Host "  ATM shared    : PnFModsLoader.py and TTaroModUtils were left untouched"
     } else {
         Write-Host "  ATM           : no ATM load files detected (nothing moved)"
+        Write-Host "  ATM shared    : PnFModsLoader.py and TTaroModUtils were left untouched"
     }
-    Write-Host "  ATM shared    : PnFModsLoader.py and TTaroModUtils were left untouched"
     Write-Host "  Next          : start the game and check state.json / meta.json in the mod folder."
     Write-Host ""
     Exit-Installer 0

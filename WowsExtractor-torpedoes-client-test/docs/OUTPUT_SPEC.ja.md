@@ -4,6 +4,12 @@
 
 `mods_DataComponent`はmodがui APIで追加・更新する領域です。0.3.29の`torpedoStateProbe`はこの領域の外部mod候補readerであって、ゲーム／サーバーの生の誘導・被発見状態を取得するAPIではありません。ATMなしのB41では実体Noneで両flags未取得でした。ATM等の導出値を扱う場合も直接取得値とは分け、producerをfield名だけでATMと確定しません。同試験は再要求しません。詳細：[供給元調査](RESEARCH_B41_MOD_DATA_PRODUCER.ja.md)。
 
+### 0.3.30のprovider明示（source only・未実機）
+
+0.3.30は、魚雷state候補の供給元を実行時に明示する`torpedo_state_provider`を追加する版です。未指定・`unknown`の既定では従来どおりproducer unknown／semantics unverifiedを維持します。`advanced_torpedo_marker`を明示した場合だけ、ATM由来の導出値としてdeclared producerを区別します。`torpedo_state_sampling_enabled`は既定falseのままで、OFF時は追加probe/API呼出しを行いません。
+
+ATMの有無、ATMのロード、ユーザーによる設定のいずれも、producerが実際に値を書いている証明ではありません。`isSpotted`はATM側の推定・第三者判定、`isHoming`も第三者判定であり、ゲーム／サーバーの生bool、誘導先ID、停止距離／理由ではありません。値はdeclared producer／unverifiedとして扱い、unknownをfalseへ変換しません。ATMは同梱・自動ダウンロードせず、installerの既定はATM退避のままです。確定した出力fieldは本書末尾の0.3.30契約を参照してください。
+
 0.3.29のstate候補で128文字を超える非boolean文字列が返った場合、短縮した値をrawとは表示せず、raw=null・reason=stringLimit・rawLengthで取得制限を明示します。正常なbooleanの扱いは変えません。
 
 `0.3.25`は、0.3.24の`diag.playerReads`とindex join契約を維持します。`sampleStatus`（players一覧取得のcomplete/partial/unavailable、direct call時notProvided）、`indexHits`、`vehicleLookups`（試行数、成功数ではない）は引き続きships sample内の個別lookupだけを数え、新しいgame APIや時計読取りは追加しません。
@@ -561,3 +567,15 @@ B37ではdepth専用sampleがOFFでした。後続B40で0.3.28 depth samplerか�
 - `torpedoStateProbe.source`は`ui.mods_DataComponent.data`、`producer=unknown`、`semantics=unverified`です。各rowの`flags.isHoming`／`flags.isSpotted`は`source/status/raw/type/semantics`を持ち、厳密boolだけstatus=`available`でrawを保持します。bool以外は`nonBoolean`で、有限数値・128文字以下stringのみraw候補に残します。`none`／`missing`／`readError`／component `unsupported`等をfalseへ置換しません。GUI/ATMからこのPython key/componentを取得できる保証はなく、現機能は実機未確認です。
 - `torpedoes[].uiState`へflagsを付与するのは、GUI collectionが完全（status=`available`）でGUI/API両側が64行以下、**全行**のIDがscalar・同じPython型の値・一意で、API torpedo statusもavailableの場合だけです。partial/truncated、ID None/不正、重複、API unavailableではcandidate rowsだけを保持してjoinを全体停止します。ownerID/playerID等の推測joinはありません。API/UI ID namespaceの同一性を一般保証するものでもありません。
 - `isHoming`は誘導先ID・停止距離・停止理由ではなく、`isSpotted`もサーバー確定の発見状態を一般保証しません。falseとunknownを区別し、producer/source fieldの表示は由来の証明ではありません。B40では独立depth samplerから262 rowsのraw `0.14`を取得しましたが、単位・意味は未確認で`unit=null`です。0.3.29はこの既存B40結果を変更・再解釈せず、新state sampler自体は未実機です。
+
+### `torpedo_state_provider`とATM由来値の境界（0.3.30）
+
+`torpedo_state_provider`は`config.ini`で供給元を明示する設定です。既定は未指定／`unknown`で、この場合は従来の`producer=unknown`を維持します。`advanced_torpedo_marker`を指定した場合だけ、ATMをdeclared producerとして扱います。指定は「どの導出値をどの供給元として解釈するか」の宣言であり、ATMのインストール状態、実行状態、書込みの実在、値の正しさを検証するものではありません。
+
+- `advanced_torpedo_marker`でも`isSpotted`はATM側の推定・第三者判定、`isHoming`も第三者判定です。ゲーム／サーバーの生状態や確定した被発見boolへ読み替えません。
+- unknown／none／missing／readErrorはfalseへ変換しません。ATMがあっても取得できない場合はunknownのままです。
+- probeには`declaredProducer`（unknownまたはadvanced_torpedo_marker）、`producerVerification=notVerified`、`valueKind`（unknownまたはthirdPartyDerived）を追加し、実行時`producer=unknown`を維持します。各flagの`valueKind`はATM宣言時にisHomingがthirdPartyGuidanceAssessment、isSpottedがclientSideEstimateです。未宣言／不正設定はunknownで、宣言だけではsamplerを有効にしません。
+- component/dataがNoneなら従来のnone/raw=nullを保ったまま`dataReason`またはfieldの`reason=missingProviderData`を付けます。投影先`uiState`は既存flat fieldを維持し、homingSource/homingDeclaredProducer/homingProducerVerification/homingValueKind（spottedも同様）を追加。既存depth辞書と先着したuiState.sourceを上書きしません。
+- `torpedo_state_sampling_enabled=false`の既定では追加sampleを行いません。有効化する場合もcollection opt-inと固定2 flagの範囲を維持します。
+- ATMは実行時の導出state情報源としてのみ必要です。自動ダウンロード・同梱・他modの復元は行いません。installerは既定でATM専用ロードファイルを退避し、明示`-WithAtm`のときだけ残します。
+- 実機試験はcore 5Hz（`state_interval=0.2`）、state sampler 1Hz、heavy diagnostics OFF、depth sampler OFFを基本とし、負荷再発時は直ちに中止します。ATM復元が必要な場合は`restore-atm-13357625.bat`を使い、復元先conflictでは上書きせず停止します。

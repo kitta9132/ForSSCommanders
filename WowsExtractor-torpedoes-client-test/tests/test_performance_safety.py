@@ -120,6 +120,7 @@ def test_depth_sampler_can_run_without_heavy_diagnostics_and_joins_current_rows(
     c._torpedoStateSamplingEnabled = True
     c._torpedoStateSamplingDue = True
     c._torpedoStateSamplingInterval = 1.0
+    c._torpedoStateProvider = 'advanced_torpedo_marker'
     c._battleId = 'b'
     c._selfTeam = None
     c._capture_avatar_snapshot = lambda: {'entities': [], 'status': 'complete',
@@ -150,6 +151,13 @@ def test_depth_sampler_can_run_without_heavy_diagnostics_and_joins_current_rows(
     assert snapshot['torpedoes'][0]['uiState']['depth']['unit'] is None
     assert snapshot['torpedoes'][0]['uiState']['isHoming'] is False
     assert snapshot['torpedoes'][0]['uiState']['isSpotted'] is True
+    assert snapshot['torpedoStateProbe']['declaredProducer'] == (
+        'advanced_torpedo_marker')
+    assert snapshot['torpedoStateProbe']['producerVerification'] == 'notVerified'
+    assert snapshot['torpedoes'][0]['uiState']['homingValueKind'] == (
+        'thirdPartyGuidanceAssessment')
+    assert snapshot['torpedoes'][0]['uiState']['spottedValueKind'] == (
+        'clientSideEstimate')
     assert snapshot['torpedoes'][0]['position'][1] == 999.0
 
     c._torpedoDepthSamplingDue = False
@@ -168,6 +176,8 @@ def test_depth_sampler_can_run_without_heavy_diagnostics_and_joins_current_rows(
     assert later['torpedoDepthProbe']['sampleTs'] is None
     assert later['torpedoStateProbe']['status'] == 'notSampled'
     assert later['torpedoStateProbe']['sampleTs'] is None
+    assert later['torpedoStateProbe']['declaredProducer'] == (
+        'advanced_torpedo_marker')
     assert 'uiState' not in later['torpedoes'][0]
 
     c._torpedoStateSamplingEnabled = False

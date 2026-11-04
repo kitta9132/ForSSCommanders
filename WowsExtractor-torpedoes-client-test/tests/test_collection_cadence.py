@@ -123,6 +123,8 @@ def test_default_state_interval_is_five_hz_and_explicit_point_one_is_kept():
         encoding='utf-8')
     assert 'state_interval = 0.2' in example
     assert 'torpedo_state_sampling_enabled = false' in example
+    assert 'torpedo_state_provider = unknown' in example
+    assert 'advanced_torpedo_marker' in example
 
 
 def test_depth_sampling_interval_is_opt_in_and_has_a_one_second_floor():
@@ -198,6 +200,7 @@ def test_state_sampling_config_and_independent_one_hz_scheduler():
     load_config(collector)
     assert collector._torpedoStateSamplingEnabled is True
     assert collector._torpedoStateSamplingInterval == 1.0
+    assert collector._torpedoStateProvider == 'unknown'
     for invalid in ('bad', 'nan', 'inf', '-inf', '0.2', '-4'):
         config['torpedo_state_sampling_interval'] = invalid
         load_config(collector)
@@ -242,6 +245,44 @@ def test_state_sampling_config_and_independent_one_hz_scheduler():
     collector._torpedoStateSamplingEnabled = False
     assert due_state(collector, 4.1) is False
     assert collector._torpedoStateSamplingNextDue is None
+
+
+def test_state_provider_declaration_is_explicit_and_never_enables_sampling():
+    def cfg_float(values, key, fallback):
+        try:
+            value = values.get(key)
+            return fallback if value in (None, '') else float(value)
+        except Exception:
+            return fallback
+
+    config = {'collection_enabled': 'true',
+              'torpedo_state_provider': 'advanced_torpedo_marker'}
+    load_config = _method('_load_config', {
+        '_load_mod_config': lambda: config, '_cfg_float': cfg_float,
+        'STATE_INTERVAL': .2, 'PerformanceProfiler': _DisabledProfiler})
+    collector = type('C', (), {'_performanceProfiler': None,
+                               '_profilerEnabled': False})()
+    load_config(collector)
+    # A declaration by itself must not turn the sampler on.
+    assert collector._torpedoStateSamplingEnabled is False
+    assert collector._torpedoStateProvider == 'advanced_torpedo_marker'
+
+    for invalid in (None, '', 'unknown', 'true', 'other_mod', 'ATM',
+                    'advanced_torpedo_marker ', 1):
+        config['torpedo_state_provider'] = invalid
+        load_config(collector)
+        assert collector._torpedoStateProvider == 'unknown'
+
+    config['torpedo_state_provider'] = 'advanced_torpedo_marker'
+    config['torpedo_state_sampling_enabled'] = 'true'
+    load_config(collector)
+    assert collector._torpedoStateSamplingEnabled is True
+    assert collector._torpedoStateProvider == 'advanced_torpedo_marker'
+
+    config['collection_enabled'] = 'false'
+    load_config(collector)
+    assert collector._torpedoStateSamplingEnabled is False
+    assert collector._torpedoStateProvider == 'advanced_torpedo_marker'
 
 
 def test_per_tick_callback_builds_and_writes_only_on_due_five_hz_frames():

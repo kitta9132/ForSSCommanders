@@ -6,7 +6,7 @@
 
 API_VERSION = 'API_v1.0'
 MOD_NAME = 'WowsExtractor'
-MOD_VERSION = '0.3.29-torpedo-state-sampling'
+MOD_VERSION = '0.3.30-atm-derived-state'
 
 # ---------------------------------------------------------------------------
 # WowsExtractor -- in-game data collector for the "8111 for WoWS" project.
@@ -1015,6 +1015,14 @@ class Collector(object):
         self._torpedoStateSamplingNextDue = None
         self._torpedoStateSamplingLastNow = None
         self._torpedoStateSamplingDue = False
+        # A provider declaration names the expected third-party producer only.
+        # It never enables sampling and cannot be verified from the generic
+        # mods_DataComponent field at runtime. Unknown/malformed values fail
+        # closed to "unknown".
+        if cfg.get('torpedo_state_provider') == 'advanced_torpedo_marker':
+            self._torpedoStateProvider = 'advanced_torpedo_marker'
+        else:
+            self._torpedoStateProvider = 'unknown'
         self._diagnosticsNextDue = None
         self._diagnosticsLastSampleTs = None
         self._diagnosticsLastNow = None
@@ -1899,6 +1907,12 @@ class Collector(object):
             self, '_torpedoStateSamplingEnabled', False) is True
         state_sampling_due = state_sampling_enabled and _get(
             self, '_torpedoStateSamplingDue', False) is True
+        state_provider = _get(self, '_torpedoStateProvider', 'unknown')
+        if state_provider != 'advanced_torpedo_marker':
+            state_provider = 'unknown'
+        state_value_kind = ('thirdPartyDerived'
+                            if state_provider == 'advanced_torpedo_marker'
+                            else 'unknown')
         avatar_phase = profiler.begin('avatar') if profiler is not None else None
         avatar_snapshot = self._capture_avatar_snapshot()
         avatar_entities = avatar_snapshot['entities']
@@ -1980,13 +1994,16 @@ class Collector(object):
                 'componentKeyStatus': 'notSampled', 'rows': []}
         if state_sampling_due:
             torpedo_state_probe = _try(lambda: ui_torpedo_state_probe(
-                diagnostic_hub, CC),
+                diagnostic_hub, CC, state_provider),
                 {'source': 'ui.mods_DataComponent.data', 'producer': 'unknown',
                  'semantics': 'unverified', 'status': 'unknown',
                  'componentKeyStatus': 'unknown', 'rows': [],
                  'collection': {'status': 'unknown', 'count': 0,
                      'limit': 64, 'truncated': False, 'partial': False,
-                     'reason': 'probeFailed'}, 'joinStatus': 'notAttempted'})
+                     'reason': 'probeFailed'}, 'joinStatus': 'notAttempted',
+                 'declaredProducer': state_provider,
+                 'producerVerification': 'notVerified',
+                 'valueKind': state_value_kind})
             _try(lambda: attach_ui_torpedo_state(
                 torpedoes, torpedo_state_probe, torpedo_status.get('status')))
             torpedo_state_probe['sampleTs'] = now
@@ -2005,7 +2022,10 @@ class Collector(object):
                                            else 'disabled'),
                     'count': 0, 'limit': 64, 'truncated': False,
                     'partial': False, 'reason': None},
-                'rows': [], 'joinStatus': 'notAttempted'}
+                'rows': [], 'joinStatus': 'notAttempted',
+                'declaredProducer': state_provider,
+                'producerVerification': 'notVerified',
+                'valueKind': state_value_kind}
         _try(lambda: self._torpedoMotion.update(
             torpedoes, now, torpedo_status.get('available', False)))
         for torpedo in torpedoes:
