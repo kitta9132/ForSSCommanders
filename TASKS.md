@@ -60,6 +60,8 @@ FPS改善の実施順・詳細タスクは[専用タスクファイル](WowsExtr
 <a id="task-scope"></a>
 ## P0：潜水艦戦闘補助への絞り込み
 
+最新指定：2Hz／5Hzの距離判定は5秒ごとの枠振り分け方式。Lはマップ一辺、長方形はmin(width,height)、半径L/3で承認済み。[FPS詳細設計](WowsExtractor-torpedoes-client-test/docs/FPS_TASKS.ja.md#fps-torpedoes)参照。現行コードへの適用は未実装。
+
 - [ ] 汎用ダメージ集計・砲弾弾道計算を削減候補として、イベント購読・ID対応・consumer・テストの依存を調査する。潜水艦の攻撃／回避／潜航判断に不要なら収集経路と出力を整理する。現時点では未撤去。
 - [ ] 詳細診断を実用収集から分離し、必要な自艦深度・Battery・ping・装填が汎用診断一式のONを必要としない構成を検討する。
 - [ ] 距離別魚雷cadenceを設計する。ユーザー指定：自艦から半径マップサイズ1/3より外は2Hz、内側5Hz案。マップサイズの一辺解釈・長方形・距離不明等の詳細は[FPS専用タスク](WowsExtractor-torpedoes-client-test/docs/FPS_TASKS.ja.md#fps-torpedoes)で扱う。自艦魚雷の確定識別ができない場合に推測で分類しない。
