@@ -35,7 +35,7 @@ def main():
     source = source.replace('gCollector = Collector()', 'gCollector = None')
     ns = {'__name__': 'offline_collector', '__file__': str(root / 'Main.py'), '__package__': None}
     exec(compile(source, str(root / 'Main.py'), 'exec'), ns)
-    from torpedo_telemetry import TorpedoTelemetry
+    from torpedo_telemetry import TorpedoTelemetry, TorpedoSamplingGroups, TorpedoMotion
     from submarine_telemetry import safe_submarine_probe
     api = Obj(getAllTorpedoes=lambda: [Obj(uiId=1, ownerId=3, ownerTeamId=0,
         ownerType='Ship', shotId=2, type='future_type', position=(1, -2, 3))])
@@ -48,7 +48,8 @@ def main():
     collector._torpedoes = TorpedoTelemetry(api, Obj())
     collector._damage = Obj(snapshot=lambda: {'inflicted': {}, 'received': {}, 'teamTotal': {}})
     collector._mapCalibration = Obj(clear=lambda: None)
-    collector._torpedoMotion = Obj(clear=lambda: None)
+    collector._torpedoMotion = TorpedoMotion()
+    collector._torpedoSamplingGroups = TorpedoSamplingGroups()
     collector._active = True
     collector._collectionEnabled = True
     collector._diagnosticsEnabled = True
@@ -75,6 +76,10 @@ def main():
     snap = collector._build_state(1.)
     assert 'ballistics' not in snap
     assert not removed_api_calls, removed_api_calls
+    assert snap['torpedoStatus']['membershipComplete'] is True
+    assert len(snap['torpedoStatus']['membership']) == 1
+    assert snap['torpedoes'][0]['sampling']['group'] == 'high'
+    assert snap['torpedoes'][0]['sampling']['sampleTs'] == 1.
     assert ns['dataHub'] is original_data_hub
     duplicated = sorted(name for name in set(collection_calls)
                         if collection_calls.count(name) > 1)
@@ -93,6 +98,51 @@ def main():
     assert snap['waveHitProbe']['sampleTs'] == 1.
     json.dumps(snap, allow_nan=False)
 
+    # Real sampler + real motion + wire projection on the calibrated path.
+    from map_calibration import MapCalibration
+    fitted = MapCalibration()
+    for index in range(20):
+        nx = (index % 5) * .2 + .1
+        ny = (index // 5) * .2 + .1
+        fitted.observe([(nx, ny, 3000. * nx - 1500., 3000. * ny - 1500.)], index + 1.)
+    assert fitted.snapshot()['status'] == 'available'
+    original_build_self, original_build_ships = collector._build_self, collector._build_ships
+    original_battle = ns['battle']
+    ns['battle'] = Obj(getSelfPlayerInfo=lambda: Obj(teamId=0),
+                       getSelfPlayerShip=lambda: Obj())
+    collector._build_self = lambda *args: {'teamId': 0, 'position': [0., 0., 0.],
+                                           'isObserver': False}
+    collector._build_ships = lambda *args: ([{'uiId': 5}], {'mapCalibration': fitted.snapshot()})
+    collector._mapCalibration = fitted
+    far = Obj(uiId=1, ownerId=3, ownerTeamId=0, ownerType='Ship', shotId=2,
+              type='future_type', position=[0., 0., 1200.])
+    near = Obj(uiId=2, ownerId=3, ownerTeamId=0, ownerType='Ship', shotId=3,
+               type='future_type', position=[0., 0., 100.])
+    collector._torpedoes = TorpedoTelemetry(Obj(getAllTorpedoes=lambda: [far, near]), Obj())
+    collector._torpedoSamplingGroups.clear()
+    collector._torpedoMotion.clear()
+    first = collector._build_state(10.)
+    assert abs(first['torpedoStatus']['sampling']['classification']['radiusWorld'] - 1000.) < 1e-8
+    assert all(row['sampling']['group'] == 'high' for row in first['torpedoes'])
+    classified = collector._build_state(15.)
+    assert classified['torpedoes'][0]['sampling']['group'] == 'low'
+    skipped = collector._build_state(15.2)
+    assert [row['uiId'] for row in skipped['torpedoes']] == [2]
+    assert skipped['torpedoStatus']['membership'] == [[1, 3, 2], [2, 3, 3]]
+    assert skipped['torpedoStatus']['sampling']['low']['status'] == 'notSampled'
+    assert skipped['torpedoStatus']['uiJoinReason'] == 'sampledSubset'
+    assert skipped['identityCandidates']['torpedoRowsStatus'] == 'sampledSubset'
+    assert skipped['torpedoDepthProbe']['joinReason'] == 'sampledSubset'
+    assert set(skipped['uiTorpedoProbe']['apiUiIds']) == {1, 2}
+    far.position = [0., 0., 1300.]
+    sampled = collector._build_state(15.6)
+    assert sampled['torpedoes'][0]['motion']['available'] is True
+    assert abs(sampled['torpedoes'][0]['motion']['dt'] - .6) < 1e-8
+    json.dumps(sampled, allow_nan=False)
+    print('Collector calibrated sampling, non-due membership, motion and UI suppression: OK')
+    collector._build_self, collector._build_ships = original_build_self, original_build_ships
+    ns['battle'] = original_battle
+
     def fail():
         raise RuntimeError('offline injected failure')
 
@@ -101,6 +151,8 @@ def main():
     snap = collector._build_state(2.)
     assert snap['ships'] == [{'uiId': 5}]
     assert snap['torpedoes'] == [] and snap['torpedoStatus']['status'] == 'unknown'
+    assert snap['torpedoStatus']['uiJoinReason'] == 'unknown'
+    assert snap['identityCandidates']['reason'] == 'apiUnavailable'
     assert snap['torpedoArmament']['available'] is False
     assert snap['selfSubmarineProbe']['status'] == 'unknown'
     ns['safe_submarine_probe'] = fail

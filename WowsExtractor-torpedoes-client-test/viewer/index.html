@@ -9,6 +9,7 @@ body{background:#101b25;color:#e8f1f5;font:14px system-ui,sans-serif;margin:1em}
 'use strict';
 const canvas=document.querySelector('#map'), ctx=canvas.getContext('2d'), status=document.querySelector('#status'), detail=document.querySelector('#detail');
 let previous=null, retained=null, selected=null, markers=[], lastKey=null;
+let torpedoSamples=new Map();
 const num=x=>typeof x==='number'&&Number.isFinite(x);
 const pair=(x,y)=>num(x)&&num(y)?[x,y]:null;
 const val=x=>x===null||x===undefined?'unknown':String(x);
@@ -19,16 +20,47 @@ function inverse(pos,cal){
   if(!x||!z||!['nx','ny'].includes(x.mapAxis)||!['nx','ny'].includes(z.mapAxis)||x.mapAxis===z.mapAxis||![x.scale,x.offset,z.scale,z.offset].every(num)||x.scale===0||z.scale===0)return null;
   const p={};p[x.mapAxis]=(pos[0]-x.offset)/x.scale;p[z.mapAxis]=(pos[2]-z.offset)/z.scale;return pair(p.nx,p.ny);
 }
+function torpedoKey(t){
+  if(Array.isArray(t))t={uiId:t[0],ownerId:t[1],shotId:t[2]};
+  const valid=x=>x===null||typeof x==='string'||num(x);
+  return t?.uiId!=null&&[t.uiId,t.ownerId??null,t.shotId??null].every(valid)?
+    JSON.stringify([t.uiId,t.ownerId??null,t.shotId??null]):null;
+}
+function sampledTorpedoes(state){
+  const rows=state?.torpedoes||[], s=state?.torpedoStatus;
+  if(!s?.sampling){torpedoSamples.clear();return rows;}
+  const counts=new Map();
+  for(const item of s.membership||[]){const key=torpedoKey(item);if(key!==null)counts.set(key,(counts.get(key)||0)+1);}
+  if(s.membershipComplete===true){
+    for(const key of torpedoSamples.keys())if(counts.get(key)!==1)torpedoSamples.delete(key);
+  }
+  const current=new Set();
+  for(const row of rows){const key=torpedoKey(row);if(key!==null){current.add(key);
+    if(row.sampling?.group==='low'&&counts.get(key)===1){
+      const old=torpedoSamples.get(key);
+      if(old?.row.sampling?.sampleTs!==row.sampling?.sampleTs)torpedoSamples.set(key,{row,wallTs:Date.now()});
+    }else torpedoSamples.delete(key);}}
+  const out=rows.slice();
+  for(const [key,entry] of torpedoSamples){
+    const row=entry.row, wallAge=Date.now()-entry.wallTs;
+    const age=num(state.ts)&&num(row.sampling?.sampleTs)?state.ts-row.sampling.sampleTs:null;
+    // Last samples are app-side history, not freshly collected positions.
+    if(age===null||age<0||age>1.5||wallAge<0||wallAge>1500){torpedoSamples.delete(key);continue;}
+    if(!current.has(key))out.push({...row,viewerSampleHeld:true});
+  }
+  return out;
+}
 function draw(snapshot, networkError=false){
   const wrap=snapshot?.state, incoming=wrap?.data;
   if(incoming?.active===true){
     const key=incoming.battleId;
-    if(lastKey!==key){previous=null;retained=null;selected=null;lastKey=key;}
+    if(lastKey!==key){previous=null;retained=null;selected=null;lastKey=key;torpedoSamples.clear();}
     retained={state:incoming,meta:snapshot.metaMatches?snapshot.meta.data:null};
-  } else if(incoming?.active===false && retained && incoming.battleId!==retained.state.battleId){retained=null;previous=null;selected=null;lastKey=null;}
+  } else if(incoming?.active===false && retained && incoming.battleId!==retained.state.battleId){retained=null;previous=null;selected=null;lastKey=null;torpedoSamples.clear();}
   const state=incoming?.active===true?incoming:retained?.state;
   const meta=incoming?.active===true?(snapshot.metaMatches?snapshot.meta.data:null):retained?.meta;
   const inactive=incoming?.active===false;
+  if(inactive)torpedoSamples.clear();
   const stale=networkError||!wrap||wrap.stale||inactive;
   let notices=[networkError?'通信失敗：最後の正常データは古い':wrap?.error?'読取失敗：最後の正常データは古い':wrap?.stale?'更新停止：古いデータ':'更新中'];
   if(inactive)notices.push('inactive / 戦闘終了：最後の戦闘表示（現在情報ではない）');
@@ -38,6 +70,7 @@ function draw(snapshot, networkError=false){
   const cal=state?.diag?.mapCalibration;
   notices.push('較正: '+val(cal?.status)+(cal?.coefficients?'（係数あり・推定）':'（未成立/係数なし）'));
   notices.push('魚雷取得: '+val(state?.torpedoStatus?.status)+' / state経過秒: '+(num(wrap?.ageSeconds)?wrap.ageSeconds.toFixed(1):'unknown'));
+  if(state?.torpedoStatus?.sampling)notices.push('魚雷は周期別sample：遠距離の前回観測は最大1.5秒表示（現在位置ではない）');
   if(meta?.map)notices.push('地図: '+val(meta.map.mapName??meta.map.name??meta.map.id));
   ctx.clearRect(0,0,680,680);ctx.strokeStyle='#416170';ctx.lineWidth=1;
   for(let i=0;i<=10;i++){let p=i*68;ctx.beginPath();ctx.moveTo(p,0);ctx.lineTo(p,680);ctx.moveTo(0,p);ctx.lineTo(680,p);ctx.stroke();}
@@ -57,9 +90,9 @@ function draw(snapshot, networkError=false){
     const p=pair(s.nx,s.ny);
     add(own?'self':'ship',s,p,'nx/ny 取得座標（鮮度未検証）',false,s.uiId??s.vehicleId??s.playerId,color);
   }
-  if(state?.torpedoStatus?.available===true)for(const t of state.torpedoes||[]){
+  if(state?.torpedoStatus?.available===true)for(const t of (inactive?(state.torpedoes||[]):sampledTorpedoes(state))){
     const direct=Array.isArray(t.mapPosition)?pair(t.mapPosition[0],t.mapPosition[1]):null;
-    add('torpedo',t,direct||inverse(t.position,cal),direct?'mapPosition（較正による推定）':'較正係数逆変換（推定）',false,t.uiId,t.isOwn===true?'#ffffff':t.relation===1?'#66dcff':t.relation===2?'#ff7474':'#e4d790');
+    add('torpedo',t,direct||inverse(t.position,cal),(direct?'mapPosition（較正による推定）':'較正係数逆変換（推定）')+(t.viewerSampleHeld?' / 前回sample位置':''),false,t.uiId,t.isOwn===true?'#ffffff':t.relation===1?'#66dcff':t.relation===2?'#ff7474':'#e4d790');
   }
   if(!stale)previous=current;else previous=null;
   if(outside)notices.push('範囲外の座標 '+outside+' 件は非表示（clampなし）');
@@ -69,7 +102,7 @@ function draw(snapshot, networkError=false){
 }
 function show(m,stale){
   const o=m.obj, u=o.uiState||{};let lines=[m.kind+(m.ghost?' / 最終目撃':''), '位置: '+m.source, '状態: '+(stale?'古い / inactive の可能性あり':'最新取得（鮮度は未検証）')];
-  if(m.kind==='torpedo')lines.push('API type: '+val(o.type),'UI type: '+val(u.uiType),'UI isHoming: '+val(u.isHoming),'UI isSpotted: '+val(u.isSpotted),'UI供給者: unknown（ATM構成由来の可能性）');
+  if(m.kind==='torpedo')lines.push('sample: '+val(o.sampling?.group)+' / ts '+val(o.sampling?.sampleTs)+(o.viewerSampleHeld?'（前回取得を表示・現在位置ではない）':''),'API type: '+val(o.type),'UI type: '+val(u.uiType),'UI isHoming: '+val(u.isHoming),'UI isSpotted: '+val(u.isSpotted),'UI供給者: unknown（ATM構成由来の可能性）');
    else lines.push('艦種: '+val(o.shipType),'HP: '+val(o.health)+' / '+val(o.maxHealth),'relation: '+val(o.relation),'visible: '+val(o.visible)+'（現在可視の保証なし）','world position source: '+val(o.positionSource)+(o.positionSource==='calibratedMapPosition'?'（推定）':''),'最終目撃時刻: '+val(o.lastSeenTs));
   detail.textContent=lines.join('\n');
 }

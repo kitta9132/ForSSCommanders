@@ -97,6 +97,16 @@ def test_battle_start_and_quit_reset_the_meta_probe_schedule(harness):
     assert c._metaProbeDue is None and c._metaProbeLastNow is None
 
 
+def test_sampling_group_membership_is_cleared_at_both_battle_boundaries(harness):
+    c, calls, _ = harness
+    c._torpedoSamplingGroups = Obj(clear=lambda: calls.append('sampling-clear'))
+    c._on_battle_start()
+    assert calls.count('sampling-clear') == 1
+    c._on_battle_shown()
+    c._on_battle_quit()
+    assert calls.count('sampling-clear') == 2
+
+
 def test_failed_meta_write_remains_retryable_and_does_not_report_success(harness):
     c, calls, ns = harness
     c._on_battle_start()

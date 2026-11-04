@@ -1,6 +1,6 @@
 # 開発タスク
 
-最新ソース：**0.3.32-remove-ballistics**（未導入・実機未確認）。砲弾道tracker・専用イベント・計算API・ballistics出力を全撤去。魚雷ammoParams／TTX・装填・ping・探知・damageは維持。Python3.11全回帰431 passed、9 moduleのPython2 grammar／checker成功。FPS改善は未確認。遠距離2Hz化は未実装。最新進捗は[FPS専用タスクB](WowsExtractor-torpedoes-client-test/docs/FPS_TASKS.ja.md#fps-ballistics)参照。
+現行ソース：**0.3.33-torpedo-sampling-groups**（未導入・実機未確認）。5秒距離再分類・high5Hz／low平均2Hz・新規暫定highを実装。今回sampleと全体membershipを分け、far非dueの位置・owner・派生処理を省略。Python3.11全pytest485 passed（B43/B44私有replayを明示ONして含む）、9 module checker成功。位置read削減はB43約9.88%／B44約18.62%だが、ホストの安価getterではnear中心時に管理固定費で遅くなりFPS改善は未確認。通常導入保留。砲弾道計算は0.3.32で全撤去済み。最新進捗は[FPS専用タスク](WowsExtractor-torpedoes-client-test/docs/FPS_TASKS.ja.md)を参照。
 
 実用化に向けた既知の問題・優先度・到達点は[既知の問題一覧](WowsExtractor-torpedoes-client-test/docs/KNOWN_ISSUES.ja.md)を参照。ユーザー方針（2026-11-04）：完全性の断言ではなく、既知の問題を整理し実用で問題のない水準へ詰める。
 
@@ -9,7 +9,7 @@
 <a id="task-performance"></a>
 ## 緊急優先：通常プレイのFPS低下
 
-FPS改善の実施順・詳細タスクは[専用タスクファイル](WowsExtractor-torpedoes-client-test/docs/FPS_TASKS.ja.md)へ集約。まず不要な砲弾道計算の撤去、次に自艦から半径マップサイズ1/3より外の魚雷2Hz化を設計する。位置分類用5Hz readと遠距離詳細2Hzを区別する。現時点では未実装。
+FPS改善の実施順・詳細タスクは[専用タスクファイル](WowsExtractor-torpedoes-client-test/docs/FPS_TASKS.ja.md)へ集約。砲弾道計算は撤去済み、距離枠による魚雷5Hz／平均2Hzもソース実装済み。位置判定は5秒ごと、全件列挙・最小IDは通常tick。実機速度は未検証。
 
 - 0.3.31-calibration-spatial-index（source only・実機未確認）：較正duplicate候補をbounded空間indexで絞る。B44の4,458組で旧実装714,861比較→40,168比較（94.38%減）、743 state全て新旧snapshot/reservoir/RNG一致。記録との係数差は再生runtimeの浮動小数点演算差で説明でき、逐次sum・sqrt相当の残差計算では全743 snapshot一致。独立調査完了、最適化による数値差は未検出。FPS改善は未確認、取得・schema・周期は不変、mod退避継続。
 - B44（2026-11-04）：profiler ON、7:30退出、minFPS40～50・目立つカクつきなし。最大63魚雷/11owner、全9,671行world/map保持。最後の窓は魚雷平均61.6本でtorpedoes2.056ms、submit1.894ms、cycle9.319ms。魚雷0本の間にもships0.662→約1.96msへ増えたため、較正sample蓄積コストを既存recordreplayで調査中。停止・13fileshash照合退避済み、追加実機はまだ依頼しない。[B44区間計測](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_B44_TORPEDO_PROFILE.ja.md)。

@@ -6,10 +6,10 @@
 
 API_VERSION = 'API_v1.0'
 MOD_NAME = 'WowsExtractor'
-MOD_VERSION = '0.3.32-remove-ballistics'
+MOD_VERSION = '0.3.33-torpedo-sampling-groups'
 
 # ---------------------------------------------------------------------------
-# WowsExtractor -- in-game data collector for the "8111 for WoWS" project.
+# WowsExtractor -- observations for an external submarine-combat map.
 #
 # It collects *legal* (player-visible) battle data through the official
 # ModsAPI and writes it to JSON files on disk. A separate local process
@@ -17,7 +17,7 @@ MOD_VERSION = '0.3.32-remove-ballistics'
 # similar to War Thunder's localhost:8111 telemetry.
 #
 #   meta.json   -- written once per battle: roster, map, consumable ranges.
-#   state.json  -- written ~10x/sec: live ship positions, hp, damage, etc.
+#   state.json  -- default ~5 Hz; distant torpedo samples average ~2 Hz.
 #
 # This mod creates NO UI elements; it only reads game state and writes files.
 # Everything is wrapped defensively: a missing/renamed API on a given client
@@ -68,7 +68,7 @@ except:
 
 try:
     from .torpedo_telemetry import (TorpedoTelemetry, attach_ui_state,
-        TorpedoMotion, safe_weapon_hub_probe,
+        TorpedoMotion, TorpedoSamplingGroups, sampling_wire_payload, safe_weapon_hub_probe,
         safe_weapon_context_probe, safe_game_clock_probe,
         safe_gun_reload_probe, safe_selected_torpedo_params_probe,
         safe_torpedo_tooltip_parameter_probe, safe_identity_candidates,
@@ -78,7 +78,7 @@ try:
         attach_ui_torpedo_state)
 except:
     from torpedo_telemetry import (TorpedoTelemetry, attach_ui_state,
-        TorpedoMotion, safe_weapon_hub_probe,
+        TorpedoMotion, TorpedoSamplingGroups, sampling_wire_payload, safe_weapon_hub_probe,
         safe_weapon_context_probe, safe_game_clock_probe,
         safe_gun_reload_probe, safe_selected_torpedo_params_probe,
         safe_torpedo_tooltip_parameter_probe, safe_identity_candidates,
@@ -820,6 +820,7 @@ class Collector(object):
         self._damage = DamageTracker(resolve=self._live_vehicle_player)
         self._torpedoes = TorpedoTelemetry(battle, constants)
         self._torpedoMotion = TorpedoMotion()
+        self._torpedoSamplingGroups = TorpedoSamplingGroups()
         self._mapCalibration = MapCalibration()
         # cached map->world affine (per battle/map); derived at runtime from ships
         # that expose BOTH getPosition() (world) and the mapPosition component.
@@ -941,6 +942,9 @@ class Collector(object):
         self._resolve_paths()
         self._mapCalibration.clear()
         self._torpedoMotion.clear()
+        sampling = getattr(self, '_torpedoSamplingGroups', None)
+        if sampling is not None:
+            sampling.clear()
         self._damage.clear()
         self._mapTransform = None
         self._diagnosticsNextDue = None
@@ -1027,6 +1031,9 @@ class Collector(object):
         self._metaProbeLastNow = None
         self._mapCalibration.clear()
         self._torpedoMotion.clear()
+        sampling = getattr(self, '_torpedoSamplingGroups', None)
+        if sampling is not None:
+            sampling.clear()
         self._stop_tick()
         self._mapTransform = None
         # write one final snapshot marking the battle inactive (through the same
@@ -1818,21 +1825,42 @@ class Collector(object):
         diag['avatarSnapshotStatus'] = {
             'status': avatar_snapshot['status'], 'count': avatar_snapshot['count'],
             'limit': avatar_snapshot['limit'], 'reason': avatar_snapshot['reason']}
+        self_state = self._build_self(ui_hp, self_info, self_ship)
         torpedoes_phase = profiler.begin('torpedoes') if profiler is not None else None
-        torpedoes, torpedo_status = _try(
-            lambda: self._torpedoes.torpedoes(self_team),
-            ([], {'available': False, 'status': 'unknown',
-                   'source': 'battle.getAllTorpedoes'}))
+        sampling = getattr(self, '_torpedoSamplingGroups', None)
+        context = (self._torpedo_sampling_context(self_state, diag)
+                   if sampling is not None and self_ship is not None else None)
+        if sampling is None:
+            torpedoes, torpedo_status = _try(
+                lambda: self._torpedoes.torpedoes(self_team),
+                ([], {'available': False, 'status': 'unknown',
+                       'source': 'battle.getAllTorpedoes'}))
+        else:
+            torpedoes, torpedo_status = _try(
+                lambda: self._torpedoes.torpedoes(
+                    self_team, sampling=sampling, now=now, context=context),
+                ([], {'available': False, 'status': 'unknown',
+                       'source': 'battle.getAllTorpedoes',
+                       'membershipComplete': False}))
+        ui_join_status = torpedo_status.get('status')
+        if sampling is not None and torpedo_status.get('available') is True and (
+                torpedo_status.get('membershipComplete') is not True or
+                len(torpedoes) != len(torpedo_status.get('membership', []))):
+            # A sampled subset cannot establish full-list UI-ID uniqueness.
+            ui_join_status = 'sampledSubset'
+        ui_api_rows = (torpedo_status.get('membership', [])
+                       if sampling is not None and
+                       torpedo_status.get('membershipComplete') is True else torpedoes)
         diagnostic_hub = None
         if diagnostic_due or depth_sampling_due or state_sampling_due:
             diagnostic_hub = _try(
                 lambda: shared_diagnostic_snapshot(dataHub), None)
         if diagnostic_due:
             probe = _try(lambda: ui_torpedo_probe_without_state(
-                              diagnostic_hub, CC, torpedoes),
+                              diagnostic_hub, CC, ui_api_rows),
                           {'status': 'unknown', 'source': 'dataHub.torpedo'})
             _try(lambda: attach_ui_state(
-                torpedoes, probe, torpedo_status.get('status')))
+                torpedoes, probe, ui_join_status))
         else:
             probe = ({'status': 'notSampled', 'source': 'scheduling',
                       'sampleTs': None, 'rows': []} if diagnostic_enabled else
@@ -1847,7 +1875,7 @@ class Collector(object):
                      'limit': 64, 'truncated': False, 'partial': False,
                      'reason': 'probeFailed'}})
             _try(lambda: attach_ui_depth_state(
-                torpedoes, depth_probe, torpedo_status.get('status')))
+                torpedoes, depth_probe, ui_join_status))
             depth_probe['sampleTs'] = now
             depth_probe['intervalSeconds'] = _get(
                 self, '_torpedoDepthSamplingInterval', 1.0)
@@ -1876,7 +1904,7 @@ class Collector(object):
                  'producerVerification': 'notVerified',
                  'valueKind': state_value_kind})
             _try(lambda: attach_ui_torpedo_state(
-                torpedoes, torpedo_state_probe, torpedo_status.get('status')))
+                torpedoes, torpedo_state_probe, ui_join_status))
             torpedo_state_probe['sampleTs'] = now
             torpedo_state_probe['intervalSeconds'] = _get(
                 self, '_torpedoStateSamplingInterval', 1.0)
@@ -1897,8 +1925,14 @@ class Collector(object):
                 'declaredProducer': state_provider,
                 'producerVerification': 'notVerified',
                 'valueKind': state_value_kind}
-        _try(lambda: self._torpedoMotion.update(
-            torpedoes, now, torpedo_status.get('available', False)))
+        if sampling is None:
+            _try(lambda: self._torpedoMotion.update(
+                torpedoes, now, torpedo_status.get('available', False)))
+        else:
+            _try(lambda: self._torpedoMotion.update(
+                torpedoes, now, torpedo_status.get('available', False),
+                membership=(torpedo_status.get('membership')
+                            if torpedo_status.get('membershipComplete') is True else [])))
         for torpedo in torpedoes:
             pos = torpedo.get('position')
             normalized = (_try(lambda: self._mapCalibration.world_to_map(pos[0], pos[2]))
@@ -1906,6 +1940,29 @@ class Collector(object):
             torpedo['mapPosition'] = normalized
             torpedo['mapPositionStatus'] = 'available' if normalized else 'unknown'
             torpedo['mapPositionSource'] = 'calibratedWorldPosition' if normalized else None
+        if sampling is not None:
+            if ui_join_status != 'available':
+                torpedo_status['uiJoinStatus'] = 'notSampled'
+                torpedo_status['uiJoinReason'] = ui_join_status
+            for ui_probe in (probe, depth_probe, torpedo_state_probe):
+                if ui_probe.get('status') in ('disabled', 'notSampled'):
+                    continue
+                ui_probe['apiRowsStatus'] = ui_join_status
+                ui_probe['apiRowsComplete'] = ui_join_status == 'available'
+                if ui_join_status == 'sampledSubset':
+                    ui_probe['joinStatus'] = 'notSampled'
+                    ui_probe['joinReason'] = 'sampledSubset'
+                    for candidate in ui_probe.get('rows', []):
+                        if candidate.get('apiMatchStatus') == 'apiUnavailable':
+                            candidate['apiMatchStatus'] = 'notSampled'
+                            candidate['apiMatchReason'] = 'sampledSubset'
+            if ui_join_status == 'sampledSubset':
+                for row in torpedoes:
+                    ui_state = row.get('uiState')
+                    if isinstance(ui_state, dict):
+                        ui_state['matchStatus'] = 'notSampled'
+                        ui_state['matchReason'] = 'sampledSubset'
+            torpedoes, torpedo_status = sampling_wire_payload(torpedoes, torpedo_status)
         if profiler is not None:
             profiler.finish(torpedoes_phase)
         disabled = {'status': 'disabled', 'source': 'config.diagnostics_enabled'}
@@ -1970,8 +2027,14 @@ class Collector(object):
                                 'waveHitProbe': dict(state)}
         if profiler is not None and diagnostic_due:
             profiler.finish(diagnostics_phase)
-        self_state = self._build_self(ui_hp, self_info, self_ship)
-        if diagnostic_due:
+        if diagnostic_due and ui_join_status != 'available':
+            identity_reason = ('sampledSubset' if ui_join_status == 'sampledSubset'
+                               else 'apiUnavailable')
+            identity_candidates_state = {
+                'status': 'notSampled', 'reason': identity_reason,
+                'source': 'scheduling', 'sampleTs': now,
+                'torpedoRowsStatus': identity_reason}
+        elif diagnostic_due:
             identity_candidates_state = _try(
                 lambda: safe_identity_candidates(ships, self_state, torpedoes,
                     submarine_probes['waveHitProbe']), dict(disabled))
@@ -2026,6 +2089,42 @@ class Collector(object):
             'damage': self._damage.snapshot(),
             'diag': diag,
         }
+
+    def _torpedo_sampling_context(self, self_state, diag):
+        """Use only this snapshot's self position and validated numeric fit.
+
+        The fitted scales span each normalized map axis in world units; unlike
+        raw map width/name hints they are in the same units as torpedo.position.
+        This is an inferred classification radius, not a physical km contract.
+        """
+        try:
+            if self_state.get('isObserver') is not False:
+                return None
+            position = _vec(self_state.get('position'))
+            calibration = diag.get('mapCalibration', {})
+            if (position is None or
+                    not all(-1000000000.0 < v < 1000000000.0 for v in position) or
+                    calibration.get('status') != 'available'):
+                return None
+            coefficients = calibration.get('coefficients', {})
+            x = coefficients.get('worldX', {})
+            z = coefficients.get('worldZ', {})
+            if (x.get('mapAxis') not in ('nx', 'ny') or
+                    z.get('mapAxis') not in ('nx', 'ny') or
+                    x.get('mapAxis') == z.get('mapAxis') or
+                    isinstance(x.get('scale'), bool) or
+                    isinstance(z.get('scale'), bool)):
+                return None
+            width = abs(float(x.get('scale')))
+            height = abs(float(z.get('scale')))
+            if not (0.0 < width < 1000000000.0 and
+                    0.0 < height < 1000000000.0):
+                return None
+            return {'selfPosition': position, 'mapWidth': width,
+                    'mapHeight': height, 'source': 'calibratedMapExtents',
+                    'inferred': True}
+        except Exception:
+            return None
 
     def _build_avatar_observations(self, avatar_snapshot, now, ships):
         """Report only current captured-avatar fields, separate from API ships."""

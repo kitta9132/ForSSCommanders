@@ -1,5 +1,23 @@
 # WowsExtractor 魚雷出力版（WoWSクライアント用mod）
 
+## 0.3.33：魚雷の周期別sample
+
+`torpedoes[]`は今回実際にsampleした魚雷行だけとなる。**配列にないことは消失ではない。** `torpedoStatus.available/status`は全体API列挙の成否、`membershipComplete`と`membership`は全件識別の観測、`sampling`は群別sampleの状態を表す。`membershipFields=["uiId","ownerId","shotId"]`の順に、membershipは`[[uiId,ownerId,shotId], ...]`を出す。重複／不明IDがあればcomplete=falseと件数を出し、match可能なIDのみをmembershipへ出す。far非dueで空rowsでも魚雷0本と判断しない。旧consumerは対応が必要。schema=1/apiVersion=1.0を維持し、変更境界はmeta.mod.versionとsampling有無で判定する。
+
+5秒ごとに現在位置を分類し、半径L/3以内はhigh（既定0.2秒）、外側low（目標0.5秒）。新規は次の再分類まで暫定high。位置・半径の判定不能はhigh。5Hz tickへ0.5秒dueを量子化するためlowは0.4/0.6秒相当の交互で平均約2Hzとなり、実際のフレーム遅延でさらに変動する。catch-upで同tickに複数sampleしない。far→nearは次の再分類まで最大約5秒＋遅延はlowのまま。
+
+Lは同じsnapshotのavailable較正係数のworldX/worldZ scale絶対値の短い方。normalized mapの一辺をworld座標へ写す長さなので魚雷位置と同単位。`source=calibratedMapExtents`・`inferred=true`であり、km単位や生のmap metadata寸法と同一とは保証しない。較正未成立・自艦位置不明・観戦等では安全側high。直接map寸法をworld単位へ未検証で換算しない。
+
+全件列挙と最小IDは従来の通常tickで観測し、low非dueでは位置・owner・追加field・motion・map変換を省く。距離再判定tickでは全員位置を確認する。sample行の`sampling`はgroup/sampleTsを示し、暫定highにはprovisional=true、不明fieldにはidentityStatus/positionStatusを追加する。intervalSecondsは群別summaryにまとめる。classificationのstatus/reason/ts/nextDue/intervalSeconds/radiusWorld/mapSource/mapInferredもsummaryへ集約する。距離判定値を各行へ反復出力しない。
+
+前回のlive objectや前回位置を今回rowとして出力しない。motionだけは完全なmembershipに基づいて非dueのnumeric観測履歴を保持し、現在観測とのdtから派生値を計算する。不完全membershipでは非due履歴を保持しない。型の異なるID・重複をmotionへ混同しない。schedulerの未観測IDは正常な完全membershipで整理し、不完全IDが続く場合も10秒超未観測のschedule entryを破棄してboundedにする。これは消滅判断ではなく、再登場を暫定highから始めるための内部状態管理。
+
+UI depth/stateは専用周期のraw候補観測を継続する。ただしAPI rowsが間引かれたsnapshotでは全API一覧のUI ID一意性を既存join処理で証明できないため、rowへの付与を抑止する。raw probeは保持し、過去sampleへの付与もしない。
+
+subset時は`torpedoStatus.uiJoinStatus=notSampled, uiJoinReason=sampledSubset`を明示。実際にsampleしたUI probeにもapiRowsStatus/apiRowsComplete、joinStatus/joinReasonを付け、apiUnavailableと混同しない。UI raw probeのapiUiIdsは完全なmembershipがある場合その全IDから作る。identityCandidatesはsubset時にnotSampled/torpedoRowsStatus=sampledSubsetとし、少ないAPI rowを完全一覧として評価しない。
+
+付属viewerはconsumer側でlowの前回sampleをゲーム時刻・受信側壁時計のどちらでも最大1.5秒保持し、「前回sample位置」と表示する（本番mapのTTL決定ではない）。正常な全体membershipで未掲載なら削除し、inactive・戦闘切替ではholdをclearする。inactiveで最後の実snapshotを古い戦闘表示として示す既存挙動は維持するが、非due補完のholdを凍結させない。collectorが幽霊位置を出力する機能ではない。recorderの通常／torpedoes-only両方がtorpedoStatusを保存する。
+
 ## 0.3.32：砲弾道計算の全撤去
 
 潜水艦戦闘補助に不要なBallisticsTracker、砲弾／航空弾薬選択の専用イベント、着弾速度・貫通・跳弾・信管計算を削除した。通常stateにも`ballistics`キーを出力しない。disabled互換枠・再有効化設定はない。従来このキーを必須としたconsumerは修正が必要。schema=1/apiVersion=1.0は他契約と同じままで、撤去境界はmeta.mod.version（0.3.32以降）とキー有無で判定する。魚雷ammoParams／TTX、装填、潜水艦状態、damage集計は撤去しない。下記の旧版時点のballistics説明は履歴であり現行契約ではない。実機性能改善は未確認。

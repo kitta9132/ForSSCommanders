@@ -1,7 +1,9 @@
 # WowsExtractor 魚雷出力版：実機テスト用パッケージ
 
 作成日：2026-11-04（日本時間）
-modバージョン：`0.3.32-remove-ballistics` / ModsAPI：`API_v1.0`（source only・未導入／未実機）
+modバージョン：`0.3.33-torpedo-sampling-groups` / ModsAPI：`API_v1.0`（source only・未導入／未実機）
+
+0.3.33は魚雷を5秒ごとに距離分類し、近距離5Hz／遠距離平均2Hzでsampleする版。新規・分類不能は暫定5Hz。`torpedoes[]`は今回sampleのみであり、非掲載だけで消失と扱わず`torpedoStatus`の全体membership・sampling状態を参照する必要がある。マップ一辺（長方形は短辺）の1/3を半径とし、同座標単位の較正scaleから算出する推定値。実機未確認。以下は旧版履歴。
 
 0.3.32は砲弾道計算と専用イベント・`ballistics`出力を全撤去。魚雷弾薬性能・装填・damage等は維持する。FPS改善は未確認。以下は旧版の機能履歴。
 

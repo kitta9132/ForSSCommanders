@@ -49,6 +49,20 @@ def test_slim_capture_drops_roster_and_player_names_but_keeps_raw_type():
     assert out['torpedoes'][0]['type'] == 'future_type'
 
 
+@pytest.mark.parametrize('slim', [False, True])
+def test_non_due_torpedo_membership_is_preserved_without_inventing_current_rows(tmp_path, slim):
+    status = {'available': True, 'status': 'available', 'membershipComplete': True,
+              'membershipFields': ['uiId', 'ownerId', 'shotId'],
+              'membership': [[8, 3, 4]],
+              'sampling': {'low': {'status': 'notSampled', 'sampleTs': 1.0,
+                                    'intervalSeconds': 0.5}}}
+    write(tmp_path / 'state.json', ts=1.2, torpedoes=[], torpedoStatus=status)
+    events = rec.poll_files(tmp_path, {}, torpedoes_only=slim)
+    assert len(events) == 1
+    assert events[0]['data']['torpedoStatus'] == status
+    assert events[0]['data']['torpedoes'] == []
+
+
 def test_cannot_overwrite_source_or_existing_recording(tmp_path):
     source = tmp_path / 'state.json'
     write(source)

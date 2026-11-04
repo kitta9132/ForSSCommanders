@@ -2654,11 +2654,523 @@ def safe_game_clock_probe(hub, components):
                 'semantics': 'unverified', 'candidates': {}, 'error': 'probeFailed'}
 
 
+SAMPLING_CLASSIFICATION_INTERVAL = 5.0
+SAMPLING_HIGH_INTERVAL = 0.2
+SAMPLING_LOW_INTERVAL = 0.5
+_SAMPLING_EPSILON = 1e-9
+_SAMPLING_HIGH = 'high'
+_SAMPLING_LOW = 'low'
+
+
+def _sampling_key(ui_id, owner_id, shot_id):
+    """Strict, type-exact identity key plus the owner key already computed."""
+    ui_key = _depth_id(ui_id)
+    owner_key = _depth_id(owner_id)
+    shot_key = _depth_id(shot_id)
+    if ui_key is None or owner_key is None or shot_key is None:
+        return None, owner_key
+    return (ui_key, owner_key, shot_key), owner_key
+
+
+def _sampling_context(context):
+    """Validate the parent's world-space classification context."""
+    info = {'status': 'unknown', 'reason': 'contextMissing',
+            'x': None, 'z': None, 'width': None, 'height': None,
+            'radius': None, 'radiusSquared': None, 'source': None,
+            'inferred': False, 'normalized': False}
+    if not isinstance(context, dict):
+        return info
+    source = context.get('source')
+    info['source'] = source if isinstance(source, STRING_TYPES) else None
+    info['inferred'] = context.get('inferred') is True
+    info['normalized'] = context.get('positionsNormalized') is True
+    self_position = vector(context.get('selfPosition'))
+    if self_position is None:
+        info['reason'] = 'selfPositionUnavailable'
+        return info
+    width = context.get('mapWidth')
+    height = context.get('mapHeight')
+    if (not _finite(width) or not _finite(height) or
+            width <= 0 or height <= 0):
+        info['reason'] = 'mapDimensionsUnavailable'
+        return info
+    radius = min(width, height) / 3.0
+    if not _finite(radius) or radius <= 0:
+        info['reason'] = 'radiusUnavailable'
+        return info
+    info.update({'status': 'available', 'reason': None,
+                 'x': self_position[0], 'z': self_position[2],
+                 'width': width, 'height': height, 'radius': radius,
+                 'radiusSquared': radius * radius})
+    return info
+
+
+def _sampling_distance(info, position):
+    """Horizontal world-space distance; unknown never reuses a last position."""
+    if info.get('status') != 'available' or position is None:
+        return 'unknown', None
+    x, z = position[0], position[2]
+    if info['normalized']:
+        dx = (x - info['x']) * info['width']
+        dz = (z - info['z']) * info['height']
+    else:
+        dx = x - info['x']
+        dz = z - info['z']
+    distance_squared = dx * dx + dz * dz
+    if not _finite(distance_squared):
+        return 'unknown', None
+    # The boundary is inclusive: exactly radius is near/high.
+    if distance_squared <= info['radiusSquared']:
+        return 'near', distance_squared
+    return 'far', distance_squared
+
+
+class TorpedoSamplingGroups(object):
+    """Numeric-only 5s classification and 5Hz/2Hz group schedule.
+
+    State contains identifiers, group, deadlines and numeric distance values.
+    Game entities, owner objects and previous positions are never retained.
+    Call clear() when the battle changes; clock rollback also clears safely.
+    """
+    CLASSIFICATION_INTERVAL = SAMPLING_CLASSIFICATION_INTERVAL
+    HIGH_INTERVAL = SAMPLING_HIGH_INTERVAL
+    LOW_INTERVAL = SAMPLING_LOW_INTERVAL
+
+    def __init__(self):
+        self.clear()
+
+    def clear(self):
+        self._entries = {}
+        self._last_now = None
+        self._last_classification = None
+        self._next_classification = None
+        self._last_high_sample = None
+        self._last_low_sample = None
+        self._classifications = 0
+        self._clock_reset_count = 0
+        self._plan = {}
+        self._last_tick = {}
+        self._classification = {
+            'status': 'notClassified', 'reason': 'contextMissing',
+            'ts': None, 'nextDue': None, 'intervalSeconds':
+            self.CLASSIFICATION_INTERVAL, 'radiusWorld': None,
+            'radiusSource': None, 'radiusSquared': None,
+            'mapWidth': None, 'mapHeight': None, 'mapSource': None,
+            'mapInferred': False, 'positionsNormalized': False,
+            'selfPositionStatus': 'unknown', 'nearCount': 0, 'farCount': 0,
+            'unknownDistanceCount': 0, 'classifiedCount': 0,
+            'newCount': 0, 'groupChangeCount': 0,
+            'provisionalHighCount': 0, 'prunedCount': 0}
+
+    def plan(self, now):
+        """Return this tick's classification decision without collecting."""
+        result = {'classificationDue': False, 'first': False,
+                  'clockReset': False}
+        if not _finite(now):
+            self._plan = result
+            return result
+        if (self._last_now is not None and
+                now < self._last_now - _SAMPLING_EPSILON):
+            self.clear()
+            self._clock_reset_count = 1
+            result['clockReset'] = True
+        first = self._last_classification is None
+        due = (first or self._next_classification is None or
+               now + _SAMPLING_EPSILON >= self._next_classification)
+        result['first'] = first
+        result['classificationDue'] = bool(due)
+        self._last_now = now
+        self._plan = result
+        return result
+
+    def needs_position(self, key, now, classification_due, identity_status,
+                       context_available=True):
+        """Cheap pre-read gate: low non-due rows read only their identifiers.
+
+        An unavailable context is a safety exception: every current identity is
+        read and promoted high immediately rather than waiting up to five seconds.
+        """
+        if classification_due or not context_available:
+            return True
+        if identity_status != 'available' or key is None:
+            return True
+        entry = self._entries.get(key)
+        if entry is None:
+            return True
+        return now + _SAMPLING_EPSILON >= entry['nextDue']
+
+    def _advance_due(self, due, now, interval):
+        # Keep the 0.5s deadline grid (0.4/0.6s sampling on 0.2s ticks)
+        # while never emitting catch-up rows. A large gap re-anchors.
+        if now - due > max(interval * 2.0, 1.0):
+            return now + interval
+        target = due + interval
+        guard = 0
+        while target <= now + _SAMPLING_EPSILON and guard < 64:
+            target += interval
+            guard += 1
+        return target
+
+    def _decision(self, sample, group, interval, reason, provisional,
+                  distance_status, distance_squared, classification_ts):
+        # Positional internal result: most fields belong to sampling summary,
+        # not to every row, and identityStatus is already on the record.
+        return (sample, group, interval, reason, provisional,
+                distance_status, distance_squared, classification_ts)
+
+    def observe(self, observations, now, context, classification_due,
+                membership_complete, context_available=True, context_info=None):
+        """Record one tick and return a decision for each observation."""
+        if classification_due:
+            return self._observe_classification(
+                observations, now, context, membership_complete, context_info)
+        return self._observe_cadence(
+            observations, now, context_available)
+
+    def _observe_classification(self, observations, now, context,
+                                membership_complete, context_info=None):
+        info = context_info if context_info is not None else _sampling_context(context)
+        observed = {}
+        near = far = unknown_distance = 0
+        new_count = changed_count = provisional_count = 0
+        sampled_high = sampled_low = 0
+        decisions = []
+        for observation in observations:
+            status = observation.get('identityStatus', 'unknown')
+            key = observation.get('key')
+            if status != 'available' or key is None:
+                reason = ('duplicateIdentity' if status == 'duplicate'
+                          else 'unknownIdentity')
+                decisions.append(self._decision(
+                    True, _SAMPLING_HIGH, self.HIGH_INTERVAL, reason, True,
+                    'unknown', None, now))
+                sampled_high += 1
+                provisional_count += 1
+                continue
+            observed[key] = True
+            distance_status, distance_squared = _sampling_distance(
+                info, observation.get('position'))
+            if distance_status == 'near':
+                near += 1
+            elif distance_status == 'far':
+                far += 1
+            else:
+                unknown_distance += 1
+            previous = self._entries.get(key)
+            if previous is None:
+                # A newly discovered identity starts provisional high.
+                group = _SAMPLING_HIGH
+                provisional = True
+                new_count += 1
+            else:
+                group = (_SAMPLING_HIGH if distance_status in ('near', 'unknown')
+                         else _SAMPLING_LOW)
+                provisional = False
+                if previous['group'] != group:
+                    changed_count += 1
+            interval = (self.HIGH_INTERVAL if group == _SAMPLING_HIGH
+                        else self.LOW_INTERVAL)
+            entry = {'group': group, 'nextDue': now + interval,
+                     'lastSampled': now, 'provisional': provisional,
+                     'identity': observation.get('identity') or {},
+                     'classifiedTs': now,
+                     'distanceStatus': distance_status,
+                     'distanceSquared': distance_squared,
+                     'firstSeen': (previous['firstSeen']
+                                   if previous is not None else now)}
+            self._entries[key] = entry
+            if provisional:
+                provisional_count += 1
+            if group == _SAMPLING_HIGH:
+                sampled_high += 1
+            else:
+                sampled_low += 1
+            decisions.append(self._decision(
+                True, group, interval, 'classification', provisional,
+                distance_status, distance_squared, now))
+        pruned = 0
+        if membership_complete:
+            remove = []
+            for key in list(self._entries.keys()):
+                if key not in observed:
+                    remove.append(key)
+            for key in remove:
+                del self._entries[key]
+                pruned += 1
+        self._last_classification = now
+        self._next_classification = now + self.CLASSIFICATION_INTERVAL
+        self._classifications += 1
+        available_context = info['status'] == 'available'
+        self._classification = {
+            'status': 'available' if available_context else 'unknown',
+            'reason': info['reason'], 'ts': now,
+            'nextDue': self._next_classification,
+            'intervalSeconds': self.CLASSIFICATION_INTERVAL,
+            'radiusWorld': info['radius'],
+            'radiusSource': ('min(mapWidth,mapHeight)/3'
+                             if available_context else None),
+            'radiusSquared': info['radiusSquared'],
+            'mapWidth': info['width'], 'mapHeight': info['height'],
+            'mapSource': info['source'], 'mapInferred': info['inferred'],
+            'positionsNormalized': info['normalized'],
+            'selfPositionStatus': ('available' if available_context
+                                   else 'unknown'),
+            'nearCount': near, 'farCount': far,
+            'unknownDistanceCount': unknown_distance,
+            'classifiedCount': near + far + unknown_distance,
+            'newCount': new_count, 'groupChangeCount': changed_count,
+            'provisionalHighCount': provisional_count,
+            'prunedCount': pruned}
+        if sampled_high:
+            self._last_high_sample = now
+        if sampled_low:
+            self._last_low_sample = now
+        self._last_tick = {
+            'ts': now, 'classificationDue': True,
+            'highSampled': sampled_high > 0, 'lowSampled': sampled_low > 0,
+            'highCount': sampled_high, 'lowCount': sampled_low,
+            'newCount': new_count, 'prunedCount': pruned}
+        return decisions
+
+    def _observe_safety_high(self, observations, now):
+        """Context loss promotes low identities without waiting for reclassify."""
+        sampled_high = 0
+        new_count = promoted_count = 0
+        decisions = []
+        for observation in observations:
+            status = observation.get('identityStatus', 'unknown')
+            key = observation.get('key')
+            if status != 'available' or key is None:
+                reason = ('duplicateIdentity' if status == 'duplicate'
+                          else 'unknownIdentity')
+                decisions.append(self._decision(
+                    True, _SAMPLING_HIGH, self.HIGH_INTERVAL, reason, True,
+                    'unknown', None, self._last_classification))
+                sampled_high += 1
+                continue
+            previous = self._entries.get(key)
+            if previous is None:
+                new_count += 1
+                provisional = True
+                first_seen = now
+            else:
+                if previous['group'] != _SAMPLING_HIGH:
+                    promoted_count += 1
+                provisional = previous['provisional']
+                first_seen = previous['firstSeen']
+            entry = {'group': _SAMPLING_HIGH,
+                     'nextDue': now + self.HIGH_INTERVAL,
+                     'lastSampled': now, 'provisional': provisional,
+                     'identity': observation.get('identity') or {},
+                     'classifiedTs': self._last_classification,
+                     'distanceStatus': 'unknown', 'distanceSquared': None,
+                     'firstSeen': first_seen}
+            self._entries[key] = entry
+            sampled_high += 1
+            decisions.append(self._decision(
+                True, _SAMPLING_HIGH, self.HIGH_INTERVAL,
+                'contextUnavailable', provisional, 'unknown', None,
+                self._last_classification))
+        if sampled_high:
+            self._last_high_sample = now
+        self._last_tick = {
+            'ts': now, 'classificationDue': False,
+            'highSampled': sampled_high > 0, 'lowSampled': False,
+            'highCount': sampled_high, 'lowCount': 0,
+            'newCount': new_count, 'prunedCount': 0,
+            'safetyHigh': True, 'promotedCount': promoted_count}
+        return decisions
+
+    def _observe_cadence(self, observations, now, context_available=True):
+        if not context_available:
+            return self._observe_safety_high(observations, now)
+        sampled_high = sampled_low = 0
+        new_count = 0
+        decisions = []
+        for observation in observations:
+            status = observation.get('identityStatus', 'unknown')
+            key = observation.get('key')
+            if status != 'available' or key is None:
+                reason = ('duplicateIdentity' if status == 'duplicate'
+                          else 'unknownIdentity')
+                decisions.append(self._decision(
+                    True, _SAMPLING_HIGH, self.HIGH_INTERVAL, reason, True,
+                    'unknown', None, self._last_classification))
+                sampled_high += 1
+                continue
+            entry = self._entries.get(key)
+            if entry is None:
+                # New between classifications: immediate provisional high.
+                entry = {'group': _SAMPLING_HIGH,
+                         'nextDue': now + self.HIGH_INTERVAL,
+                         'lastSampled': now, 'provisional': True,
+                         'identity': observation.get('identity') or {},
+                         'classifiedTs': self._last_classification,
+                         'distanceStatus': 'notClassified',
+                         'distanceSquared': None, 'firstSeen': now}
+                self._entries[key] = entry
+                new_count += 1
+                sampled_high += 1
+                decisions.append(self._decision(
+                    True, _SAMPLING_HIGH, self.HIGH_INTERVAL, 'new', True,
+                    'notClassified', None, self._last_classification))
+                continue
+            group = entry['group']
+            interval = (self.HIGH_INTERVAL if group == _SAMPLING_HIGH
+                        else self.LOW_INTERVAL)
+            if now + _SAMPLING_EPSILON >= entry['nextDue']:
+                entry['nextDue'] = self._advance_due(
+                    entry['nextDue'], now, interval)
+                entry['lastSampled'] = now
+                if group == _SAMPLING_HIGH:
+                    sampled_high += 1
+                else:
+                    sampled_low += 1
+                decisions.append(self._decision(
+                    True, group, interval,
+                    ('highDue' if group == _SAMPLING_HIGH else 'lowDue'),
+                    entry['provisional'], entry['distanceStatus'],
+                    entry['distanceSquared'], entry['classifiedTs']))
+            else:
+                decisions.append(self._decision(
+                    False, group, interval, 'notDue', entry['provisional'],
+                    entry['distanceStatus'], entry['distanceSquared'],
+                    entry['classifiedTs']))
+        if sampled_high:
+            self._last_high_sample = now
+        if sampled_low:
+            self._last_low_sample = now
+        self._last_tick = {
+            'ts': now, 'classificationDue': False,
+            'highSampled': sampled_high > 0, 'lowSampled': sampled_low > 0,
+            'highCount': sampled_high, 'lowCount': sampled_low,
+            'newCount': new_count, 'prunedCount': 0}
+        return decisions
+
+    def summary(self, now, options=None):
+        """Return the JSON-safe sampling status for the completed tick."""
+        options = options if isinstance(options, dict) else {}
+        high_members = low_members = 0
+        for entry in self._entries.values():
+            if entry['group'] == _SAMPLING_HIGH:
+                high_members += 1
+            else:
+                low_members += 1
+        tick = self._last_tick if isinstance(self._last_tick, dict) else {}
+        classification = dict(self._classification)
+        classification['due'] = bool(self._plan.get('classificationDue'))
+        classification['clockReset'] = bool(self._plan.get('clockReset'))
+        classification['classificationTs'] = self._last_classification
+        classification['nextDue'] = self._next_classification
+        classification['intervalSeconds'] = self.CLASSIFICATION_INTERVAL
+        if self._last_classification is None:
+            high_status = low_status = 'notClassified'
+        else:
+            high_status = ('sampled' if tick.get('highSampled')
+                           else 'notSampled')
+            low_status = ('sampled' if tick.get('lowSampled')
+                          else 'notSampled')
+        high = {'status': high_status, 'sampleTs': self._last_high_sample,
+                'intervalSeconds': self.HIGH_INTERVAL,
+                'sampledCount': tick.get('highCount', 0),
+                'memberCount': high_members}
+        low = {'status': low_status, 'sampleTs': self._last_low_sample,
+               'intervalSeconds': self.LOW_INTERVAL,
+               'sampledCount': tick.get('lowCount', 0),
+               'memberCount': low_members}
+        return {
+            'status': options.get('samplingStatus', 'available'),
+            'classification': classification,
+            # Convenience aliases for the compact top-level contract.
+            'classificationTs': self._last_classification,
+            'classificationDue': bool(self._plan.get('classificationDue')),
+            'radiusWorld': classification.get('radiusWorld'),
+            'radiusSource': classification.get('radiusSource'),
+            'mapSource': classification.get('mapSource'),
+            'mapInferred': classification.get('mapInferred'),
+            'selfPositionStatus': classification.get('selfPositionStatus'),
+            'high': high, 'low': low,
+            'newCount': tick.get('newCount', 0),
+            'prunedCount': tick.get('prunedCount', 0),
+            'safetyHigh': bool(tick.get('safetyHigh')),
+            'promotedCount': tick.get('promotedCount', 0),
+            'membershipComplete': bool(options.get(
+                'membershipComplete', False)),
+            'membershipCount': options.get('membershipCount', 0),
+            'duplicateIdentityCount': options.get('duplicateCount', 0),
+            'unmatchableIdentityCount': options.get('unknownCount', 0),
+             'counters': options.get('counters', {})}
+
+    def reconcile(self, observations, now, complete):
+        """Bound numeric scheduling state without declaring entity death.
+
+        Complete identity lists can remove absent schedule entries immediately.
+        Incomplete identities retain them briefly, but not forever: two missed
+        classification periods discard scheduling state only. A returning ID
+        then starts provisional high; no observed row is suppressed by expiry.
+        """
+        seen = {}
+        for observation in observations:
+            key = observation.get('key')
+            if key is not None:
+                seen[key] = True
+                entry = self._entries.get(key)
+                if entry is not None:
+                    entry['lastObserved'] = now
+        for key in list(self._entries.keys()):
+            if key in seen:
+                continue
+            entry = self._entries[key]
+            if (complete or now - entry.get('lastObserved', entry['firstSeen']) >
+                    self.CLASSIFICATION_INTERVAL * 2.0):
+                del self._entries[key]
+
+
+def sampling_wire_payload(rows, status):
+    """Compact only new scheduler metadata, never the observed game fields.
+
+    Adapter-local dictionaries retain detailed budgets for offline tests; the
+    wire membership is a positional identity list to avoid repeating key names
+    for every entity on every tick. No owner table/schema normalization is used.
+    """
+    if not isinstance(status.get('sampling'), dict):
+        return rows, status
+    out = dict(status)
+    out['membershipFields'] = ['uiId', 'ownerId', 'shotId']
+    out['membership'] = [[item.get('uiId'), item.get('ownerId'),
+                          item.get('shotId')]
+                         for item in status.get('membership', [])]
+    summary = status['sampling']
+    classification = summary.get('classification', {})
+    out['sampling'] = {
+        'status': summary.get('status'),
+        'classification': dict((name, classification.get(name)) for name in (
+            'status', 'reason', 'ts', 'nextDue', 'intervalSeconds',
+            'radiusWorld', 'mapSource', 'mapInferred')),
+        'high': summary.get('high', {}), 'low': summary.get('low', {}),
+        'safetyHigh': bool(summary.get('safetyHigh')),
+        'unmatchableIdentityCount': summary.get('unmatchableIdentityCount', 0),
+        'duplicateIdentityCount': summary.get('duplicateIdentityCount', 0)}
+    if summary.get('reason') is not None:
+        out['sampling']['reason'] = summary['reason']
+    for row in rows:
+        sample = row.get('sampling', {})
+        compact = {'group': sample.get('group'), 'sampleTs': sample.get('sampleTs')}
+        if sample.get('provisional'):
+            compact['provisional'] = True
+        for name in ('identityStatus', 'positionStatus'):
+            if sample.get(name) not in (None, 'available'):
+                compact[name] = sample[name]
+        row['sampling'] = compact
+    return rows, out
+
+
 class TorpedoMotion(object):
     """Finite differences in game-world units, not authoritative game speed.
 
     Gaps over one second and non-increasing time cannot yield current velocity.
     Membership/identity loss drops history; no extrapolation or stale reuse.
+    Optional membership retains numeric history for non-due sampled groups.
     """
     def __init__(self):
         self.clear()
@@ -2666,13 +3178,46 @@ class TorpedoMotion(object):
     def clear(self):
         self._previous = {}
 
-    def update(self, rows, now, available=True):
+    def update(self, rows, now, available=True, membership=None):
         if not available or not _finite(now):
             self.clear()
             return
         current = {}
+        row_key_counts = {}
+        row_keys = []
+        strict = membership is not None
         for row in rows:
-            key = row.get('uiId')
+            if strict:
+                key, _owner_key = _sampling_key(
+                    row.get('uiId'), row.get('ownerId'), row.get('shotId'))
+            else:
+                key = row.get('uiId')
+            row_keys.append(key)
+            if key is not None:
+                row_key_counts[key] = row_key_counts.get(key, 0) + 1
+        if membership is not None:
+            allowed = {}
+            ambiguous = {}
+            for item in membership:
+                key, _owner_key = _sampling_key(
+                    _get(item, 'uiId'), _get(item, 'ownerId'),
+                    _get(item, 'shotId'))
+                if key is None:
+                    continue
+                if key in allowed:
+                    ambiguous[key] = True
+                    continue
+                allowed[key] = (_get(item, 'ownerId'), _get(item, 'shotId'))
+            for key, previous in self._previous.items():
+                if key in row_key_counts or ambiguous.get(key):
+                    continue
+                identity = allowed.get(key)
+                if identity is not None and identity == previous[2]:
+                    # Retain only numeric history for a still-present identity;
+                    # non-due rows were not sampled in this snapshot.
+                    current[key] = previous
+        for index, row in enumerate(rows):
+            key = row_keys[index]
             pos = vector(row.get('position'))
             motion = {'available': False, 'source': 'positionDifference',
                       'inferred': True, 'speedUnit': 'game_world_units_per_second',
@@ -2680,7 +3225,8 @@ class TorpedoMotion(object):
                       'velocity': None, 'dt': None, 'observedAge': None,
                       'observedDistance': None}
             row['motion'] = motion
-            if key is None or pos is None:
+            if (key is None or pos is None or
+                    (strict and row_key_counts.get(key, 0) != 1)):
                 continue
             identity = (row.get('ownerId'), row.get('shotId'))
             previous = self._previous.get(key)
@@ -2744,37 +3290,238 @@ class TorpedoTelemetry(object):
                                     'source': 'Ship.' + method, 'shape': shape}
         return out
 
-    def torpedoes(self, self_team=None):
+    def torpedoes(self, self_team=None, sampling=None, now=None, context=None):
+        """Collect torpedo rows.
+
+        The legacy call (sampling=None) keeps the complete 5Hz snapshot shape.
+        With a TorpedoSamplingGroups instance, rows contain only this tick's
+        sampled groups and status carries sampling metadata plus the complete
+        normal-enumeration membership for non-due motion history retention.
+        """
         status, items = _call(self.battle, 'getAllTorpedoes')
-        out = []
+        if sampling is None:
+            out = []
+            owners = {}
+            if status == 'available':
+                try:
+                    for torpedo in items:
+                        row = _fields(torpedo, TORPEDO_FIELDS)
+                        row['position'] = vector(_get(torpedo, 'position'))
+                        team = row['ownerTeamId']
+                        row['relation'] = (None if team is None or self_team is None
+                                           else (1 if team == self_team else 2))
+                        owner_id = row['ownerId']
+                        if owner_id is not None and owner_id not in owners:
+                            owner_status, owner = _call(
+                                self.battle, 'getTorpedoOwnerById', owner_id)
+                            owners[owner_id] = (_fields(owner, OWNER_FIELDS)
+                                                if owner_status == 'available' else None)
+                        row['owner'] = owners.get(owner_id)
+                        # ownerId is NOT documented as a player/vehicle id. Never
+                        # equate these namespaces. Ship.isPlayer is public instead.
+                        row['isOwn'] = _get(row['owner'], 'isPlayer')
+                        if type(row['isOwn']) is not bool:
+                            row['isOwn'] = None
+                        out.append(row)
+                except Exception:
+                    # A failed/incomplete enumeration is not a successful empty list.
+                    status = 'unknown'
+                    out = []
+            return out, {'available': status == 'available', 'status': status,
+                         'source': 'battle.getAllTorpedoes'}
+        return self._sampled_torpedoes(
+            items, status, self_team, sampling, now, context)
+
+    def _sampling_no_rows(self, status, sampling, now, reason, counters,
+                          membership_complete):
+        status['membership'] = []
+        status['membershipComplete'] = bool(membership_complete)
+        try:
+            summary = sampling.summary(now, {
+                'samplingStatus': status['status'],
+                'membershipComplete': status['membershipComplete'],
+                'membershipCount': 0, 'duplicateCount': 0,
+                'unknownCount': 0, 'counters': counters})
+        except Exception:
+            summary = {
+                'status': 'unknown', 'reason': 'samplingUnavailable',
+                'classification': {}, 'counters': counters}
+        # A failed/absent collection made no current sample in either group.
+        for name in ('high', 'low'):
+            group = summary.get(name)
+            if isinstance(group, dict):
+                group['status'] = 'notSampled'
+                group['sampledCount'] = 0
+        summary['status'] = status['status']
+        summary['reason'] = reason
+        status['sampling'] = summary
+        return [], status
+
+    def _sampling_row(self, record, self_team, owners, counters):
+        torpedo = record['item']
+        identity = record['identity']
+        if record['key'] is not None:
+            # _sampling_key accepted only finite numbers or bounded strings.
+            ui_id, owner_id, shot_id = (identity['uiId'],
+                                        identity['ownerId'],
+                                        identity['shotId'])
+        else:
+            ui_id = public_data(identity['uiId'])
+            owner_id = public_data(identity['ownerId'])
+            shot_id = public_data(identity['shotId'])
+        row = {'uiId': ui_id, 'ownerId': owner_id,
+               'ownerTeamId': public_data(_get(torpedo, 'ownerTeamId')),
+               'ownerType': public_data(_get(torpedo, 'ownerType')),
+               'shotId': shot_id,
+               'type': public_data(_get(torpedo, 'type'))}
+        row['position'] = record['position']
+        team = row['ownerTeamId']
+        row['relation'] = (None if team is None or self_team is None
+                           else (1 if team == self_team else 2))
+        owner_key = record['ownerKey']
+        owner = None
+        if owner_key is not None:
+            if owner_key not in owners:
+                counters['ownerLookups'] += 1
+                owner_status, owner_value = _call(
+                    self.battle, 'getTorpedoOwnerById', identity['ownerId'])
+                owners[owner_key] = (_fields(owner_value, OWNER_FIELDS)
+                                     if owner_status == 'available' else None)
+            owner = owners.get(owner_key)
+        row['owner'] = owner
+        # ownerId is NOT documented as a player/vehicle id. Never equate these
+        # namespaces; Ship.isPlayer is the public value used by existing rows.
+        row['isOwn'] = _get(row['owner'], 'isPlayer')
+        if type(row['isOwn']) is not bool:
+            row['isOwn'] = None
+        return row
+
+    def _sampled_torpedoes(self, items, enumeration_status, self_team,
+                           sampling, now, context):
+        status = {'available': enumeration_status == 'available',
+                  'status': enumeration_status,
+                  'source': 'battle.getAllTorpedoes'}
+        counters = {'enumerations': 1, 'identityReads': 0,
+                    'positionReads': 0, 'ownerLookups': 0, 'sampledRows': 0}
+        if enumeration_status != 'available':
+            return self._sampling_no_rows(
+                status, sampling, now, 'collectionUnavailable', counters, False)
+        if not _finite(now):
+            status['available'] = False
+            status['status'] = 'unknown'
+            return self._sampling_no_rows(
+                status, sampling, now, 'invalidNow', counters, False)
+        records = []
+        seen_keys = {}
+        duplicate_keys = {}
+        try:
+            for torpedo in items:
+                ui_id = _get(torpedo, 'uiId')
+                owner_id = _get(torpedo, 'ownerId')
+                shot_id = _get(torpedo, 'shotId')
+                counters['identityReads'] += 3
+                key, owner_key = _sampling_key(ui_id, owner_id, shot_id)
+                record = {
+                    'item': torpedo, 'key': key, 'ownerKey': owner_key,
+                    'identity': {'uiId': ui_id, 'ownerId': owner_id,
+                                 'shotId': shot_id},
+                    'identityStatus': ('available' if key is not None
+                                       else 'unknown'),
+                    'position': None, 'positionStatus': 'notRead'}
+                records.append(record)
+                if key is not None:
+                    if key in seen_keys:
+                        duplicate_keys[key] = True
+                    else:
+                        seen_keys[key] = True
+        except Exception:
+            status['available'] = False
+            status['status'] = 'partial' if records else 'unknown'
+            return self._sampling_no_rows(
+                status, sampling, now, 'iterationError', counters, False)
+        duplicate_count = 0
+        unknown_count = 0
+        membership_complete = True
+        for record in records:
+            key = record['key']
+            if key is not None and key in duplicate_keys:
+                record['identityStatus'] = 'duplicate'
+            if record['identityStatus'] == 'duplicate':
+                duplicate_count += 1
+                membership_complete = False
+            elif record['identityStatus'] == 'unknown':
+                unknown_count += 1
+                membership_complete = False
+        try:
+            plan = sampling.plan(now)
+            classification_due = bool(plan.get('classificationDue'))
+            context_info = _sampling_context(context)
+            context_available = context_info.get('status') == 'available'
+            for record in records:
+                if (record['identityStatus'] != 'available' or
+                        sampling.needs_position(
+                            record['key'], now, classification_due,
+                            record['identityStatus'], context_available)):
+                    record['position'] = vector(
+                        _get(record['item'], 'position'))
+                    counters['positionReads'] += 1
+                    record['positionStatus'] = (
+                        'available' if record['position'] is not None
+                        else 'unknown')
+            decisions = sampling.observe(
+                records, now, context, classification_due,
+                membership_complete, context_available, context_info)
+            sampling.reconcile(records, now, membership_complete)
+            if len(decisions) != len(records):
+                raise Exception('samplingDecisionCountMismatch')
+        except Exception:
+            status['available'] = False
+            status['status'] = 'unknown'
+            return self._sampling_no_rows(
+                status, sampling, now, 'samplingError', counters, False)
         owners = {}
-        if status == 'available':
-            try:
-                for torpedo in items:
-                    row = _fields(torpedo, TORPEDO_FIELDS)
-                    row['position'] = vector(_get(torpedo, 'position'))
-                    team = row['ownerTeamId']
-                    row['relation'] = (None if team is None or self_team is None
-                                       else (1 if team == self_team else 2))
-                    owner_id = row['ownerId']
-                    if owner_id is not None and owner_id not in owners:
-                        owner_status, owner = _call(
-                            self.battle, 'getTorpedoOwnerById', owner_id)
-                        owners[owner_id] = (_fields(owner, OWNER_FIELDS)
-                                            if owner_status == 'available' else None)
-                    row['owner'] = owners.get(owner_id)
-                    # ownerId is NOT documented as a player/vehicle id. Never
-                    # equate these namespaces. Ship.isPlayer is public instead.
-                    row['isOwn'] = _get(row['owner'], 'isPlayer')
-                    if type(row['isOwn']) is not bool:
-                        row['isOwn'] = None
-                    out.append(row)
-            except Exception:
-                # A failed/incomplete enumeration is not a successful empty list.
-                status = 'unknown'
-                out = []
-        return out, {'available': status == 'available', 'status': status,
-                     'source': 'battle.getAllTorpedoes'}
+        out = []
+        membership = []
+        decision_count = len(decisions)
+        for index, record in enumerate(records):
+            if index >= decision_count:
+                break
+            decision = decisions[index]
+            identity = record['identity']
+            group = decision[1]
+            if record['identityStatus'] == 'available':
+                # The strict key accepted only finite numbers/bounded strings.
+                membership.append({
+                    'uiId': identity['uiId'],
+                    'ownerId': identity['ownerId'],
+                    'shotId': identity['shotId'],
+                    'group': group})
+            if not decision[0]:
+                continue
+            row = self._sampling_row(record, self_team, owners, counters)
+            row['sampling'] = {
+                'group': group,
+                'sampleTs': now,
+                'intervalSeconds': decision[2],
+                'classificationTs': decision[7],
+                'provisional': bool(decision[4]),
+                'reason': decision[3],
+                'distanceStatus': decision[5],
+                'distanceSquared': decision[6],
+                'identityStatus': record['identityStatus'],
+                'positionStatus': record['positionStatus']}
+            out.append(row)
+            counters['sampledRows'] += 1
+        status['membership'] = membership
+        status['membershipComplete'] = membership_complete
+        status['sampling'] = sampling.summary(now, {
+            'samplingStatus': status['status'],
+            'membershipComplete': membership_complete,
+            'membershipCount': len(membership),
+            'duplicateCount': duplicate_count,
+            'unknownCount': unknown_count,
+            'counters': counters})
+        return out, status
 
     def armament(self, self_ship=_MISSING):
         if self_ship is _MISSING:
