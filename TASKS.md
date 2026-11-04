@@ -7,6 +7,8 @@
 <a id="task-performance"></a>
 ## 緊急優先：通常プレイのFPS低下
 
+FPS改善の実施順・詳細タスクは[専用タスクファイル](WowsExtractor-torpedoes-client-test/docs/FPS_TASKS.ja.md)へ集約。まず不要な砲弾道計算の撤去、次に自艦から半径マップサイズ1/3より外の魚雷2Hz化を設計する。位置分類用5Hz readと遠距離詳細2Hzを区別する。現時点では未実装。
+
 - 0.3.31-calibration-spatial-index（source only・実機未確認）：較正duplicate候補をbounded空間indexで絞る。B44の4,458組で旧実装714,861比較→40,168比較（94.38%減）、743 state全て新旧snapshot/reservoir/RNG一致。記録との係数差は再生runtimeの浮動小数点演算差で説明でき、逐次sum・sqrt相当の残差計算では全743 snapshot一致。独立調査完了、最適化による数値差は未検出。FPS改善は未確認、取得・schema・周期は不変、mod退避継続。
 - B44（2026-11-04）：profiler ON、7:30退出、minFPS40～50・目立つカクつきなし。最大63魚雷/11owner、全9,671行world/map保持。最後の窓は魚雷平均61.6本でtorpedoes2.056ms、submit1.894ms、cycle9.319ms。魚雷0本の間にもships0.662→約1.96msへ増えたため、較正sample蓄積コストを既存recordreplayで調査中。停止・13fileshash照合退避済み、追加実機はまだ依頼しない。[B44区間計測](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_B44_TORPEDO_PROFILE.ja.md)。
 - B43 offline補強：ownerId→同state vehicleIdは93,297行で一意候補一致・2,116行未一致、playerId一致0。namespace契約へ昇格しない。216魚雷/22 owner fixtureで全行・順序維持、collection1回・owner各1回、次sample再取得を検証（全pytest424成功・1skip、checker成功）。owner table化は全payload約8.69%削減試算だがschema変更かつFPS効果不明のため採用せず。残負荷の原因特定にはprofiler有効の別目的計測が必要。
@@ -58,7 +60,7 @@
 
 - [ ] 汎用ダメージ集計・砲弾弾道計算を削減候補として、イベント購読・ID対応・consumer・テストの依存を調査する。潜水艦の攻撃／回避／潜航判断に不要なら収集経路と出力を整理する。現時点では未撤去。
 - [ ] 詳細診断を実用収集から分離し、必要な自艦深度・Battery・ping・装填が汎用診断一式のONを必要としない構成を検討する。
-- [ ] 距離別魚雷cadenceを設計する。案：近距離5Hz／遠距離2Hz。ただし距離閾値は未決定、自艦魚雷・接近魚雷・距離不明の扱いも設計対象。自艦魚雷の確定識別ができない場合に推測で分類しない。
+- [ ] 距離別魚雷cadenceを設計する。ユーザー指定：自艦から半径マップサイズ1/3より外は2Hz、内側5Hz案。マップサイズの一辺解釈・長方形・距離不明等の詳細は[FPS専用タスク](WowsExtractor-torpedoes-client-test/docs/FPS_TASKS.ja.md#fps-torpedoes)で扱う。自艦魚雷の確定識別ができない場合に推測で分類しない。
 - [ ] 全魚雷列挙・分類用位置readの費用と、owner取得・motion・map変換・serialize費用を分け、2Hz化で何が減るかoffline確認する。初観測・領域境界・出現／消失・欠測・観戦・自艦位置不明を検証する。
 - [ ] 群別sampleTs／周期／状態を出力契約へ追加する場合の互換性を設計する。非dueを0本・消失と扱わず、保持する場合は過去sampleとして分離する。既存のlive位置frame間cache禁止を無断で変更しない。
 
