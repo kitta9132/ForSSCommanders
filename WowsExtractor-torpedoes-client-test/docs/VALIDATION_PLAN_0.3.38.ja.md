@@ -31,4 +31,6 @@
 
 ## 現在の準備状態
 
-全555 offline tests／9 module checker成功。ゲーム停止を確認し、11 source fileのinstaller用SHA256を再生成（ZIPなし）、build13357625へのread-only dry-run成功。**本書作成時点では実導入・設定書込み・recorder起動・実機試験は未実施。** UACや実機操作が必要になった段階で依頼する。
+全555 offline tests／9 module checker成功。ゲーム停止を確認し、11 source fileのinstaller用SHA256を再生成（ZIPなし）、build13357625へのread-only dry-run成功。
+
+準備更新：既存installer経由で導入後、Python9＋config.exampleの10ファイルをソースとSHA256一致確認。既存loaderは維持、ATMロード対象なし。新規config.iniに上記試験設定を書き込み、全field recorderをprefix `without-atm-b`で起動（最大3600秒、番号自動採番）。ゲーム停止は設定書込み前にも確認。**実機操作・実機結果は未実施。** recorder期限後に開始する場合はAIが再準備する。

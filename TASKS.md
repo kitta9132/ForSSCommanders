@@ -1,6 +1,6 @@
 # 開発タスク
 
-次の実機確認は[0.3.38限定試験計画](WowsExtractor-torpedoes-client-test/docs/VALIDATION_PLAN_0.3.38.ja.md)。初回paramsとheavy OFF独立4群・通常区間FPSを1戦へ集約。555 offline tests成功、ゲーム停止／build実起動履歴／installer dry-runを確認済み。実導入・試験はまだ行っていない。
+次の実機確認は[0.3.38限定試験計画](WowsExtractor-torpedoes-client-test/docs/VALIDATION_PLAN_0.3.38.ja.md)。初回paramsとheavy OFF独立4群・通常区間FPSを1戦へ集約。555 offline tests成功、build13357625へinstaller導入・10 source hash一致・専用試験設定書込み・全field recorder起動済み。実機操作／結果は未実施。試験後は停止確認してcollector退避する。
 
 0.3.38親最終検証：全555 passed（私有replay含む）、Python2 grammar9 module／collector checker成功。profilerの全登録phase予算テストを11phaseへ更新。ゲーム未導入・実機FPS未確認。
 
