@@ -2,6 +2,7 @@
 
 ## 緊急優先：通常プレイのFPS低下
 
+- B43（2026-11-04）：指定2対2でなく11対12・シャトルーノー・自艦未発射、minFPS30以上と報告。active対応roster23、別battleの旧meta24は除外。魚雷同時最大216本/owner22、複合候補350（味方213/敵137）、全95,413行world位置・owner object取得、map95,349/unknown64。profilerOFFで取得/計算/write費用は未計測、通常PvP上限ともmod原因とも断定不可。停止・13fileshash照合退避済み、同条件再試験をすぐ求めず大量記録とsourceで残負荷を調査。[B43大量魚雷](WowsExtractor-torpedoes-client-test/docs/VALIDATION_B43_OTHER_OWNER_LOAD.ja.md)。
 - B42静的照合終了：GUIの魚雷depthはNumber sync=false宣言のみ、公開API意味定義なし。検索した範囲でUI用途根拠なし。locator/search APIのenum契約もint宣言のみなのでGUI状態名候補を確定値へ昇格しない。深度意味・終了/cooldown等の未確認は明示して保留し、同条件再試験しない。次の未検証領域は敵／味方魚雷の公開owner取得と生座標（自艦以外の観測）。
 - B42追加確認：8:30の発射時はHUD深度30mとユーザー確認済み。魚雷depth候補は43行とも0.14で、浮上B40と同値。自艦発射深度の指標とは解釈せず、実魚雷深度／別用途の区別・単位は未確定。同じ30m発射の再試験は不要。
 - B42（2026-11-04）：0.3.30・1対1、8:30発射／8:00深度0m／4:28装置作動／効果終了前退出、minFPS60以上・カクつきなし。depth43行raw0.14/exactUiId、発射時HUD深度は未報告。locatorと消耗品state6→0→3、workTimeLeft60→27.879を取得。作動162sampleでendTime-ts=workTimeLeftだがendTimeは約1秒変動し不変deadline外挿不可。終了/cooldown・HUD残秒は未確認、330秒待機を直ちに再要求しない。停止・13fileshash照合退避済み。[B42記録](WowsExtractor-torpedoes-client-test/docs/VALIDATION_B42_DEPTH_LOCATOR.ja.md)。
