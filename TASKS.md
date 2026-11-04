@@ -1,5 +1,7 @@
 # 開発タスク
 
+B46詳細解析完了：depth／WaveHit／gun全1,333 available、Battery272 available／1,061非due。depth raw30.0到達、gun参照探索0、WaveHit対象／TTLは未知を維持。初回pinger選択で選択魚雷TTXは対象外、魚雷variant表示候補75／9は取得、ammoParamsは空。[B46詳細](WowsExtractor-torpedoes-client-test/docs/VALIDATION_B46_0.3.38.ja.md)。下記の詳細解析中表記は履歴。初回だけで必要選択性能が必ず揃う保証は未達とし、周期再取得は復活させない。追加同条件再戦は不要。
+
 B46実機終了：0.3.38／heavy OFF／独立4群ON、ユーザーminFPS約50以上・カクつきなし（動画なし）。1,335 records回収、HP平均2Hz・比較／damage平均1Hz・非due省略、独立profiler phaseを確認。通常参考48窓cycle平均3.763ms／最大7.359ms。魚雷最大6・low群0で遠距離／大量魚雷は未検証。停止確認後13fileshash照合退避済み。[B46結果](WowsExtractor-torpedoes-client-test/docs/VALIDATION_B46_0.3.38.ja.md)。独立probe／初回性能の詳細解析は継続中。
 
 次の実機確認は[0.3.38限定試験計画](WowsExtractor-torpedoes-client-test/docs/VALIDATION_PLAN_0.3.38.ja.md)。初回paramsとheavy OFF独立4群・通常区間FPSを1戦へ集約。555 offline tests成功、build13357625へinstaller導入・10 source hash一致・専用試験設定書込み・全field recorder起動済み。実機操作／結果は未実施。試験後は停止確認してcollector退避する。

@@ -1,5 +1,7 @@
 # 既知の問題と実用化の到達点
 
+B46詳細確定：独立4群の取得経路は今回の条件で実機確認済み。ただし初回pinger選択のため選択魚雷TTXは対象外、variant表示候補75／9・ammoParams空。必要性能が初回だけで必ず揃うとは保証しない。[装填・性能タスク](../../TASKS.md#task-armament)／[B46](VALIDATION_B46_0.3.38.ja.md)。以下の詳細解析中表記は履歴。
+
 [B46実機](VALIDATION_B46_0.3.38.ja.md)：0.3.38・heavy OFF・独立4群ONでminFPS約50以上／カクつきなし（ユーザー報告）。HP／比較／damage周期と非due省略・独立phase計上を確認した。最大6魚雷・low群0なので遠距離と大量魚雷のFPS課題は未解決。停止・13fileshash照合退避済み。初回性能と各独立rawの詳細解析は継続中。
 
 0.3.38：[FPS C](FPS_TASKS.ja.md#fps-other)の装填raw独立取得を実装。gun／submarine独立群は既定OFF、意味未確定を維持し、実機FPSは未確認。0.3.37で未登録だった独立submarine計測phaseを修正した。mod退避継続。

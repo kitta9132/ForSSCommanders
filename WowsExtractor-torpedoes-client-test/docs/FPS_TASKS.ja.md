@@ -271,6 +271,8 @@ depth／Battery／WaveHitについては、合同probeの内部で読むcomponen
 <a id="fps-validation"></a>
 ## D：完了判定・検証
 
+B46詳細解析完了：depth／WaveHit／gun全1,333 available、Battery272 available／1,061 notSampled。初回TTXはpinger選択により選択魚雷対象外、魚雷variant表示候補75／9取得・ammoParams空。初回のみの可用性制約を実機根拠付きで残し、周期再取得を復活させない。
+
 B46：heavy OFFの独立4群構成でminFPS約50以上・カクつきなしと報告。HP平均2Hz／比較・damage1Hzと非due省略を実機記録で確認、独立phase計上。通常参考48窓cycle平均3.763ms／最大7.359ms。魚雷は最大6本でlow0のため、遠距離2Hzと多数本数のFPS効果は未確認。[B46](VALIDATION_B46_0.3.38.ja.md)。collectorは停止確認後13fileshash照合退避済み。
 
 - [ ] 変更ごとに全pytest、Python3.11 checker、Python2 grammar、diff・公開schema整合を確認し、版を更新して親がcommitする。

@@ -54,4 +54,15 @@ performance availableは53個の異なる集計窓（その他stateはnotSampled
 
 ゲーム停止確認後、Python9＋設定例の10 source hash一致を確認。config／meta／stateを含むcollector13ファイルをhash照合してPnFMods外へ退避し、ゲームload pathから除去した。記録・ゲームログ・個人設定はprivate保全のみでコミットしない。
 
-独立各probe・初回性能の詳細は別途集計結果を追記する。現時点で実用情報全項目やFPS課題を解決済みとは扱わない。
+## 独立raw・初回性能の詳細（親照合済み）
+
+- depth／WaveHit／gunは全1,333 active stateでavailableかつcore sampled。自艦collectionはsingleton complete、WaveHitはcompleteでpartial/truncatedなし。Batteryは272 available／1,061 notSampled。Battery非dueのsampling.sourceはscheduling、sampleTs=null、dueはcomparison。
+- 自艦depth rawは0→30.0。正になった最初のts916.274550090、30.0到達ts931.561282667、終了まで30.0保持。これは潜航方向のraw増加であり「上昇」「ping命中」を意味しない。UIcontextの単位hint・depthIndexラベルを物理状態保証へ拡張しない。録画／残時間換算なしにユーザーの07:00と厳密同期したとは扱わない。
+- Battery raw255→214.714。dueのbatteryState raw0が231／raw3が41、currentRate raw0が231／raw-1が41。rateから残時間や消費単位を新たに確定しない。
+- WaveHitは空1,239／1行94、非空区間ts899.001766096～917.915589190。targetIDは同一整数候補1件、hitCount=1、weaponType=6、maxLifeTime=25.0、alertTime=8.3、lifeTimeは24.83～5.94。0到達は未観測で、行消滅をTTL失効と同一視しない。対象namespace・区画・TTL契約は未知を維持。
+- gunは毎sample gun7／reloadBar2／gunBarrel6行、getEntity.status=notSampled・getterStatus=unsupported・attempted=0・references=[]。state／progressの変化は取得できたが、行数やprogressから装填残数・物理管対応を推定出力しない。
+- meta.torpedoInitialParamsはpolicy=oncePerBattle／status=sampled／sampleTs688.827161893。全stateのbattleIdがmetaと一致。ttx.selectionはnotApplicable／descriptor=pinger。初回に魚雷以外を選択していると、選択魚雷variantを作らない経路を実機確認。後の発射で更新する契約ではない。
+- ttx.variants.torpedoはavailable、speed.raw75.0（TTX UIのknots hint）／maxDist.raw9.0（TTX UIのkm hint）、両delta.raw0。他variantはnone、ttxStatus=partial。displaySemanticsはstaticTTXDisplayCandidate／liveAdjusted=false。初回表示候補であり、無補正baseや後の選択魚雷のライブ性能を証明しない。
+- ammunitionはavailable=true、selectedAmmoStatus／ammoParamsStatus=availableだがammoParams={}。ID観測と空辞書を残すだけで、有用な魚雷弾薬paramsが揃った意味ではない。初回だけで必要な選択魚雷性能が必ず揃うという実用要件は未達。対象外も固定する承認済み方針を維持し、周期TTX再取得を復活させない。
+
+独立4群の新経路は今回の条件で実機可用性確認済み。初回選択性能・遠距離／多数魚雷負荷には制約が残り、実用情報全項目やFPS課題を解決済みとは扱わない。同じ成功操作の再試験は要求しない。
