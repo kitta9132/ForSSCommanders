@@ -1,17 +1,33 @@
 # FPS改善専用タスク：潜水艦戦闘補助に必要な負荷へ絞る
 
+<a id="fps-latest-summary"></a>
+## 最新状況サマリー（0.3.38・B46後）
+
+- 最新ソースは **`0.3.38-independent-gun-reload`**。0.3.38実装版で全555 tests＋9 module checker成功。
+- B46実機限定試験（heavy OFF・独立4群ON）：1,335 records（active 1,333）。ユーザー報告 minFPS 約50以上・カクつきなし（録画なし）。HP平均約2 Hz、比較／damage平均約1 Hz・非due省略を実機記録で確認。独立 profiler phase（gun／submarine含む）を計上。通常参考48窓の cycle 平均3.763 ms／最大7.359 ms。
+- 独立4群（depth／WaveHit／Battery／gun）の新経路は今回の条件で実機可用性確認済み。depth／WaveHit／gun は全1,333 active state で available、Battery は272 available／1,061 notSampled。
+- 今回の魚雷は同時最大6本・high 6／low 0だったため、**遠距離2 Hzの実機動作・多数魚雷FPS・因果的改善率は未検証**。
+- A（魚雷距離5秒再分類＋5 Hz／2 Hz分岐）は offline 実装完了。216魚雷／22 owner fixture および B43／B44 replay で成功済み。実機 near／far 両側試験・最終FPS判定は未完。
+- B（砲弾道計算）は完全撤去済み。
+- C（damage snapshot 1 Hz化・自艦 depth／Battery／WaveHit 独立化・gun reload raw 独立化）は実装・offline検証完了。独立4群はB46で実機可用性確認済み、C個別の因果的FPS効果は未確認。
+- E（情報群の低頻度化）：①HP 2 Hz、②avatar比較1 Hz、⑦Battery 1 Hz、⑨damage 1 Hz、⑧初回TTXのみを完了。③遠距離艦、④⑤消耗品／search、⑥module故障修理、⑩較正診断／coverage 1 Hz は未実装／設計事項で保留。
+- 初回 pinger 選択はユーザー見解で仕様上おそらく回避不可とみなし、事前魚雷選択での回避や追加再試験は行わない。TTX 値は合っていたため現行の初回 variant 表示候補を実用受入済み。スキル発動時の実戦値／動的補正は未確認だが、追加取得・再試験は行わず受入済みとする。`selectedTTXnotApplicable` や `ammoParams={}` を阻害課題として再オープンせず、source／raw／`liveAdjusted=false` という出典契約を維持する。
+- startup FPS 追跡は中止維持。同条件再試験の追加要求はしない。
+
+以下の節は、上記サマリーの根拠・詳細・旧版履歴である。個別の実装・試験・未確認事項は各節を参照。
+
 <a id="fps-slow-groups"></a>
 ## E：情報群の低頻度化（最新指定）
 
-0.3.35実装：①②は共通HP・生存値群2Hz、avatar照合・集計1Hzへ分割。位置・visibilityと必要IDは5Hz維持。他の1Hz候補はこの版へ混ぜない。HP非dueのgetter0、比較非dueのcount省略、death／0HP sentinel／partial／clock resetをoffline確認。実機性能は未確認。
+0.3.35時点の記録：①②は共通HP・生存値群2Hz、avatar照合・集計1Hzへ分割。位置・visibilityと必要IDは5Hz維持。他の1Hz候補はこの版へ混ぜない。HP非dueのgetter0、比較非dueのcount省略、death／0HP sentinel／partial／clock resetをoffline確認。当時は実機未確認で、周期・非due省略は後のB46で確認済み（因果的FPS改善率は未確認）。
 
 親の最終検証はPython3.11全505 passed（私有replay含む）、9 module checker成功。付属viewerの過去HP保持・欠測時破棄・終了／ID切替とrecorderの非due状態保存も回帰対象。
 
 親の合成fixture比較（Python3.11、24 avatar／20 API艦、300 tick×3反復中央値、snapshot＋compact JSON encode）は0.3.34の1.759ms→0.3.35の1.494ms。HP component read 7,200→2,880（60%減）、比較sample 300→60、avatar collection getterは300→300で維持。総byteは13,313,974→12,227,790（約8.16%減）。test_health_sampling_cadenceのcounted fake componentsと旧Main固定版からのメソッド差替えを使用したホスト上の限定比較であり、ゲームAPI内部費用・FPS・実機payloadの測定ではない。
 
-次の作業順（追加キュー）：①②の検証・統合 → TASKSの△領域で有用なコード確認と根拠文書化（既知調査の繰り返しはしない） → Cの用途外処理削減・実用情報の独立化へ進む。
+次の作業順（追加キュー、0.3.35時点の履歴）：①②の検証・統合 → TASKSの△領域で有用なコード確認と根拠文書化（既知調査の繰り返しはしない） → Cの用途外処理削減・実用情報の独立化へ進む。現在はCの実装・offline検証まで完了している。
 
-△領域の読取りは完了し、[装填・ping・初回性能のコード境界](CODE_AUDIT_PARTIAL_ITEMS.ja.md)へ記録した。未知を閉じる新しい実機根拠はなく、△は維持。HP周期分離を統合したらCへ進む。
+△領域の読取りは完了し、[装填・ping・初回性能のコード境界](CODE_AUDIT_PARTIAL_ITEMS.ja.md)へ記録した。未知を閉じる新しい実機根拠はなく、△は維持。HP周期分離を統合したらCへ進む（現在はCまで完了）。
 
 [10項目の依存・取り逃し調査](RESEARCH_SLOW_GROUPS.ja.md)を参照。①HP・生存値2Hz、②③④⑤⑥⑦⑨⑩は1Hzの適性を調査、⑧の性能・弾薬paramsは初回取得のみへ変更する。
 
@@ -21,7 +37,7 @@
 - [ ] ③の全位置1Hzかworld/yawのみ1Hzか、距離閾値・重要対象例外を決定して実装。
 - [ ] ④⑤は短期遷移取り逃し・作動検知遅延を明記して1Hz群を設計。
 - [ ] ⑥は1Hz化可能でも故障・修理の検出保証は未確認とする。
-- [ ] ⑦をdepth/WaveHitから分離、⑨はイベント全受付・終了時最新集計を維持して1Hz化。
+- [x] ⑦Batteryをdepth／WaveHitから分離、⑨damageはイベント全受付・終了時最新集計を維持して1Hz化（0.3.36・0.3.37）。
 - [ ] ⑩はlive model更新を維持し、診断／coverageだけ1Hz化。
 - [x] ⑧の初回のみ取得・定期経路撤去を0.3.34で実装。全Python3.11回帰491 passed（私有replay含む）、9 module checker成功。初回失敗時はunknownを固定し周期retryしない制約を明記。未導入・FPS未確認。
 
@@ -48,9 +64,9 @@ byte数は元行の観測値をsample対象だけ残し、新sampling metadata�
 
 親の事前record試算（実装測定ではない）：B43は95,413行中9,134行（9.57%）、B44は9,671行中1,702行（17.60%）の詳細処理を省略できる計算。現在の較正coefficientsとself.position、5秒再分類・初観測high・平均2Hzを用いた。新metadataのbyte増分は含まないため、FPS・payload削減効果とは扱わない。
 
-0.3.32更新：Bの砲弾道撤去を実装。tracker・専用イベント・計算・出力を削除。魚雷距離別cadence（A）は引き続き未実装。
+0.3.32更新（履歴）：Bの砲弾道撤去を実装。tracker・専用イベント・計算・出力を削除。魚雷距離別cadence（A）はこの時点で未実装（0.3.33で実装）。
 
-更新：2026-11-04。現行ソース0.3.32。**Bの砲弾道撤去は実装済み、Aの周期変更は設計段階。** 汎用WoWSテレメトリ収集器ではなく、潜水艦の攻撃・回避・潜航判断を優先する。
+更新：2026-11-05。現行ソース **`0.3.38-independent-gun-reload`**。Bの砲弾道撤去は実装済み、Aの周期変更はoffline 実装・検証済み（216魚雷fixture・B43／B44 replay）。実機 near／far 両側試験・最終FPS判定は未完。汎用WoWSテレメトリ収集器ではなく、潜水艦の攻撃・回避・潜航判断を優先する。
 
 関連：[既知の問題](KNOWN_ISSUES.ja.md)、[用途の絞り込み](../../TASKS.md#task-scope)、[性能実績](../../TASKS.md#task-performance)、[B44計測](PERFORMANCE_B44_TORPEDO_PROFILE.ja.md)。FPS改善作業の詳細・チェック欄は本書へ集約する。
 
@@ -75,7 +91,7 @@ byte数は元行の観測値をsample対象だけ残し、新sampling metadata�
 
 ### 最新の指定：5秒ごとの枠振り分け
 
-ユーザー指定（2026-11-04）：距離による2Hz／5Hz判定は**5秒ごと**に行い、IDを収集枠へ振り分ける。マップサイズは対角線でなく一辺、長方形は`L=min(width,height)`、半径`R=L/3`で確定。以下の毎tick距離判定案は旧案であり、本節を優先する。実装は未着手。
+ユーザー指定（2026-11-04）：距離による2Hz／5Hz判定は**5秒ごと**に行い、IDを収集枠へ振り分ける。マップサイズは対角線でなく一辺、長方形は`L=min(width,height)`、半径`R=L/3`で確定。以下の毎tick距離判定案は旧案であり、本節を優先する。offline 実装は0.3.33で完了し、216魚雷／22 owner fixture および B43／B44 replay で検証済み。実機 near／far 両側試験・最終 FPS 判定は未完。
 
 | 処理 | 周期 | 提案する動作 |
 |---|---|---|
@@ -239,6 +255,15 @@ AP通常経路は1 stateあたり照準getter最大2回、条件次第でimpact 
 <a id="fps-other"></a>
 ## C：その他の削減候補
 
+### 現況（0.3.38・B46後）
+
+- damage snapshot 生成・出力を 1 Hz 化（0.3.36）、自艦 depth／Battery／WaveHit 独立取得（0.3.37）、gun reload raw 独立取得（0.3.38）を実装・offline 検証済み。
+- 独立4群（depth／Battery／WaveHit／gun）は B46 で実機可用性確認済み。専用設定は既定OFF・collection必須。独立群OFF時は追加 phase の clock read なし。
+- B46：depth／WaveHit／gun は全1,333 active state で available、Battery は272 available／1,061 notSampled。独立 gun／submarine profiler phase を計上。
+- 因果的 FPS 改善効果・遠距離2 Hz・多数魚雷時の FPS は未確認。
+
+### 実装履歴（当時の記述）
+
 0.3.38親最終検証：全555 passed（私有replay含む）、9 module checker成功。profiler11phaseを人工一巡するclock予算30 read（初期probe8含む）。専用群OFFでは追加phaseのclock readなし。
 
 0.3.38統合：gun_reload_sampling_enabled既定OFF・collection必須。ONはcore周期の直接gun raw／progressのみでmodifiergetEntity探索0。heavy同tickは1probeを共用し参照診断を省く。OFFは従来heavy経路を維持。親がhelper内barrelsModifier二重readを1回へ削減し予算assertも更新。gun／submarine計測phaseをprofiler本体へ登録、実profilerのcount増加も検証する（0.3.37のsubmarine phase未登録を修正）。実機未確認・退避継続。
@@ -261,8 +286,10 @@ depth／Battery／WaveHitについては、合同probeの内部で読むcomponen
 
 独立化の初期方針：専用opt-inは既定OFF・collection必須とし、depthとWaveHitはcore周期、Batteryは共通1Hz枠を使う。全てOFFなら従来どおり詳細診断だけが読み、明示ON時は詳細診断一式を要求しない。同時dueなら1つのsample-local facade／合同呼出しへまとめ、同名collection getterを増やさない。gun reloadの独立化は別途、既存modifier getEntity探索を高頻度で繰り返さない設計が必要（[△棚卸し](CODE_AUDIT_PARTIAL_ITEMS.ja.md)）。
 
+### 現況チェック・検討結果
+
 - [x] damageの依存を分け、イベント・ID対応を維持して不要な非due snapshot生成／出力を省略する（0.3.36）。イベント自体の撤去は行わない。
-- [x] 自艦depth／Battery／WaveHitを0.3.37、装填rawを0.3.38で独立sampleへ分離。全て既定OFF、実機可用性・FPSは未確認。
+- [x] 自艦depth／Battery／WaveHitを0.3.37、装填rawを0.3.38で独立sampleへ分離。全て既定OFF。独立4群の実機可用性はB46で確認済み、FPS効果は未確認。
 - [x] HP・avatar／ships重複payloadを検討し、今回は削除しない。B36/B39の観測範囲差と未確定namespaceがあり、API HP・avatar raw・正規化値は取得元と意味が異なる。省略で観測根拠を失うschema変更より、0.3.35の非due省略を優先する。再検討はconsumer側が出典・unknown・sampleTsを維持できる具体的な圧縮契約ができた時に限る。
 - [x] 0.3.31較正最適化の小reservoir固定費をホスト合成比較で評価。下記の限定条件では0～8件でindex固定費が不利、16件以上で有利。実機FPS改善とは扱わず、切替の追加実装は保留。
 
@@ -275,7 +302,7 @@ B46詳細解析完了：depth／WaveHit／gun全1,333 available、Battery272 ava
 
 B46：heavy OFFの独立4群構成でminFPS約50以上・カクつきなしと報告。HP平均2Hz／比較・damage1Hzと非due省略を実機記録で確認、独立phase計上。通常参考48窓cycle平均3.763ms／最大7.359ms。魚雷は最大6本でlow0のため、遠距離2Hzと多数本数のFPS効果は未確認。[B46](VALIDATION_B46_0.3.38.ja.md)。collectorは停止確認後13fileshash照合退避済み。
 
-- [ ] 変更ごとに全pytest、Python3.11 checker、Python2 grammar、diff・公開schema整合を確認し、版を更新して親がcommitする。
-- [ ] 既存B43規模216魚雷／22owner fixtureで、近距離保持・遠距離cadence・総API予算を確認する。byte削減と処理時間・FPSを分けて報告する。
+- [x] 変更ごとに全pytest、Python3.11 checker、Python2 grammar、diff・公開schema整合を確認し、版を更新して親がcommitする（0.3.32～0.3.38で実施）。
+- [x] 既存B43規模216魚雷／22owner fixtureで、近距離保持・遠距離cadence・総API予算を確認する。byte削減と処理時間・FPSを分けて報告する（offline 完了）。
 - [ ] 実機が必要になった段階でのみ限定試験を準備し、near/farの実sample間隔・phase・取得範囲と体感をまとめて確認する。悪化時は中止・退避する。
 - [ ] 実用化の最終判定はプレイへの支障と取得の誤りで行う。平均2Hz化による遠距離軌跡の粗さ・最大sample遅延等を明記する。

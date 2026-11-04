@@ -1,20 +1,20 @@
 # ForSSCommanders
 
-最新実機状況：[B46・0.3.38](WowsExtractor-torpedoes-client-test/docs/VALIDATION_B46_0.3.38.ja.md)は限定条件でminFPS約50以上・カクつきなし。HP／比較／damage周期と独立計測phaseを確認、遠距離・大量魚雷のFPSは未検証。試験後collector退避済み。以下の未実機表記は各版公開時の履歴。
+最新実機状況：[B46・0.3.38](WowsExtractor-torpedoes-client-test/docs/VALIDATION_B46_0.3.38.ja.md)は限定条件（heavy OFF・独立4群ON）で minFPS 約50以上・カクつきなし（ユーザー報告、録画なし）。1,335 records（active 1,333）、HP平均約2 Hz、比較／damage平均約1 Hz・非due省略、独立 profiler phase を確認。depth／WaveHit／gun は全1,333 available、Battery 272 available／1,061 notSampled。遠距離2 Hz・多数魚雷・因果的 FPS 改善率は未検証。試験後 collector 退避済み。以下の未実機表記は各版公開時の履歴。
 
-最新ソース：**0.3.38-independent-gun-reload**（未導入・実機未確認）。装填raw／progressを重い診断から独立取得可能にした（既定OFF・collection必須）。modifier参照探索なし、同tick二重probeなし。以下は旧版履歴。
+最新ソース：**0.3.38-independent-gun-reload**（B46で実機可用性確認済み・通常導入は保留・B46試験後退避済み）。0.3.38実装版で全555 tests＋9 module checker成功。装填raw／progressを重い診断から独立取得可能にした（既定OFF・collection必須）。modifier参照探索なし、同tick二重probeなし。
 
-最新ソース：**0.3.37-independent-submarine**（未導入・実機未確認）。自艦深度／WaveHitをcore周期、Batteryを1Hzで詳細診断から独立取得可能にした。専用設定は全て既定OFF・collection必須。以下は旧版履歴。
+## 最近の版別到達点（履歴）
 
-最新ソース：**0.3.36-damage-cadence**（未導入・実機未確認）。damageイベント受付は維持し、snapshot生成・出力を1Hz化。終了時は最新台帳を出力。潜水艦probeの独立化は選択read基盤のみでruntime未統合。以下は旧版履歴。
+- 0.3.37 `independent-submarine`：自艦深度／Battery／WaveHit を診断から独立取得（既定OFF・collection必須）。
+- 0.3.36 `damage-cadence`：damage イベント受付を維持し、snapshot 生成・出力を1 Hz化。
+- 0.3.35 `health-cadence`：共通HP群を平均2 Hz、avatar 照合／集計を1 Hz へ分離。
+- 0.3.34 `initial-torpedo-parameters`：魚雷性能・弾薬 params を戦闘初回のみ meta へ移動。
+- 0.3.33 `torpedo-sampling-groups`：魚雷を5秒ごとに距離分類、近距離5 Hz／遠距離平均2 Hz。
+- 0.3.32：砲弾道計算・専用イベント・`ballistics` 出力を全撤去。
+- 0.3.31 `calibration-spatial-index`：較正の距離比較候補を空間 index で絞り込み。
 
-最新ソース：**0.3.35-health-cadence**（未導入・実機未確認）。共通HP群平均2Hz、avatar照合・集計1Hz、位置・visibility・必要IDは5Hz維持。非dueと取得不能・HP0を分けて出力。以下は旧版履歴。
-
-最新ソース：**0.3.34-initial-torpedo-parameters**（未導入・実機未確認）。魚雷性能・弾薬paramsは戦闘初回のみ、meta.torpedoInitialParamsへ移動。動的補正はマップ側へ。HP2Hz／他情報1Hz化は[依存・取り逃し調査](WowsExtractor-torpedoes-client-test/docs/RESEARCH_SLOW_GROUPS.ja.md)のみ完了し、周期はまだ変更していない。以下の旧版説明は履歴。
-
-現行ソース：**0.3.33-torpedo-sampling-groups**（未導入・実機未確認）。魚雷を5秒ごとに距離分類、近距離5Hz／遠距離平均2Hz、新規・不明は暫定5Hz。魚雷配列は今回sampleであり、全体membershipと非due状態を区別する。砲弾道計算は撤去済み。以下の旧版説明は履歴。
-
-現行ソース：**0.3.31-calibration-spatial-index**（未導入・実機未確認）。較正の距離比較候補を絞り、B44再生で旧実装との同値を確認。FPS改善は未確認、mod退避継続。以下の0.3.30説明は旧版の機能履歴です。[検証と制約](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_B44_TORPEDO_PROFILE.ja.md)。
+詳細・制約・未確認事項は [TASKS.md](TASKS.md)、[FPS専用タスク](WowsExtractor-torpedoes-client-test/docs/FPS_TASKS.ja.md)、[既知の問題](WowsExtractor-torpedoes-client-test/docs/KNOWN_ISSUES.ja.md) を参照。
 
 - [開発タスク・残課題](TASKS.md)（仮マップはパラメーター確認用。本番マップはmod完成後に別途開発）
 - [開発方針](DEVELOPMENT.md)
@@ -35,9 +35,11 @@ World of Warshipsの潜水艦向け外部2Dマップと、公開ModsAPIを使う
 
 ### 最優先：通常プレイ時のFPS報告
 
-0.3.14導入後「自艦が沈むまでminFPS 25、撃沈後は110まで回復」と報告されています（外部記録ツール未使用）。因果は未確定です。通常プレイでは収集modのロード対象外への退避を推奨します。現行0.3.30-atm-derived-stateは**source only・未導入／未実機**で、collection/diagnostics/profiler/position fallbackとdepth/state samplerは既定OFFです。0.3.30はB41の供給元調査を受け、`torpedo_state_provider=advanced_torpedo_marker`を明示した場合だけATM由来の導出stateをdeclared producerとして区別します。既定は`unknown`、`torpedo_state_sampling_enabled`はfalseのままです。`isSpotted`はATM側の推定・第三者判定、`isHoming`も第三者判定で、ゲーム／サーバーの生状態を保証しません。provider出力の厳密なfield schemaは実装側で確認中で、ここでは断定しません。ATMの有無やユーザー指定だけではproducerを実証できません。B37ではavatar map/healthを取得できましたが、strict `avatar.playerId`は全738 stateでunmatchableでした。0.3.27の`avatar.id`は未確定candidateとして別出力し、確定join・既存coverageは変更しません。0.3.28の専用depth samplerはB40で262行のraw `0.14`を実機取得しましたが、単位・意味は未確認でunit=nullです。0.3.29は`isHoming`/`isSpotted`の固定2候補だけを最小1秒で独立sampleするopt-inを追加します。FPS・新featureの実機値・実時間・API内部時間は未確認です。ATMを残してcollectorだけ入れる場合は明示`-WithAtm`（wrapperは`--with-atm`）を使い、ATMは自動ダウンロード・同梱しません。[B41供給元調査](WowsExtractor-torpedoes-client-test/docs/RESEARCH_B41_MOD_DATA_PRODUCER.ja.md)／[B40深度記録](WowsExtractor-torpedoes-client-test/docs/VALIDATION_B40_0.3.28_TORPEDO_DEPTH.ja.md)／[事故記録](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_INCIDENT_0.3.14.ja.md)
+0.3.14導入後「自艦が沈むまでminFPS 25、撃沈後は110まで回復」と報告されています（外部記録ツール未使用）。因果は未確定です。B46（0.3.38・heavy OFF・独立4群ON）ではユーザー報告 minFPS 約50以上・カクつきなしを確認しましたが、今回は魚雷同時最大6本・low群0であり、遠距離2 Hz や多数魚雷時の FPS は未検証です。因果的な改善率・開始直後 FPS 低下も未解明です。
 
-現行ソースは `0.3.30-atm-derived-state`（source only・未導入／未実機）。collection/diagnostics/profiler/位置fallback/depth/state samplerは既定OFFです。state既定は0.2秒（約5Hz、0.1明示で10Hz互換）、全snapshot一体・群別周期なしです。`torpedo_state_provider`の既定は`unknown`で、`advanced_torpedo_marker`の明示時だけATM由来の導出stateをdeclared producerとして区別します。`torpedo_state_sampling_enabled`はfalseのままで、ATMがなくてもcore収集は動きます。depth/state samplerは別々の専用opt-inでdiagnosticsに依存せず、各最小1秒・最大64 entities。同時due時はheavy diagnosticsを含む3 probeで同sample torpedo collection getter／列挙を共有します。state samplerは固定`isHoming`/`isSpotted`のみ読み、GUI/API IDが完全・scalar・同型・全件一意の場合だけ付与します。`isSpotted`は推定・第三者判定、`isHoming`も第三者判定で、sourceのproducerと意味はdeclared producer／unverifiedです。誘導先ID・停止理由を表しません。B40ではdepth候補raw `0.14`を262行取得しましたが、単位・意味は未確認（unit=null）。非due/欠測に過去値は使わず、新featureの実機取得・FPS・実時間・API内部時間は未確認です。[出力仕様](WowsExtractor-torpedoes-client-test/docs/OUTPUT_SPEC.ja.md)と[TASKS.md](TASKS.md)を参照してください。旧0.3.1ではSteam版build 13357625の訓練戦で、魚雷位置・type、
+現行ソースは **`0.3.38-independent-gun-reload`**（通常導入は保留・B46試験後退避済み）。collection/diagnostics/profiler/独立群はすべて既定OFFです。state は core tick 0.2 秒（約5 Hz、0.1 秒明示で10 Hz互換）を基準とし、各情報群の期限・sample metadata に応じて取得を省略・出力します（同一 `state.json` ファイルに出力されるだけで、すべての項目が毎tick揃うわけではありません）。HP 2 Hz・avatar 比較1 Hz・damage 1 Hz・自艦 depth／Battery／WaveHit／gun reload の独立取得は、明示ON・collection必須で利用可能です。意味・単位・実機 FPS 効果には制約が残ります。通常プレイでは引き続き mod 退避を推奨します。
+
+旧0.3.1ではSteam版build 13357625の訓練戦で、魚雷位置・type、
 ATM由来の誘導/被発見状態、移動履歴による座標較正などを試験しています。
 簡易2Dマップのグリッドとゲーム内位置が概ね一致することをテスターが目視確認しました。
 12対12・別地図・失探時の鮮度などは未検証です。完成版ではありません。

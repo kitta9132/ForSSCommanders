@@ -3,29 +3,26 @@
 作成日：2026-11-04（日本時間）
 modバージョン：`0.3.38-independent-gun-reload` / ModsAPI：`API_v1.0`（[B46限定実機確認](docs/VALIDATION_B46_0.3.38.ja.md)・試験後退避済み）
 
-B46はユーザー報告minFPS約50以上・カクつきなし。HP平均2Hz／比較・damage平均1Hzと非due省略、独立profiler phaseを確認した。遠距離2Hz・多数魚雷のFPSと全項目の意味保証は未確認。以下の未実機記述は版公開時の履歴。
+B46は限定条件（heavy OFF・独立4群ON）で、ユーザー報告 minFPS 約50以上・カクつきなし（録画なし）。1,335 records（active 1,333）、HP平均約2 Hz、比較／damage平均約1 Hz・非due省略、独立 profiler phase を確認。depth／WaveHit／gun は全1,333 available、Battery 272 available／1,061 notSampled。遠距離2 Hz・多数魚雷・全項目の意味保証は未確認。以下の未実機記述は版公開時の履歴。
 
-0.3.38：`gun_reload_sampling_enabled=false`を追加。明示ON時はheavy診断なしでcore周期のgun raw／progressを採取し、modifier参照探索は省く。heavy同tickもprobeは1回。装填数・物理管ID・修理timerの意味確定ではない。独立gun／submarineのprofiler phase登録漏れも修正。
+## 最近の版別到達点（履歴）
 
-0.3.37：`self_depth_sampling_enabled`／`battery_sampling_enabled`／`wave_hit_sampling_enabled`を個別に追加（既定false・collection必須）。詳細診断OFFでも自艦深度／WaveHitはcore周期、Batteryは比較共通1Hzで採取できる。群別sampling時刻を確認し、上位probe時刻を非due Batteryの取得時刻に使わない。gun軽量helperは基盤だけで独立runtime未接続。実機未確認。
+- 0.3.38 `independent-gun-reload`：gun reload raw を heavy 診断なしで core 周期から採取（既定OFF・collection必須）。装填数・物理管ID・修理timer の意味確定ではない。B46で独立4群の実機可用性確認。
+- 0.3.37 `independent-submarine`：自艦 depth／Battery／WaveHit を個別opt-inで診断から独立（既定false・collection必須）。WaveHit対象 namespace／TTL・装填数・管ID は未解決。
+- 0.3.36 `damage-cadence`：damage イベント受付を維持し、台帳 snapshot 生成・出力だけを共通1 Hz 枠へ移す。
+- 0.3.35 `health-cadence`：共通HP・生存値の取得を平均2 Hz、avatar 照合／集計を1 Hz へ分離。
+- 0.3.34 `initial-torpedo-parameters`：魚雷性能・弾薬 params を戦闘ごとの初回結果だけ meta へ保存。
+- 0.3.33 `torpedo-sampling-groups`：魚雷を5秒ごとに距離分類し、近距離5 Hz／遠距離平均2 Hz。`torpedoes[]`は今回sampleのみ、membership・sampling状態は `torpedoStatus` で確認。
+- 0.3.32：砲弾道計算と専用イベント・`ballistics` 出力を全撤去。
+- 0.3.31 `calibration-spatial-index`：較正 reservoir の重複判定を空間 index で絞り込み。B44再生の新旧実装は同値、距離比較94.38%減。
 
-0.3.36はdamageイベント受付を維持し、台帳snapshot生成・出力だけを共通1Hz枠へ移す。非dueはdamage省略＋damageSampling、終了時は最新台帳を強制出力。潜水艦probeの個別read選択基盤も追加したが、独立runtime設定はまだ未統合。
-
-0.3.35は共通HP・生存値の取得を平均2Hz、avatar照合／集計を1Hzへ分離。位置・visibility・必要IDは5Hz維持。HP非dueのraw fieldを省略し、群別sample状態・時刻を出す。付属viewerは取得時刻付きの前回HP表示に対応。実機性能は未確認。以下は旧版履歴。
-
-0.3.34は魚雷性能・弾薬paramsの定期取得を撤去し、戦闘ごとの初回結果だけをmeta.torpedoInitialParamsへ保存する。動的補正は外部マップ責務。初回取得不能はunknownのまま固定し、周期retryしない。艦HP2Hz・他情報1Hz化は[依存調査](docs/RESEARCH_SLOW_GROUPS.ja.md)の段階で、まだ周期を変えていない。
-
-0.3.33は魚雷を5秒ごとに距離分類し、近距離5Hz／遠距離平均2Hzでsampleする版。新規・分類不能は暫定5Hz。`torpedoes[]`は今回sampleのみであり、非掲載だけで消失と扱わず`torpedoStatus`の全体membership・sampling状態を参照する必要がある。マップ一辺（長方形は短辺）の1/3を半径とし、同座標単位の較正scaleから算出する推定値。実機未確認。以下は旧版履歴。
-
-0.3.32は砲弾道計算と専用イベント・`ballistics`出力を全撤去。魚雷弾薬性能・装填・damage等は維持する。FPS改善は未確認。以下は旧版の機能履歴。
-
-0.3.31は較正reservoirの重複判定を空間indexで絞り込みます。取得周期・観測行・出力schemaは変更しません。B44再生の新旧実装は同値、距離比較94.38%減。ゲーム内の速度・FPS改善は未確認で、collectorは退避を維持します。[根拠と再生の制約](docs/PERFORMANCE_B44_TORPEDO_PROFILE.ja.md)。以下の0.3.30説明は引き継ぐ機能の履歴です。
+詳細・制約・未確認事項は [TASKS.md](../TASKS.md)、[FPS専用タスク](docs/FPS_TASKS.ja.md)、[既知の問題](docs/KNOWN_ISSUES.ja.md) を参照。
 
 ## 最優先：性能報告と安全設定
 
-0.3.30-atm-derived-state（source only・未実機）は、B41で確認した`mods_DataComponent`の供給元限界を受け、ATMを**実行時の導出state供給元として明示指定**できる版です。`config.ini`の`torpedo_state_provider=advanced_torpedo_marker`を明示した場合だけATM由来の導出値として扱います。未指定・`unknown`の既定は従来どおりproducer unknownで、`torpedo_state_sampling_enabled`も既定falseのままです。`isSpotted`はATM側の推定・第三者判定、`isHoming`も第三者由来の判定であり、ゲーム／サーバーの生boolではありません。provider出力の厳密なfield schemaは実装側の別作業で確認中で、本書では断定しません。ATMの有無やユーザー指定だけではproducerを実証できないため、値はdeclared producer／unverifiedとして扱います。ATMは自動ダウンロード・同梱せず、installerの既定もATM退避のままです。ATMを残してcollectorだけ入れる場合は明示`-WithAtm`（wrapperは`--with-atm`）を使い、試験後に必要なら`restore-atm-13357625.bat`で戻します。新機能の実機取得・FPS・実時間・API内部時間は未確認です。[B41供給元調査](docs/RESEARCH_B41_MOD_DATA_PRODUCER.ja.md)／[導入](docs/INSTALL.ja.md)／[バージョン固定インストーラー](docs/INSTALL_BAT.ja.md)
+0.3.14導入後「自艦が沈むまでminFPS 25、撃沈後110まで回復」と報告されています。因果は未確定です。B46（0.3.38・heavy OFF・独立4群ON）ではユーザー報告 minFPS 約50以上・カクつきなしを確認しましたが、今回は魚雷同時最大6本・low群0であり、遠距離2 Hz や多数魚雷時の FPS は未検証です。因果的な改善率・開始直後 FPS 低下も未解明です。
 
-0.3.14導入後「自艦が沈むまでminFPS 25、撃沈後110まで回復」と報告されています。因果は未確定です。現行0.3.30はsource only・未導入です。collection/diagnostics/profiler/position fallback/depth/state samplerは既定OFF、state既定0.2秒（約5Hz）・0.1明示10Hz互換・全snapshot一体を維持します。B37ではavatar map/healthは取得できた一方、738 active state全てでstrict `avatar.playerId`がunmatchableでした。0.3.27の`avatar.id` candidateは別namespaceのまま維持し、確定join・既存coverageを変更しません。0.3.28のdepth samplerはB40で262行のraw `0.14`を実機取得しましたが、意味・単位は未確認（unit=null）です。0.3.29は`isHoming`/`isSpotted`の固定2候補のみを独立sampleする専用opt-in（最小1秒、最大64 UI entities）を追加します。Python/dataHubでの可用性・producerは未確認／unknown、値の意味はunverifiedです。完全collectionとAPI/UI ID全件のscalar・同型・一意性が確認できる場合だけ`uiState`へ付与します。誘導先ID・停止距離／理由の値ではなく、サーバー状態一般を保証しません。heavy diagnostics/depth/stateの同時dueはtorpedo collection getter／列挙をsample内共有し、非due値・frame間cache・推測joinはありません。新featureの実機取得、FPS・実時間・API内部時間は未確認です。[出力仕様](docs/OUTPUT_SPEC.ja.md)／[B40深度記録](docs/VALIDATION_B40_0.3.28_TORPEDO_DEPTH.ja.md)
+現行ソースは **`0.3.38-independent-gun-reload`**（通常導入は保留・B46試験後退避済み）。collection/diagnostics/profiler/depth/state/gun reload 独立群はすべて既定OFFです。state は core tick 0.2 秒（約5 Hz、0.1 秒明示で10 Hz互換）を基準とし、各情報群の期限・sample metadata に応じて取得を省略・出力します（同一 `state.json` ファイルに出力されるだけで、すべての項目が毎tick揃うわけではありません）。HP 2 Hz・avatar 比較1 Hz・damage 1 Hz・自艦 depth／Battery／WaveHit／gun reload の独立取得は、明示ON・collection必須で利用可能です。意味・単位・実機 FPS 効果には制約が残ります。通常プレイでは引き続き mod 退避を推奨します。
 
 `config.ini` がない場合・読み込みに失敗した場合も収集停止です。明示的に `collection_enabled = true` のときだけ通常収集を開始します。heavy UI/dataHub probeはさらに `diagnostics_enabled = true`、profilerは独立して `profiler_enabled = true` が必要です。魚雷depth/state samplerはそれぞれ専用opt-inでdiagnostics非依存にできますが、collection opt-inが必須です（全option既定OFF）。intervalは既定・最小1秒、invalid値は1秒へ戻します。同時sampleではheavy/depth/stateのtorpedo collection getter／列挙を共有します。state samplerは`isHoming`/`isSpotted`以外の任意data keyを探索しません。収集停止中はprobe/API poll・定期tickを行わず、戦闘開始時のdisabled stateと終了stateだけを書きます。core収集（既定0.2秒）およびarmament/public_dataの負荷は未評価です。
 
@@ -97,7 +94,7 @@ World_of_Warships/
 
 `config.example.ini` は必要なら `config.ini` にコピーします。未作成なら収集停止です。`Main.py` 単体では動きません。
 
-導入に必要なPython sourceは9 filesです（0.3.30でも同じ構成）：`Main.py`, `battle_identity.py`, `damage_tracker.py`, `emit_guard.py`, `ui_health.py`, `torpedo_telemetry.py`, `submarine_telemetry.py`, `map_calibration.py`, `performance_profiler.py`。installerの明示allowlistと`tools/check_collector_offline.py`の必須module listを同期しています。offline確認は対応するPython 3.10–3.12で`python tools/check_collector_offline.py`、回帰は`python -m pytest -q`。manifest/checksumは生成物で、今回更新せず親セッション管理です。
+導入に必要なPython sourceは9 filesです（0.3.38でも同じ構成）：`Main.py`, `battle_identity.py`, `damage_tracker.py`, `emit_guard.py`, `ui_health.py`, `torpedo_telemetry.py`, `submarine_telemetry.py`, `map_calibration.py`, `performance_profiler.py`。installerの明示allowlistと`tools/check_collector_offline.py`の必須module listを同期しています。offline確認は対応するPython 3.10–3.12で`python tools/check_collector_offline.py`、回帰は`python -m pytest -q`。manifest/checksumは生成物で、今回更新せず親セッション管理です。
 
 ## この版でできること
 
