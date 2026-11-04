@@ -22,3 +22,9 @@ state3の162 sample全てで`endTime - state.ts - workTimeLeft`は記録上厳�
 ## 残る確認
 
 作動とraw状態遷移、same-snapshotの時間値整合、ユーザー確認によるHUD30m発射は記録できた。終了・cooldown、HUD残秒、魚雷depthの単位・基準面・意味は未確認のまま残す。手元の記録や既存根拠を先に扱い、約330秒の待機試験や同じ30m発射を直ちに繰り返させない。
+
+## 静的照合の結論
+
+限定GUI抽出にはTorpedo.depthのNumber sync=false宣言だけがあり、用途を示すUI表示参照は見つからなかった。公開Torpedo APIにもdepthの意味定義はない。raw0.14をmへ昇格せず、position.yも別観測のまま保つ。
+
+公式APIの_SearchConsumableInfo.stateと_ConsumableState.currentStateはint宣言のみ。GUI汎用enum0=READY／3=AT_WORK／6=PREPARATIONは今回の遷移と整合するが、APIとの直接配線契約は未確認。出力raw値は変えず、このラベルを付ける場合もGUI候補hintに限定する。以上は静的照合の限界として確定し、同じ30m発射やlocator準備待ちを繰り返さない。
