@@ -1,5 +1,9 @@
 # WowsExtractor 魚雷出力版（WoWSクライアント用mod）
 
+### B41後のstate候補の供給元訂正
+
+`mods_DataComponent`はmodがui APIで追加・更新する領域です。0.3.29の`torpedoStateProbe`はこの領域の外部mod候補readerであって、ゲーム／サーバーの生の誘導・被発見状態を取得するAPIではありません。ATMなしのB41では実体Noneで両flags未取得でした。ATM等の導出値を扱う場合も直接取得値とは分け、producerをfield名だけでATMと確定しません。同試験は再要求しません。詳細：[供給元調査](RESEARCH_B41_MOD_DATA_PRODUCER.ja.md)。
+
 0.3.29のstate候補で128文字を超える非boolean文字列が返った場合、短縮した値をrawとは表示せず、raw=null・reason=stringLimit・rawLengthで取得制限を明示します。正常なbooleanの扱いは変えません。
 
 `0.3.25`は、0.3.24の`diag.playerReads`とindex join契約を維持します。`sampleStatus`（players一覧取得のcomplete/partial/unavailable、direct call時notProvided）、`indexHits`、`vehicleLookups`（試行数、成功数ではない）は引き続きships sample内の個別lookupだけを数え、新しいgame APIや時計読取りは追加しません。

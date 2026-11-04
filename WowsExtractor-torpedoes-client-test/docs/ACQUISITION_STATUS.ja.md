@@ -110,3 +110,6 @@ ATM isSpotted=trueを80フレーム取得、残り294フレームはunknown（fa
 2. 他艦/敵魚雷の取得と所有者対応、画面外・未発見での欠損の確認。
 3. 地図較正と他艦2D座標の検証（外部マップの土台）。
 4. 魚雷兵装・pingタイマー・停止距離等の取得経路調査。
+## B41後の訂正（2026-11-04）
+
+isHoming/isSpottedのmods_DataComponent経路は、外部modが供給する候補データの読取りであり、公開Torpedo APIの生状態ではありません。ATMなしのB41では84候補すべてcomponentNoneで取得未達。公式ui APIとGUI定義でmod専用領域と確認したため、操作変更で同試験を再要求しません。ATM由来値は推定／導出の出所を分ける必要があります。[調査根拠](RESEARCH_B41_MOD_DATA_PRODUCER.ja.md)。

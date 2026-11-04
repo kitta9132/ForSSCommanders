@@ -2,6 +2,7 @@
 
 ## 緊急優先：通常プレイのFPS低下
 
+- B41供給元調査：公式ui APIとGUI定義からmods_DataComponentはmod追加・更新領域と確認。ATM等の値は第三者由来の導出候補であり、公開Torpedo APIの生誘導／被発見boolではない。ATMなしでNoneは現在の根拠と整合し、同じ発射/ping再試験は行わない。外部mod導入は未承認、直接値の代用もしない。範囲判断が必要。[供給元根拠](WowsExtractor-torpedoes-client-test/docs/RESEARCH_B41_MOD_DATA_PRODUCER.ja.md)。
 - B41（2026-11-04）：0.3.29・1対1、08:00発射→07:40 1ping→07:30外れ、07:00二重状態発射→06:40命中との報告。minFPS60・カクつきなし。state samplerの84魚雷候補はexactUiIdだがmods_DataComponent実体Noneで両flags未取得（falseではない）。停止・13fileshash照合退避済み。同じ実機試験は再要求せず、GUI/producer/別API経路を調査する。DSFF実依頼は枠切れにつきLuna xhighへ切替済み。[B41候補未取得](WowsExtractor-torpedoes-client-test/docs/VALIDATION_B41_0.3.29_TORPEDO_STATE.ja.md)。
 - B40（2026-11-04解析）：0.3.28・6対6、8:22全発射完了／7:30退出、minFPS60・カクつきなし。depth probe147 due sampleで262魚雷行を取得、全行raw0.14・exactUiId、unit null。独立取得の実機可用性確認済み、意味・単位・別深度は未確認。cycle平均5.775ms／最大21.938msを記録したがdepth起因とは断定しない。停止・13fileshash照合退避完了。同じ浮上発射の再試験不要。[B40深度候補](WowsExtractor-torpedoes-client-test/docs/VALIDATION_B40_0.3.28_TORPEDO_DEPTH.ja.md)。
 - B39後のnamespace調査完了：GUI Components.xmlではAvatar.idがInteger PK、playerId propertyなし。観戦・combat log・context menuでもこのGUI IDをplayerId名で使う根拠あり。ただしModsAPIとの一般対応契約は見つからず、候補一致をconfirmed joinへ昇格しない。定義にないplayerIdを探すための実機再試験は行わない。現行0.3.27の独立観測＋candidate契約を維持。[namespace調査](WowsExtractor-torpedoes-client-test/docs/RESEARCH_AVATAR_ID_NAMESPACE.ja.md)。
