@@ -37,4 +37,6 @@ direct world位置と同rowのmapPositionRawの組を4,458件再生、各state�
 
 親の独立検証：全pytest 427 passed・1 skipped、Python3.11 checker成功（9 moduleのPython2 grammarとcollector integration）。サブエージェント報告の428 passedとは区別し、今回の親の結果を採用する。
 
+追加でPython3.11全pytestも428 passed。ホスト3.11の固定入力miss queryを各10,000回・5反復の中央値で比較すると、reservoir1件は旧0.681→新5.194μs、25件は13.152→5.206μs、256件は136.955→5.974μs。小reservoirでは49 bucket参照の固定費で遅くなる。これは限定的な合成入力で、B44全体再生・実機速度とは別の結果。全条件で高速化したとは主張しない。
+
 追加実機を直ちに要求せず、魚雷がない区間でも増えるships費用を既存記録の較正replayで調べる。B31でreservoirが小さい条件ではduplicate scan主因説は支持されなかったため、今回も比較回数とearlyreturnを実測し、条件差を明記する。意味・coverageを保った削減が成立する場合だけsourceを変更する。魚雷切捨てやframeを超えた古いowner/positionの再利用はしない。
