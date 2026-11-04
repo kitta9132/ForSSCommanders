@@ -2,6 +2,7 @@
 
 ## 緊急優先：通常プレイのFPS低下
 
+- B41（2026-11-04）：0.3.29・1対1、08:00発射→07:40 1ping→07:30外れ、07:00二重状態発射→06:40命中との報告。minFPS60・カクつきなし。state samplerの84魚雷候補はexactUiIdだがmods_DataComponent実体Noneで両flags未取得（falseではない）。停止・13fileshash照合退避済み。同じ実機試験は再要求せず、GUI/producer/別API経路を調査する。DSFF実依頼は枠切れにつきLuna xhighへ切替済み。[B41候補未取得](WowsExtractor-torpedoes-client-test/docs/VALIDATION_B41_0.3.29_TORPEDO_STATE.ja.md)。
 - B40（2026-11-04解析）：0.3.28・6対6、8:22全発射完了／7:30退出、minFPS60・カクつきなし。depth probe147 due sampleで262魚雷行を取得、全行raw0.14・exactUiId、unit null。独立取得の実機可用性確認済み、意味・単位・別深度は未確認。cycle平均5.775ms／最大21.938msを記録したがdepth起因とは断定しない。停止・13fileshash照合退避完了。同じ浮上発射の再試験不要。[B40深度候補](WowsExtractor-torpedoes-client-test/docs/VALIDATION_B40_0.3.28_TORPEDO_DEPTH.ja.md)。
 - B39後のnamespace調査完了：GUI Components.xmlではAvatar.idがInteger PK、playerId propertyなし。観戦・combat log・context menuでもこのGUI IDをplayerId名で使う根拠あり。ただしModsAPIとの一般対応契約は見つからず、候補一致をconfirmed joinへ昇格しない。定義にないplayerIdを探すための実機再試験は行わない。現行0.3.27の独立観測＋candidate契約を維持。[namespace調査](WowsExtractor-torpedoes-client-test/docs/RESEARCH_AVATAR_ID_NAMESPACE.ja.md)。
 - B39（2026-11-03）：0.3.27、minFPS60～70・カクつきなし。roster/avatar12対APIships最大9。候補avatar.idは全12件available、ships内9件とは型値一致、安定168 stateでは未一致3件すべてでmap/raw health取得を確認。strictplayerIdは依然unknownのまま、候補一致を確定joinへ昇格しない。cycle平均5.119ms・最大6.806ms。停止・13fileshash照合退避完了。範囲差の追加実機再現は当面不要、次は既存定義でnamespace根拠を確認。[B39詳細](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_B39_0.3.27.ja.md)。
