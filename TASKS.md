@@ -2,6 +2,7 @@
 
 ## 緊急優先：通常プレイのFPS低下
 
+- B44（2026-11-04）：profiler ON、7:30退出、minFPS40～50・目立つカクつきなし。最大63魚雷/11owner、全9,671行world/map保持。最後の窓は魚雷平均61.6本でtorpedoes2.056ms、submit1.894ms、cycle9.319ms。魚雷0本の間にもships0.662→約1.96msへ増えたため、較正sample蓄積コストを既存recordreplayで調査中。停止・13fileshash照合退避済み、追加実機はまだ依頼しない。[B44区間計測](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_B44_TORPEDO_PROFILE.ja.md)。
 - B43 offline補強：ownerId→同state vehicleIdは93,297行で一意候補一致・2,116行未一致、playerId一致0。namespace契約へ昇格しない。216魚雷/22 owner fixtureで全行・順序維持、collection1回・owner各1回、次sample再取得を検証（全pytest424成功・1skip、checker成功）。owner table化は全payload約8.69%削減試算だがschema変更かつFPS効果不明のため採用せず。残負荷の原因特定にはprofiler有効の別目的計測が必要。
 - B43（2026-11-04）：指定2対2でなく11対12・シャトルーノー・自艦未発射、minFPS30以上と報告。active対応roster23、別battleの旧meta24は除外。魚雷同時最大216本/owner22、複合候補350（味方213/敵137）、全95,413行world位置・owner object取得、map95,349/unknown64。profilerOFFで取得/計算/write費用は未計測、通常PvP上限ともmod原因とも断定不可。停止・13fileshash照合退避済み、同条件再試験をすぐ求めず大量記録とsourceで残負荷を調査。[B43大量魚雷](WowsExtractor-torpedoes-client-test/docs/VALIDATION_B43_OTHER_OWNER_LOAD.ja.md)。
 - B42静的照合終了：GUIの魚雷depthはNumber sync=false宣言のみ、公開API意味定義なし。検索した範囲でUI用途根拠なし。locator/search APIのenum契約もint宣言のみなのでGUI状態名候補を確定値へ昇格しない。深度意味・終了/cooldown等の未確認は明示して保留し、同条件再試験しない。次の未検証領域は敵／味方魚雷の公開owner取得と生座標（自艦以外の観測）。
