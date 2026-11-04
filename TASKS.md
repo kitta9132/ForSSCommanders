@@ -1,5 +1,7 @@
 # 開発タスク
 
+試験準備中の導入状態（2026-11-05）：ユーザー指定12対12＋ATM用に、実起動先の新build13533378へ0.3.38と作者公式ATM／TTaroModUtils／ModForgeを導入・hash照合済み。heavy OFF、独立4群・profiler ON、ATM state1Hz。全field記録`with-atm-b09`を起動、実機結果は未取得。[試験構成](WowsExtractor-torpedoes-client-test/docs/VALIDATION_PLAN_13533378_ATM_12V12.ja.md)。以下の「B46後退避済み」は前回試験終了時の状態。
+
 ## 最新サマリー（0.3.38・B46後）
 
 - 最新ソースは **`0.3.38-independent-gun-reload`**。0.3.38実装版で全555 tests＋9 module checker成功。
