@@ -1,5 +1,7 @@
 # ForSSCommanders
 
+最新ソース：**0.3.38-independent-gun-reload**（未導入・実機未確認）。装填raw／progressを重い診断から独立取得可能にした（既定OFF・collection必須）。modifier参照探索なし、同tick二重probeなし。以下は旧版履歴。
+
 最新ソース：**0.3.37-independent-submarine**（未導入・実機未確認）。自艦深度／WaveHitをcore周期、Batteryを1Hzで詳細診断から独立取得可能にした。専用設定は全て既定OFF・collection必須。以下は旧版履歴。
 
 最新ソース：**0.3.36-damage-cadence**（未導入・実機未確認）。damageイベント受付は維持し、snapshot生成・出力を1Hz化。終了時は最新台帳を出力。潜水艦probeの独立化は選択read基盤のみでruntime未統合。以下は旧版履歴。

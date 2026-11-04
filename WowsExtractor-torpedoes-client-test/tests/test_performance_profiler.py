@@ -111,7 +111,7 @@ def test_five_second_window_exception_isolation_and_no_stale_payload(monkeypatch
     assert p._stats.get('broken', {}).get('count', 0) == before
 
 
-def test_clock_call_budget_is_18_per_cycle_after_fixed_probe(monkeypatch):
+def test_clock_budget_includes_both_optional_independent_sampling_phases(monkeypatch):
     clock = Clock()
     install_clock(monkeypatch, clock)
     p = profiler_module.PerformanceProfiler(True, True)
@@ -120,17 +120,17 @@ def test_clock_call_budget_is_18_per_cycle_after_fixed_probe(monkeypatch):
     for phase in phases:
         token = p.begin(phase)
         p.finish(token)
-    assert p.clock_calls == 8 + 2 * len(phases) == 26
+    assert p.clock_calls == 8 + 2 * len(phases) == 30
     p.reset_battle()
 
 
-def test_main_uses_exactly_the_nine_budgeted_phase_boundaries():
+def test_main_uses_each_registered_phase_boundary_exactly_once():
     source = (ROOT / 'Main.py').read_text(encoding='utf-8')
     for phase in profiler_module.PerformanceProfiler.PHASES:
         boundary = re.compile(r'profiler\.(?:begin|measure)\(\s*[\'\"]' +
                               re.escape(phase) + r'[\'\"]')
         assert len(boundary.findall(source)) == 1, phase
-    assert len(profiler_module.PerformanceProfiler.PHASES) == 9
+    assert len(profiler_module.PerformanceProfiler.PHASES) == 11
 
 
 def test_reverse_during_measurement_stops_without_clock_switch(monkeypatch):

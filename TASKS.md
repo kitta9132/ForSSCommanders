@@ -1,5 +1,9 @@
 # 開発タスク
 
+0.3.38親最終検証：全555 passed（私有replay含む）、Python2 grammar9 module／collector checker成功。profilerの全登録phase予算テストを11phaseへ更新。ゲーム未導入・実機FPS未確認。
+
+最新ソース：**0.3.38-independent-gun-reload**（未導入・実機未確認）。FPS Cの装填raw独立取得を統合。専用ONはcore周期・参照getEntity探索0・heavy同tickもprobe1回。既存helper内barrelsModifierの二重component readを1回へ削減。独立gun／submarineのprofiler phaseを正式登録（0.3.37のsubmarine phaseは未登録で計上されなかった点を修正）。装填数・物理管ID・修理timer・WaveHit対象namespace／TTLは未知を維持。以下は旧版履歴。
+
 0.3.37親検証：全545 passed（Python3.11、私有replay含む）、9 moduleのPython2 grammar／collector checker成功。導入・実機取得・FPS確認は未実施。
 
 最新ソース：**0.3.37-independent-submarine**（未導入・実機未確認）。自艦深度／Battery／WaveHitの独立runtimeを統合。専用設定は既定OFF、深度とWaveHitはcore周期、Batteryは共通1Hz、同tick facade共有・群別sampling metadata。装填は参照解決を省略できるhelper基盤のみ、独立runtimeは次工程。制限builtinsを実際に適用するテストでgun／submarineのenumerate依存も除去。以下は旧版履歴。

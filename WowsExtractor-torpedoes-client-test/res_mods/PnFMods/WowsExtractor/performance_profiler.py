@@ -16,7 +16,7 @@ class PerformanceProfiler(object):
     WINDOW_SECONDS = 5.0
     PHASES = ('state_cycle_total', 'snapshot_build_total', 'avatar', 'self',
               'ships', 'torpedoes', 'armament_systems', 'diagnostics_due',
-              'submit')
+              'submit', 'submarine_sampling', 'gun_sampling')
 
     def __init__(self, enabled=False, collection_enabled=False):
         self.enabled = bool(enabled and collection_enabled)

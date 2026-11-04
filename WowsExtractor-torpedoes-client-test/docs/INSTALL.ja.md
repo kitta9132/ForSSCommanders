@@ -72,8 +72,12 @@ state_interval = 0.2
 | `profiler_enabled` | `false` | collection有効時だけclockを初期probeし、game-thread区間を集約 |
 | `diagnostics_interval` | `1.0` | 診断一式を実行する秒間隔。非due tickは古いprobeを再利用しない |
 | `state_interval` | `0.2` | `state.json` の収集・出力を行う目安の秒間隔。0.2=約5Hz、0.1=約10Hz |
+| `self_depth_sampling_enabled` | `false` | collection有効時に自艦深度群をcore周期で独立採取 |
+| `battery_sampling_enabled` | `false` | collection有効時にBatteryを比較共通1Hzで独立採取 |
+| `wave_hit_sampling_enabled` | `false` | collection有効時にWaveHitをcore周期で独立採取 |
+| `gun_reload_sampling_enabled` | `false` | collection有効時にgun raw／progressをcore周期で採取。modifier参照探索なし |
 
-`state_interval` は0.02秒未満を0.02に丸めます。これは50Hzの保証ではありません。ゲームのtick、処理時間、非同期書き込みの状況によってフレームが省略されます。既定は0.2（約5Hz）で、全snapshotを一体のまま頻度だけを下げます。0.1（約10Hz）も明示すれば従来どおり動きますが、取得・構築・書込み回数が倍になり、FPS改善は未確認です。
+`state_interval` は0.02秒未満を0.02に丸めます。これは50Hzの保証ではありません。ゲームのtick、処理時間、非同期書き込みの状況によってフレームが省略されます。既定は0.2（約5Hz）のcore周期です。HP平均2Hz、比較・damage約1Hz、距離別魚雷等の群別期限は別に維持し、実sample時刻を参照します。0.1（約10Hz）ではcoreの取得・構築・書込み回数が増え、FPS改善は未確認です。
 `diagnostics_interval` は0.1秒未満を0.1に丸めます。FPS改善を保証する設定ではありません。
 通常の有限な正の数を設定します。不明な設定キーは無視されます。設定は読み込み時と戦闘開始時に読み直されます。戦闘中の変更を即時反映する仕組みではありません。
 
@@ -84,7 +88,7 @@ state_interval = 0.2
 1. 起動して訓練戦に入る。
 2. modフォルダー内に `meta.json` と `state.json` ができるか確認。
 3. `state.json` の更新日時が進むことを確認。
-4. `meta.json` の `mod.version` が `0.3.37-independent-submarine` であることを確認。
+4. `meta.json` の `mod.version` が `0.3.38-independent-gun-reload` であることを確認。
 5. 魚雷発射後に `torpedoes` を確認。[実機テスト手順](TEST_PLAN.ja.md)に進む。
 
 ## ATMとの併用

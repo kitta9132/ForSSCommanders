@@ -1,7 +1,9 @@
 # WowsExtractor 魚雷出力版：実機テスト用パッケージ
 
 作成日：2026-11-04（日本時間）
-modバージョン：`0.3.37-independent-submarine` / ModsAPI：`API_v1.0`（source only・未導入／未実機）
+modバージョン：`0.3.38-independent-gun-reload` / ModsAPI：`API_v1.0`（source only・未導入／未実機）
+
+0.3.38：`gun_reload_sampling_enabled=false`を追加。明示ON時はheavy診断なしでcore周期のgun raw／progressを採取し、modifier参照探索は省く。heavy同tickもprobeは1回。装填数・物理管ID・修理timerの意味確定ではない。独立gun／submarineのprofiler phase登録漏れも修正。
 
 0.3.37：`self_depth_sampling_enabled`／`battery_sampling_enabled`／`wave_hit_sampling_enabled`を個別に追加（既定false・collection必須）。詳細診断OFFでも自艦深度／WaveHitはcore周期、Batteryは比較共通1Hzで採取できる。群別sampling時刻を確認し、上位probe時刻を非due Batteryの取得時刻に使わない。gun軽量helperは基盤だけで独立runtime未接続。実機未確認。
 

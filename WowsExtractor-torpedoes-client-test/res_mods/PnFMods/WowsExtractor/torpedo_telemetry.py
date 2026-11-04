@@ -110,7 +110,7 @@ class DiagnosticCollectionSnapshot(object):
 
 
 def shared_diagnostic_snapshot(hub):
-    """Create a fresh, sample-local facade; never call from non-diagnostic paths."""
+    """Share selected UI collections within one core/diagnostic sample only."""
     return DiagnosticCollectionSnapshot(hub)
 
 
@@ -1191,10 +1191,14 @@ def _gun_collection(hub, components, name, component_name, fields):
                 for modifier_name, modifier_key_name, member in (
                         ('barrelsModifier', 'barrelsModifier', 'barrels'),
                         ('serialLoaderModifier', 'serialLoaderModifier', 'serialLoads')):
-                    modifier_key_status, modifier_key = _probe_component_key(
-                        components, modifier_key_name)
-                    ms, modifier = _probe_component(entity, modifier_key)
-                    mstatus = ms if modifier_key_status == 'available' else modifier_key_status
+                    if modifier_name == 'barrelsModifier':
+                        # Reuse the same component already read for mode.
+                        mstatus = modifier_status
+                    else:
+                        modifier_key_status, modifier_key = _probe_component_key(
+                            components, modifier_key_name)
+                        ms, modifier = _probe_component(entity, modifier_key)
+                        mstatus = ms if modifier_key_status == 'available' else modifier_key_status
                     row[modifier_name + 'Status'] = mstatus
                     row[member] = []
                     if mstatus == 'available':

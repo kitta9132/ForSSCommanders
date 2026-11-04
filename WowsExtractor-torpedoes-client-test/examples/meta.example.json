@@ -4,7 +4,7 @@
   "battleId": "synthetic-example-only",
   "mod": {
     "name": "WowsExtractor",
-    "version": "0.3.37-independent-submarine"
+    "version": "0.3.38-independent-gun-reload"
   },
   "ts": 120.0,
   "battleType": null,

@@ -1,5 +1,7 @@
 # 既知の問題と実用化の到達点
 
+0.3.38：[FPS C](FPS_TASKS.ja.md#fps-other)の装填raw独立取得を実装。gun／submarine独立群は既定OFF、意味未確定を維持し、実機FPSは未確認。0.3.37で未登録だった独立submarine計測phaseを修正した。mod退避継続。
+
 0.3.37：[FPS C](FPS_TASKS.ja.md#fps-other)の自艦深度／Battery／WaveHitを診断から独立化（既定OFF）。群ごとのsampleTsと非dueを参照する。WaveHit対象namespace／TTL・装填数／管IDは未解決のまま。gun独立runtimeと実機FPS確認は未完、退避継続。
 
 0.3.36：[FPS C](FPS_TASKS.ja.md#fps-other)のdamage snapshot生成・出力1Hz化を実装。イベント全受付・終了時最新台帳を維持する。潜水艦の個別read選択は基盤のみで独立runtimeは未完。ゲーム導入・FPS検証は保留継続。

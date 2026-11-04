@@ -6,7 +6,7 @@
 
 API_VERSION = 'API_v1.0'
 MOD_NAME = 'WowsExtractor'
-MOD_VERSION = '0.3.37-independent-submarine'
+MOD_VERSION = '0.3.38-independent-gun-reload'
 
 # ---------------------------------------------------------------------------
 # WowsExtractor -- observations for an external submarine-combat map.
@@ -810,6 +810,7 @@ class Collector(object):
         self._selfDepthSamplingEnabled = False
         self._batterySamplingEnabled = False
         self._waveHitSamplingEnabled = False
+        self._gunReloadSamplingEnabled = False
         self._torpedoDepthSamplingEnabled = False
         self._torpedoDepthSamplingInterval = 1.0
         self._torpedoDepthSamplingNextDue = None
@@ -887,6 +888,9 @@ class Collector(object):
         self._waveHitSamplingEnabled = (
             self._collectionEnabled and
             cfg.get('wave_hit_sampling_enabled') == 'true')
+        self._gunReloadSamplingEnabled = (
+            self._collectionEnabled and
+            cfg.get('gun_reload_sampling_enabled') == 'true')
         self._positionFallbacksEnabled = (
             self._collectionEnabled and cfg.get('position_fallbacks_enabled') == 'true')
         profiler_enabled = (
@@ -2194,7 +2198,8 @@ class Collector(object):
                 lambda: shared_diagnostic_snapshot(dataHub), None)
         elif (submarine_plan['sample_depth'] or
               submarine_plan['sample_battery'] or
-              submarine_plan['sample_wave_hit']):
+              submarine_plan['sample_wave_hit'] or
+              _get(self, '_gunReloadSamplingEnabled', False) is True):
             diagnostic_hub = _try(
                 lambda: shared_diagnostic_snapshot(dataHub), None)
         if diagnostic_due:
@@ -2351,10 +2356,13 @@ class Collector(object):
             game_clock = _try(lambda: safe_game_clock_probe(diagnostic_hub, CC),
                 {'source': 'dataHub UI game clock candidates',
                  'status': 'unknown', 'semantics': 'unverified', 'candidates': {}})
-            gun_reload = _try(lambda: safe_gun_reload_probe(diagnostic_hub, CC),
-                {'source': 'dataHub UI gun reload candidates', 'status': 'unknown',
-                 'semantics': 'unverified', 'collections': {}, 'references': [],
-                 'error': 'probeFailed'})
+            if _get(self, '_gunReloadSamplingEnabled', False) is not True:
+                gun_reload = _try(
+                    lambda: safe_gun_reload_probe(diagnostic_hub, CC),
+                    {'source': 'dataHub UI gun reload candidates',
+                     'status': 'unknown', 'semantics': 'unverified',
+                     'collections': {}, 'references': [],
+                     'error': 'probeFailed'})
             for _probe in (weapon_context, game_clock):
                 for _observation in _get(_probe, 'observations', {}).values():
                     _observation['sampleTs'] = now
@@ -2364,6 +2372,31 @@ class Collector(object):
             weapon_context = dict(state)
             game_clock = dict(state)
             gun_reload = dict(state)
+        gun_sampling_enabled = _get(
+            self, '_gunReloadSamplingEnabled', False) is True
+        if gun_sampling_enabled:
+            def sample_gun_reload():
+                return _try(
+                    lambda: safe_gun_reload_probe(
+                        diagnostic_hub, CC, resolve_references=False),
+                    {'source': 'dataHub UI gun reload candidates',
+                     'status': 'unknown', 'semantics': 'unverified',
+                     'collections': {}, 'references': [],
+                     'getEntity': {'getterStatus': 'unknown',
+                                   'status': 'unknown', 'resolved': 0,
+                                   'budget': 16},
+                     'error': 'probeFailed'})
+            if profiler is not None and not diagnostic_due:
+                gun_reload = profiler.measure('gun_sampling', sample_gun_reload)
+            else:
+                # If heavy diagnostics are due, this one probe belongs to that
+                # existing phase instead of being counted a second time.
+                gun_reload = sample_gun_reload()
+            gun_reload['sampleTs'] = now
+            gun_reload['sampling'] = {
+                'status': 'sampled', 'sampleTs': now,
+                'intervalSeconds': _get(self, '_stateInterval', STATE_INTERVAL),
+                'source': 'core'}
         if profiler is not None and diagnostic_due:
             profiler.finish(diagnostics_phase)
         if diagnostic_due and ui_join_status != 'available':

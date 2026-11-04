@@ -1,5 +1,14 @@
 # WowsExtractor 魚雷出力版（WoWSクライアント用mod）
 
+## 0.3.38：装填rawの独立取得
+
+- `gun_reload_sampling_enabled`は既定false・collection必須。ON時はheavy診断なしでcore周期にgunReloadProbeのgun／reloadBar／gunBarrel直接rawを取得する。`sampleTs=now`と`sampling={status:sampled,sampleTs:now,intervalSeconds:実state周期,source:core}`を追加。sampledは試行でありraw取得成功を保証しない。
+- 専用ONではmodifier getEntity参照解決を省略する。heavy同tickも同じprobe1回だけで、heavyの参照診断もそのtickは省略。専用OFFのheavy dueは従来の参照探索付き出力形状を維持する。
+- 非取得時は既存disabled／notSampledを維持し、前回rawを持ち越さない。失敗はunknown、空成功や0へ置換しない。同tick collection列挙は既存facadeで共有し、barrelsModifierはmode／配列でcomponentを再読せず1回の観測を使う。
+- gun samplingとsubmarine samplingのphaseをprofilerへ正式登録。0.3.37の独立submarine phaseは未登録のため計上されていなかった（総cycle計測とは別）。heavy同tickは従来diagnostics_dueへ含める。
+- 独立gun／submarineの各phaseは実行時にclock readを2回ずつ追加する。profiler OFF時は追加clock readなし。登録11phase全てを人工的に一巡する予算テストは初期probe8＋22=30 readであり、毎tick全phaseが実行される意味ではない。
+- raw gun state／progressは装填残数・物理管番号・修理timerの確定値ではない。schema=1/apiVersion=1.0維持、実機取得／FPSは未確認。
+
 ## 0.3.37：自艦深度・Battery・WaveHitの独立取得
 
 - collection有効時の専用設定`self_depth_sampling_enabled`／`battery_sampling_enabled`／`wave_hit_sampling_enabled`を追加（全て既定false）。深度・WaveHitはcore周期（標準0.2秒）、Batteryは既存比較共通1秒期限。heavy diagnosticsは不要。

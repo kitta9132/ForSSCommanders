@@ -239,6 +239,10 @@ AP通常経路は1 stateあたり照準getter最大2回、条件次第でimpact 
 <a id="fps-other"></a>
 ## C：その他の削減候補
 
+0.3.38親最終検証：全555 passed（私有replay含む）、9 module checker成功。profiler11phaseを人工一巡するclock予算30 read（初期probe8含む）。専用群OFFでは追加phaseのclock readなし。
+
+0.3.38統合：gun_reload_sampling_enabled既定OFF・collection必須。ONはcore周期の直接gun raw／progressのみでmodifiergetEntity探索0。heavy同tickは1probeを共用し参照診断を省く。OFFは従来heavy経路を維持。親がhelper内barrelsModifier二重readを1回へ削減し予算assertも更新。gun／submarine計測phaseをprofiler本体へ登録、実profilerのcount増加も検証する（0.3.37のsubmarine phase未登録を修正）。実機未確認・退避継続。
+
 0.3.37統合：自艦深度／Battery／WaveHitを専用既定OFF設定でheavy diagnosticsから分離。深度／WaveHitはcore周期、Batteryは比較共通1Hz、専用ON群のcadenceをheavy dueで上書きしない。群別sampling状態／時刻を追加し、同tick facade共有、identity候補はheavy dueの同frameだけ。独立probe費用をprofilerのsubmarine_samplingへ計上する（heavy dueでは従来diagnostics_due内）。親の全545 passed（私有replay含む）、9 module checker成功。装填は軽量helper基盤のみで独立runtimeは未完、実機未確認・退避継続。
 
 次版の親レビュー：制限builtinsテストをモジュール再exec方式へ修正したところ、gun collection／modifier配列のenumerate依存で取得unknownになる問題を検出。gun専用のforベース添字列挙へ変更し、制限環境・共有collection getter予算・参照16件上限を含む関連156 passed。既存moduleの__builtins__差替えだけではPython3の生成済み関数を制限できないため、この新規テストでは制限namespace下で関数を生成し、実際のbuiltins参照もassertする。実ゲームでの失敗を観測した主張ではない。
@@ -258,8 +262,8 @@ depth／Battery／WaveHitについては、合同probeの内部で読むcomponen
 独立化の初期方針：専用opt-inは既定OFF・collection必須とし、depthとWaveHitはcore周期、Batteryは共通1Hz枠を使う。全てOFFなら従来どおり詳細診断だけが読み、明示ON時は詳細診断一式を要求しない。同時dueなら1つのsample-local facade／合同呼出しへまとめ、同名collection getterを増やさない。gun reloadの独立化は別途、既存modifier getEntity探索を高頻度で繰り返さない設計が必要（[△棚卸し](CODE_AUDIT_PARTIAL_ITEMS.ja.md)）。
 
 - [x] damageの依存を分け、イベント・ID対応を維持して不要な非due snapshot生成／出力を省略する（0.3.36）。イベント自体の撤去は行わない。
-- [ ] 自艦depth／Battery／ping／装填を独立sampleへ整理し、実用情報のために詳細診断一式をONにしなくてよい構成へする。
-- [ ] HP・avatar／ships観測の重複payloadは、観測範囲を失わないこととconsumer契約を優先して検討する。
+- [x] 自艦depth／Battery／WaveHitを0.3.37、装填rawを0.3.38で独立sampleへ分離。全て既定OFF、実機可用性・FPSは未確認。
+- [x] HP・avatar／ships重複payloadを検討し、今回は削除しない。B36/B39の観測範囲差と未確定namespaceがあり、API HP・avatar raw・正規化値は取得元と意味が異なる。省略で観測根拠を失うschema変更より、0.3.35の非due省略を優先する。再検討はconsumer側が出典・unknown・sampleTsを維持できる具体的な圧縮契約ができた時に限る。
 - [x] 0.3.31較正最適化の小reservoir固定費をホスト合成比較で評価。下記の限定条件では0～8件でindex固定費が不利、16件以上で有利。実機FPS改善とは扱わず、切替の追加実装は保留。
 
 小reservoir比較（Python3.11、5反復中央値、256候補×4回／反復、map格子0.06間隔、既存と同一sqrt・閾値判定、全候補結果一致）：reservoir件数0/4/8/16/32/64/128/256に対するindexed µsは5.018/5.322/5.479/5.597/5.655/5.739/5.855/5.904、旧linear判定µsは0.132/2.199/4.691/8.257/16.769/33.442/65.502/137.580。候補の重複早期returnがない疎な配置の検索単体であり、fit費用・getter・state全体・ゲームPython2・FPSは測っていない。小件数でbruteへ切り替えるなら別途密集／early return条件と実runtimeで評価し、B44再生のsnapshot／reservoir／RNG同一性を再確認する。今回このためのゲーム試験は求めない。
