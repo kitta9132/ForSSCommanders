@@ -1,5 +1,7 @@
 # 開発タスク
 
+次の比較準備（2026-11-05）：build13533378へ0.3.38をATMなしで導入・10 source hash照合。**半径L/3・近5Hz／遠2Hzを維持**、L/5案は別の記録試算のみ。現行他modは保持したためB09と厳密なATM単独比較ではない。B47全field記録を起動、実機結果未取得。[条件](WowsExtractor-torpedoes-client-test/docs/VALIDATION_PLAN_13533378_NO_ATM_COMPARISON.ja.md)。
+
 ATM B09負荷解析：[結果](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_WITH_ATM_B09_0.3.38.ja.md)。記録3セッションの魚雷あり2つは最大92／95本（200本ではない）。near約85%で、far非due省略は全体約8～9%。1/3条件は機能したが大半が円内。cycle平均約10.7ms、高負荷窓平均約15ms、固定avatar約4ms。ATM描画は計測外で体感FPSとの因果同期は未確定。near情報を減らすbudget案は未採用、情報維持型の固定費／同期出力削減をコード調査する。ゲーム停止・145fileshash照合退避済み。
 
 ATM併用負荷試験終了（2026-11-05）：ユーザーはbot魚雷を観察、ソナーで魚雷発見。minFPS約40では目立つカクつきなし、約30へ低下時は体感あり。with-atm-b09約199MBを回収し戦闘別に解析中（3 battleIdがあるため申告の2回目との対応を確認する）。新build13533378のcollector／ATM供給は確認、ゲーム停止確認後に今回導入物・依存・生成UIの145ファイルをhash照合退避済み。以下の試験準備中／導入済み表記は履歴。
