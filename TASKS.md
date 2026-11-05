@@ -1,5 +1,7 @@
 # 開発タスク
 
+半径L/5案の[記録試算](WowsExtractor-torpedoes-client-test/docs/RESEARCH_RADIUS_L5_B09.ja.md)完了：分類tickでは現行nearの約47～52%がL/5～L/3帯にあり、全87本tickのhighは67→37／65→30。静的・定常2/5仮定の参考detail削減は約25～27%だが完全反実仮想再生・FPS改善率ではない。未実装・未適用、ATMなしB47は現行L/3を維持する。
+
 次の比較準備（2026-11-05）：build13533378へ0.3.38をATMなしで導入・10 source hash照合。**半径L/3・近5Hz／遠2Hzを維持**、L/5案は別の記録試算のみ。現行他modは保持したためB09と厳密なATM単独比較ではない。B47全field記録を起動、実機結果未取得。[条件](WowsExtractor-torpedoes-client-test/docs/VALIDATION_PLAN_13533378_NO_ATM_COMPARISON.ja.md)。
 
 ATM B09負荷解析：[結果](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_WITH_ATM_B09_0.3.38.ja.md)。記録3セッションの魚雷あり2つは最大92／95本（200本ではない）。near約85%で、far非due省略は全体約8～9%。1/3条件は機能したが大半が円内。cycle平均約10.7ms、高負荷窓平均約15ms、固定avatar約4ms。ATM描画は計測外で体感FPSとの因果同期は未確定。near情報を減らすbudget案は未採用、情報維持型の固定費／同期出力削減をコード調査する。ゲーム停止・145fileshash照合退避済み。
