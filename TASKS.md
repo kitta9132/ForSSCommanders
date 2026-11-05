@@ -1,16 +1,18 @@
 # 開発タスク
 
+ATM B09負荷解析：[結果](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_WITH_ATM_B09_0.3.38.ja.md)。記録3セッションの魚雷あり2つは最大92／95本（200本ではない）。near約85%で、far非due省略は全体約8～9%。1/3条件は機能したが大半が円内。cycle平均約10.7ms、高負荷窓平均約15ms、固定avatar約4ms。ATM描画は計測外で体感FPSとの因果同期は未確定。near情報を減らすbudget案は未採用、情報維持型の固定費／同期出力削減をコード調査する。ゲーム停止・145fileshash照合退避済み。
+
 ATM併用負荷試験終了（2026-11-05）：ユーザーはbot魚雷を観察、ソナーで魚雷発見。minFPS約40では目立つカクつきなし、約30へ低下時は体感あり。with-atm-b09約199MBを回収し戦闘別に解析中（3 battleIdがあるため申告の2回目との対応を確認する）。新build13533378のcollector／ATM供給は確認、ゲーム停止確認後に今回導入物・依存・生成UIの145ファイルをhash照合退避済み。以下の試験準備中／導入済み表記は履歴。
 
 試験準備中の導入状態（2026-11-05）：ユーザー指定12対12＋ATM用に、実起動先の新build13533378へ0.3.38と作者公式ATM／TTaroModUtils／ModForgeを導入・hash照合済み。heavy OFF、独立4群・profiler ON、ATM state1Hz。全field記録`with-atm-b09`を起動、実機結果は未取得。[試験構成](WowsExtractor-torpedoes-client-test/docs/VALIDATION_PLAN_13533378_ATM_12V12.ja.md)。以下の「B46後退避済み」は前回試験終了時の状態。
 
-## 最新サマリー（0.3.38・B46後）
+## 最新サマリー（0.3.38・ATM B09後）
 
 - 最新ソースは **`0.3.38-independent-gun-reload`**。0.3.38実装版で全555 tests＋9 module checker成功。
 - ユーザー受入：TTX値は合っていたため、現行の初回TTX variant表示候補を実用上受け入れる。初回pinger選択はユーザー見解で仕様上おそらく回避不可とみなし、事前に魚雷を選ぶ操作や追加再試験は行わない。スキル発動時の実戦値／動的補正は未確認だが、追加取得・再試験は行わず受入済みとする。`selectedTTXnotApplicable`・`ammoParams={}` は追加取得の阻害課題として再オープンせず、source／raw／`liveAdjusted=false` という出典契約を維持する。
 - B46実機限定試験（0.3.38・heavy OFF・独立4群ON）：1,335 records（active 1,333）。ユーザー報告 minFPS 約50以上・カクつきなし（録画なし）。HP平均約2 Hz、比較／damage平均約1 Hz・非due省略を実機確認。独立 profiler phase（gun／submarine含む）を計上。通常参考48窓 cycle 平均3.763 ms／最大7.359 ms。depth／WaveHit／gun は全1,333 available、Battery は272 available／1,061 notSampled。
-- FPSタスク到達点：A（魚雷距離5秒再分類＋5 Hz／2 Hz）offline 実装完了（216魚雷／22 owner fixture・B43／B44 replay 成功）。B（砲弾道計算）撤去完了。C（damage snapshot 1 Hz・自艦 depth／Battery／WaveHit・gun reload raw 独立化）実装・offline 検証完了。D は各版 pytest／checker／commit 実施済み、216 fixture offline 根拠確認済み；実機 near／far 両側試験・最終 FPS 判定は未完。E は①②⑦⑨⑧を完了、③④⑤⑥⑩は未実装／設計保留。
-- 遠距離2 Hz・多数魚雷・因果的 FPS 改善率は未検証。startup FPS 追跡は中止維持。同条件再試験の追加要求はしない。
+- FPSタスク到達点：Aのoffline実装・216魚雷／22owner fixture・B43／B44 replayと、ATM B09でのnear／far実周期・省略を確認。B砲弾道撤去、Cのdamage1Hz／独立4群は完了。Dの各版回帰・限定実機試験は実施済みだが、負荷増加時に体感カクつきがあり最終実用FPSは未達。Eは①②⑦⑨⑧を完了、③④⑤⑥⑩は未実装／設計保留。
+- ATM B09は最大95魚雷を観測、200本規模・因果的FPS改善率は未検証。startup FPS追跡は中止維持。同条件再試験の追加要求はしない。
 - 既知の問題・優先度・到達点は [KNOWN_ISSUES.ja.md](WowsExtractor-torpedoes-client-test/docs/KNOWN_ISSUES.ja.md)、詳細タスクは [FPS_TASKS.ja.md](WowsExtractor-torpedoes-client-test/docs/FPS_TASKS.ja.md) を参照。
 
 ## 旧版履歴（要約）

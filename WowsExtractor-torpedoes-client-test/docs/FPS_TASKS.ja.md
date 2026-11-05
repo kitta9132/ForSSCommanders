@@ -1,13 +1,15 @@
 # FPS改善専用タスク：潜水艦戦闘補助に必要な負荷へ絞る
 
 <a id="fps-latest-summary"></a>
-## 最新状況サマリー（0.3.38・B46後）
+## 最新状況サマリー（0.3.38・ATM B09後）
+
+追加実機結果：[ATM B09・新build13533378](PERFORMANCE_WITH_ATM_B09_0.3.38.ja.md)。ユーザーはmin40程度で目立つカクつきなし、負荷増でmin30程度では体感ありと報告。記録上最大92／95魚雷で、near約85%・全detail省略約8～9%。1/3条件は機能し、farの連続存在区間平均sampleは約1.95Hz。大量時の実用FPSは未達として残す。nearの本数budgetは未採用で、情報維持型のavatar固定費／同期出力削減を先に調査する。145ファイル退避済み。
 
 - 最新ソースは **`0.3.38-independent-gun-reload`**。0.3.38実装版で全555 tests＋9 module checker成功。
 - B46実機限定試験（heavy OFF・独立4群ON）：1,335 records（active 1,333）。ユーザー報告 minFPS 約50以上・カクつきなし（録画なし）。HP平均約2 Hz、比較／damage平均約1 Hz・非due省略を実機記録で確認。独立 profiler phase（gun／submarine含む）を計上。通常参考48窓の cycle 平均3.763 ms／最大7.359 ms。
 - 独立4群（depth／WaveHit／Battery／gun）の新経路は今回の条件で実機可用性確認済み。depth／WaveHit／gun は全1,333 active state で available、Battery は272 available／1,061 notSampled。
-- 今回の魚雷は同時最大6本・high 6／low 0だったため、**遠距離2 Hzの実機動作・多数魚雷FPS・因果的改善率は未検証**。
-- A（魚雷距離5秒再分類＋5 Hz／2 Hz分岐）は offline 実装完了。216魚雷／22 owner fixture および B43／B44 replay で成功済み。実機 near／far 両側試験・最終FPS判定は未完。
+- B46は同時最大6本・low0だったが、後のATM B09で最大95本・near／far両枠を観測。遠距離枠の約2Hz動作と省略を実機確認した。200本規模と因果的FPS改善率は未検証、負荷増加時の体感カクつきは未解決。
+- A（魚雷距離5秒再分類＋5 Hz／2 Hz分岐）はoffline実装・216魚雷／22owner fixture・B43／B44 replayを完了。ATM B09でnear／far両枠の実周期・省略も確認したが、最終的な実用FPS判定は未達。
 - B（砲弾道計算）は完全撤去済み。
 - C（damage snapshot 1 Hz化・自艦 depth／Battery／WaveHit 独立化・gun reload raw 独立化）は実装・offline検証完了。独立4群はB46で実機可用性確認済み、C個別の因果的FPS効果は未確認。
 - E（情報群の低頻度化）：①HP 2 Hz、②avatar比較1 Hz、⑦Battery 1 Hz、⑨damage 1 Hz、⑧初回TTXのみを完了。③遠距離艦、④⑤消耗品／search、⑥module故障修理、⑩較正診断／coverage 1 Hz は未実装／設計事項で保留。
@@ -304,5 +306,5 @@ B46：heavy OFFの独立4群構成でminFPS約50以上・カクつきなしと�
 
 - [x] 変更ごとに全pytest、Python3.11 checker、Python2 grammar、diff・公開schema整合を確認し、版を更新して親がcommitする（0.3.32～0.3.38で実施）。
 - [x] 既存B43規模216魚雷／22owner fixtureで、近距離保持・遠距離cadence・総API予算を確認する。byte削減と処理時間・FPSを分けて報告する（offline 完了）。
-- [ ] 実機が必要になった段階でのみ限定試験を準備し、near/farの実sample間隔・phase・取得範囲と体感をまとめて確認する。悪化時は中止・退避する。
+- [x] 限定実機試験でnear／farの実sample間隔・phase・取得範囲と体感を確認（ATM B09）。負荷増で体感カクつきの報告があり、試験後退避済み。改善済みとする最終判定とは分ける。
 - [ ] 実用化の最終判定はプレイへの支障と取得の誤りで行う。平均2Hz化による遠距離軌跡の粗さ・最大sample遅延等を明記する。

@@ -1,11 +1,13 @@
 # 既知の問題と実用化の到達点
 
-## 到達点サマリー（0.3.38・B46）
+## 到達点サマリー（0.3.38・ATM B09後）
+
+追加の[ATM B09負荷試験](PERFORMANCE_WITH_ATM_B09_0.3.38.ja.md)で、minFPS約30になると体感カクつきありと報告。記録上最大95本、near約85%で全detail削減は約9%。遠距離枠は実際に約2Hzで動作したが、負荷課題は未解決。新build・ATMありで条件が変わり、FPSとphaseの時刻同期もないためmod単独の因果は未確定。near情報削減を即採用せず固定費／同期出力の情報維持型改善を調べる。試験後退避済み。
 
 - 0.3.38実装版で全555 tests＋9 module checker成功。
 - B46実機（0.3.38・heavy OFF・独立4群ON）：1,335 records（active 1,333）。ユーザー報告 minFPS 約50以上・カクつきなし（録画なし）。HP 2 Hz／比較・damage 1 Hz・非due省略、独立 phase 計上を確認。depth／WaveHit／gun 全1,333 available、Battery 272 available／1,061 notSampled。
-- FPSタスク：A offline 完了、B 撤去完了、C 実装・offline 検証完了、D pytest／checker／commit・216 fixture 確認済み（実機 near／far 両側・最終 FPS 判定未完）、E の①②⑦⑨⑧完了・③④⑤⑥⑩保留。
-- 遠距離2 Hz・多数魚雷・因果的 FPS 改善率は未検証。startup FPS 追跡中止。同条件再試験は要求しない。
+- FPSタスク：AのofflineとATM B09でのnear／far実周期確認、B撤去、C実装・独立取得、Dの既存回帰と限定実機試験は実施済み。最終実用FPSは未達。Eは①②⑦⑨⑧完了・③④⑤⑥⑩保留。
+- ATM B09で最大95魚雷時の負荷を観測し、ユーザーはmin30程度で体感カクつきを報告。200本規模・因果的FPS改善率は未検証。startup追跡中止、同条件再試験は即要求しない。
 - 初回 pinger 選択はユーザー見解で仕様上おそらく回避不可とみなす。TTX 値は合っていたため現行初回 variant 表示候補を実用受入済み。スキル発動時の実戦値／動的補正は未確認だが、追加取得・再試験は行わず受入済みとする。`selectedTTXnotApplicable`・`ammoParams={}` は阻害課題として再オープンせず、source／raw／`liveAdjusted=false` 契約を維持。
 
 ## 版別到達点（履歴）
