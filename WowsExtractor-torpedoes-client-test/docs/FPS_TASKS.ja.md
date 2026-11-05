@@ -257,6 +257,8 @@ AP通常経路は1 stateあたり照準getter最大2回、条件次第でimpact 
 <a id="fps-other"></a>
 ## C：その他の削減候補
 
+B09後のavatar固定費調査：大きな同frame getter重複は既に解消済み。shipId fallbackの遅延で通常24 read/tickを省ける小候補はあるが、約4msを大幅に削減する根拠は得られていない。未実装・単独実機試験なし。read比率をms削減量に読み替えず、players出典置換やnear間引きは採用しない。[調査結果](PERFORMANCE_WITH_ATM_B09_0.3.38.ja.md#avatar固定費のコード調査結果)。
+
 ### 現況（0.3.38・B46後）
 
 - damage snapshot 生成・出力を 1 Hz 化（0.3.36）、自艦 depth／Battery／WaveHit 独立取得（0.3.37）、gun reload raw 独立取得（0.3.38）を実装・offline 検証済み。

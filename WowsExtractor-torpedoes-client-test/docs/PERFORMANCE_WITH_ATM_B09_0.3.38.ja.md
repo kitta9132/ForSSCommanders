@@ -75,4 +75,12 @@ performance窓はsampleStartSeconds／sampleEndSecondsで重複除去。S2は36�
 
 次は追加の実機負荷再現ではなく、情報を維持したまま約4msのavatar固定費や同期serialize／write費用を減らせるかコードで調べる。無駄なread／構築の削減余地と、API内部費用で削れない部分を分ける。B46は旧build・ATMなし・少数艦で条件が違うため、因果的FPS改善率を計算しない。
 
+### avatar固定費のコード調査結果
+
+調査ではcollection／players getter・HP index・mapPosition取得の大きな同frame重複は既に解消済みだった。counted fixtureでhealth dueの24 avatarは336 read、別途players24行×3 fieldの72 read。ゲーム内部費用とPython構築の内訳は実測できていない。
+
+小さな候補は`ui_health.sample_avatar_ids`のavatar.shipId取得を、`roster_ids_from_avatar`がvehicle.idを使えない場合だけへ遅延するもの。通常24 read/tickを省ける可能性があり、調査用fixtureではstate／rosterが一致した。ただし実装前にはbool／0／非有限値／文字列／partial等で既存ID採否との厳密な等価検証が必要。**read数の比率からms削減量や上限は計算できない**。4msの主因を除去できる根拠ではなく、この小変更だけの追加実機試験は行わない。現時点では未実装。
+
+component key取得の共有やHP正規化の重複削減も小さなPython構築整理の候補に留まる。players getterをavatar候補IDで置き換える案は出典・namespace・死亡／partial時の契約を変え得るため採用しない。**安全に大幅削減できる新しいavatar経路は今回見つからなかった**。近距離本数budgetや半径・周期変更も未採用のまま、同期出力・ATM計測外負荷との切分けを優先する。
+
 記録を回収して記録プロセスを停止。ゲーム停止確認後、collector10 source hash一致・今回の第三者配布ファイルの改変なしを確認した。導入前が空だった新build内で、導入manifestとModForge生成UI／cacheに属することを全件確認し、145ファイルをhash照合してload path外へ退避。旧buildは触らず、ModPrefsの手動変更・削除も行っていない。
