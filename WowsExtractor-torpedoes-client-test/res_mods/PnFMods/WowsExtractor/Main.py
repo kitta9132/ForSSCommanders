@@ -6,7 +6,7 @@
 
 API_VERSION = 'API_v1.0'
 MOD_NAME = 'WowsExtractor'
-MOD_VERSION = '0.3.38-independent-gun-reload'
+MOD_VERSION = '0.3.39-own-torpedo-cadence'
 
 # ---------------------------------------------------------------------------
 # WowsExtractor -- observations for an external submarine-combat map.

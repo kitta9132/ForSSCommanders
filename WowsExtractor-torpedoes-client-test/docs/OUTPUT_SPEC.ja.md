@@ -1,5 +1,15 @@
 # WowsExtractor 魚雷出力版（WoWSクライアント用mod）
 
+現在の群別周期は[収集頻度表](COLLECTION_CADENCE.ja.md)を参照。以下の版別節は変更時点の契約履歴であり、同じ項目に差分があれば最新の適用版を優先する。
+
+## 0.3.39：自艦魚雷の全距離HIGH例外
+
+- 今回取得したownerの`isPlayer is True`だけを自艦判定の根拠とし、全距離HIGH（0.2秒期限）にする。整数1・文字列・欠測は自艦判定に使わず、unknownをfalseへ変換しない。ownerIdとplayer／vehicle IDの推測joinはしない。
+- その他は半径L/3内HIGH／外LOW（平均2Hz）、5秒再分類を維持。距離不明・新規は従来どおりHIGH。幾何分類farCountには自艦farも含むため、HIGH本数とnearCountは一致しない場合がある。
+- owner取得はsample内で共有し、既存の詳細行取得を先行するだけ。low非dueではowner／位置を読まない。不明からTrueへの変化は次のdue sampleで検知し、その場でHIGHへ昇格、次期限をnow+0.2秒へ設定する。
+- 新しいwire field／reasonは追加しない。非dueの詳細を現在値として再出力しない。core0.1秒でもHIGHを10Hzへ変更しない。
+- オフライン564 tests（私有replay含む）・9 module checker成功。未導入・未実機、FPS改善の保証なし。
+
 ## 0.3.38：装填rawの独立取得
 
 - `gun_reload_sampling_enabled`は既定false・collection必須。ON時はheavy診断なしでcore周期にgunReloadProbeのgun／reloadBar／gunBarrel直接rawを取得する。`sampleTs=now`と`sampling={status:sampled,sampleTs:now,intervalSeconds:実state周期,source:core}`を追加。sampledは試行でありraw取得成功を保証しない。

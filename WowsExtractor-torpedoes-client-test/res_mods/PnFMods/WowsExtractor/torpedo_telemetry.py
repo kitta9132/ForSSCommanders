@@ -2694,6 +2694,12 @@ def _sampling_key(ui_id, owner_id, shot_id):
     return (ui_key, owner_key, shot_key), owner_key
 
 
+def _owner_is_own(owner):
+    """Strict bool from the copied public owner row; never infer from ownerId."""
+    value = _get(owner, 'isPlayer')
+    return value if type(value) is bool else None
+
+
 def _sampling_context(context):
     """Validate the parent's world-space classification context."""
     info = {'status': 'unknown', 'reason': 'contextMissing',
@@ -2885,7 +2891,12 @@ class TorpedoSamplingGroups(object):
                 provisional = True
                 new_count += 1
             else:
-                group = (_SAMPLING_HIGH if distance_status in ('near', 'unknown')
+                # A current strict owner Ship.isPlayer=True keeps every distance
+                # high. Unknown ownership is not treated as false; the ordinary
+                # distance rule remains in effect.
+                group = (_SAMPLING_HIGH
+                         if (observation.get('isOwn') is True or
+                             distance_status in ('near', 'unknown'))
                          else _SAMPLING_LOW)
                 provisional = False
                 if previous['group'] != group:
@@ -3038,11 +3049,21 @@ class TorpedoSamplingGroups(object):
                     'notClassified', None, self._last_classification))
                 continue
             group = entry['group']
+            own = observation.get('isOwn') is True
+            promoted_own = own and group != _SAMPLING_HIGH
+            if promoted_own:
+                # A current strict own observation wins over a stale far/low
+                # distance group. This row is sampled now; its high deadline is
+                # re-anchored below, so no same-tick catch-up row is emitted.
+                group = _SAMPLING_HIGH
+                entry['group'] = group
             interval = (self.HIGH_INTERVAL if group == _SAMPLING_HIGH
                         else self.LOW_INTERVAL)
-            if now + _SAMPLING_EPSILON >= entry['nextDue']:
-                entry['nextDue'] = self._advance_due(
-                    entry['nextDue'], now, interval)
+            if (promoted_own or
+                    now + _SAMPLING_EPSILON >= entry['nextDue']):
+                entry['nextDue'] = (now + interval if promoted_own else
+                                    self._advance_due(
+                                        entry['nextDue'], now, interval))
                 entry['lastSampled'] = now
                 if group == _SAMPLING_HIGH:
                     sampled_high += 1
@@ -3379,6 +3400,19 @@ class TorpedoTelemetry(object):
         status['sampling'] = summary
         return [], status
 
+    def _owner_for_record(self, record, owners, counters):
+        """One sample-local owner lookup per strict owner key."""
+        owner_key = record['ownerKey']
+        if owner_key is None:
+            return None
+        if owner_key not in owners:
+            counters['ownerLookups'] += 1
+            owner_status, owner_value = _call(
+                self.battle, 'getTorpedoOwnerById', record['identity']['ownerId'])
+            owners[owner_key] = (_fields(owner_value, OWNER_FIELDS)
+                                 if owner_status == 'available' else None)
+        return owners.get(owner_key)
+
     def _sampling_row(self, record, self_team, owners, counters):
         torpedo = record['item']
         identity = record['identity']
@@ -3400,22 +3434,11 @@ class TorpedoTelemetry(object):
         team = row['ownerTeamId']
         row['relation'] = (None if team is None or self_team is None
                            else (1 if team == self_team else 2))
-        owner_key = record['ownerKey']
-        owner = None
-        if owner_key is not None:
-            if owner_key not in owners:
-                counters['ownerLookups'] += 1
-                owner_status, owner_value = _call(
-                    self.battle, 'getTorpedoOwnerById', identity['ownerId'])
-                owners[owner_key] = (_fields(owner_value, OWNER_FIELDS)
-                                     if owner_status == 'available' else None)
-            owner = owners.get(owner_key)
+        owner = self._owner_for_record(record, owners, counters)
         row['owner'] = owner
         # ownerId is NOT documented as a player/vehicle id. Never equate these
         # namespaces; Ship.isPlayer is the public value used by existing rows.
-        row['isOwn'] = _get(row['owner'], 'isPlayer')
-        if type(row['isOwn']) is not bool:
-            row['isOwn'] = None
+        row['isOwn'] = _owner_is_own(owner)
         return row
 
     def _sampled_torpedoes(self, items, enumeration_status, self_team,
@@ -3436,6 +3459,7 @@ class TorpedoTelemetry(object):
         records = []
         seen_keys = {}
         duplicate_keys = {}
+        owners = {}
         try:
             for torpedo in items:
                 ui_id = _get(torpedo, 'uiId')
@@ -3490,6 +3514,12 @@ class TorpedoTelemetry(object):
                     record['positionStatus'] = (
                         'available' if record['position'] is not None
                         else 'unknown')
+                    # All identities are due on a classification tick, so this
+                    # lookup replaces (rather than adds to) the owner lookup the
+                    # sampled row would perform. On cadence ticks it runs only
+                    # for rows that will be sampled now.
+                    owner = self._owner_for_record(record, owners, counters)
+                    record['isOwn'] = _owner_is_own(owner)
             decisions = sampling.observe(
                 records, now, context, classification_due,
                 membership_complete, context_available, context_info)
@@ -3501,7 +3531,6 @@ class TorpedoTelemetry(object):
             status['status'] = 'unknown'
             return self._sampling_no_rows(
                 status, sampling, now, 'samplingError', counters, False)
-        owners = {}
         out = []
         membership = []
         decision_count = len(decisions)

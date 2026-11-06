@@ -88,7 +88,7 @@ state_interval = 0.2
 1. 起動して訓練戦に入る。
 2. modフォルダー内に `meta.json` と `state.json` ができるか確認。
 3. `state.json` の更新日時が進むことを確認。
-4. `meta.json` の `mod.version` が `0.3.38-independent-gun-reload` であることを確認。
+4. `meta.json` の `mod.version` が `0.3.39-own-torpedo-cadence` であることを確認。
 5. 魚雷発射後に `torpedoes` を確認。[実機テスト手順](TEST_PLAN.ja.md)に進む。
 
 ## ATMとの併用

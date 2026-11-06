@@ -1,11 +1,11 @@
 # FPS改善専用タスク：潜水艦戦闘補助に必要な負荷へ絞る
 
 <a id="fps-latest-summary"></a>
-## 最新状況サマリー（0.3.38・ATM B09後）
+## 最新状況サマリー（0.3.39・実機根拠は0.3.38）
 
 追加実機結果：[ATM B09・新build13533378](PERFORMANCE_WITH_ATM_B09_0.3.38.ja.md)。ユーザーはmin40程度で目立つカクつきなし、負荷増でmin30程度では体感ありと報告。記録上最大92／95魚雷で、near約85%・全detail省略約8～9%。1/3条件は機能し、farの連続存在区間平均sampleは約1.95Hz。大量時の実用FPSは未達として残す。nearの本数budgetは未採用で、情報維持型のavatar固定費／同期出力削減を先に調査する。145ファイル退避済み。
 
-- 最新ソースは **`0.3.38-independent-gun-reload`**。0.3.38実装版で全555 tests＋9 module checker成功。
+- 最新ソースは **`0.3.39-own-torpedo-cadence`**。全564 tests（私有replay含む）＋9 module checker成功。自艦魚雷は全距離HIGH、その他は現行L/3距離枠を維持する。[収集頻度表](COLLECTION_CADENCE.ja.md)を更新。未導入・未実機で、実機数値は0.3.38の根拠。
 - B46実機限定試験（heavy OFF・独立4群ON）：1,335 records（active 1,333）。ユーザー報告 minFPS 約50以上・カクつきなし（録画なし）。HP平均約2 Hz、比較／damage平均約1 Hz・非due省略を実機記録で確認。独立 profiler phase（gun／submarine含む）を計上。通常参考48窓の cycle 平均3.763 ms／最大7.359 ms。
 - 独立4群（depth／WaveHit／Battery／gun）の新経路は今回の条件で実機可用性確認済み。depth／WaveHit／gun は全1,333 active state で available、Battery は272 available／1,061 notSampled。
 - B46は同時最大6本・low0だったが、後のATM B09で最大95本・near／far両枠を観測。遠距離枠の約2Hz動作と省略を実機確認した。200本規模と因果的FPS改善率は未検証、負荷増加時の体感カクつきは未解決。
@@ -68,7 +68,7 @@ byte数は元行の観測値をsample対象だけ残し、新sampling metadata�
 
 0.3.32更新（履歴）：Bの砲弾道撤去を実装。tracker・専用イベント・計算・出力を削除。魚雷距離別cadence（A）はこの時点で未実装（0.3.33で実装）。
 
-更新：2026-11-05。現行ソース **`0.3.38-independent-gun-reload`**。Bの砲弾道撤去は実装済み、Aの周期変更はoffline 実装・検証済み（216魚雷fixture・B43／B44 replay）。実機 near／far 両側試験・最終FPS判定は未完。汎用WoWSテレメトリ収集器ではなく、潜水艦の攻撃・回避・潜航判断を優先する。
+更新：2026-11-06。現行ソース **`0.3.39-own-torpedo-cadence`**（offline検証済み）。Aの距離枠は0.3.33で実装しB09で両枠動作を確認、B砲弾道撤去・C独立化は完了。新しい自艦全距離HIGH例外の実機確認と最終実用FPS判定は未完。汎用WoWSテレメトリ収集器ではなく、潜水艦の攻撃・回避・潜航判断を優先する。
 
 関連：[既知の問題](KNOWN_ISSUES.ja.md)、[用途の絞り込み](../../TASKS.md#task-scope)、[性能実績](../../TASKS.md#task-performance)、[B44計測](PERFORMANCE_B44_TORPEDO_PROFILE.ja.md)。FPS改善作業の詳細・チェック欄は本書へ集約する。
 

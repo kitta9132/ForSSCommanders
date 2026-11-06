@@ -12,9 +12,9 @@ ATM併用負荷試験終了（2026-11-05）：ユーザーはbot魚雷を観察�
 
 試験準備中の導入状態（2026-11-05）：ユーザー指定12対12＋ATM用に、実起動先の新build13533378へ0.3.38と作者公式ATM／TTaroModUtils／ModForgeを導入・hash照合済み。heavy OFF、独立4群・profiler ON、ATM state1Hz。全field記録`with-atm-b09`を起動、実機結果は未取得。[試験構成](WowsExtractor-torpedoes-client-test/docs/VALIDATION_PLAN_13533378_ATM_12V12.ja.md)。以下の「B46後退避済み」は前回試験終了時の状態。
 
-## 最新サマリー（0.3.38・ATM B09後）
+## 最新サマリー（0.3.39・実機根拠は0.3.38）
 
-- 最新ソースは **`0.3.38-independent-gun-reload`**。0.3.38実装版で全555 tests＋9 module checker成功。
+- 最新ソースは **`0.3.39-own-torpedo-cadence`**。自艦魚雷の全距離HIGH例外と[収集頻度表](WowsExtractor-torpedoes-client-test/docs/COLLECTION_CADENCE.ja.md)を更新済み。私有replayを含む全564 tests＋9 module checker成功。未導入・未実機、追加実機試験は行わない。
 - ユーザー受入：TTX値は合っていたため、現行の初回TTX variant表示候補を実用上受け入れる。初回pinger選択はユーザー見解で仕様上おそらく回避不可とみなし、事前に魚雷を選ぶ操作や追加再試験は行わない。スキル発動時の実戦値／動的補正は未確認だが、追加取得・再試験は行わず受入済みとする。`selectedTTXnotApplicable`・`ammoParams={}` は追加取得の阻害課題として再オープンせず、source／raw／`liveAdjusted=false` という出典契約を維持する。
 - B46実機限定試験（0.3.38・heavy OFF・独立4群ON）：1,335 records（active 1,333）。ユーザー報告 minFPS 約50以上・カクつきなし（録画なし）。HP平均約2 Hz、比較／damage平均約1 Hz・非due省略を実機確認。独立 profiler phase（gun／submarine含む）を計上。通常参考48窓 cycle 平均3.763 ms／最大7.359 ms。depth／WaveHit／gun は全1,333 available、Battery は272 available／1,061 notSampled。
 - FPSタスク到達点：Aのoffline実装・216魚雷／22owner fixture・B43／B44 replayと、ATM B09でのnear／far実周期・省略を確認。B砲弾道撤去、Cのdamage1Hz／独立4群は完了。Dの各版回帰・限定実機試験は実施済みだが、負荷増加時に体感カクつきがあり最終実用FPSは未達。Eは①②⑦⑨⑧を完了、③④⑤⑥⑩は未実装／設計保留。
