@@ -1,15 +1,15 @@
 # FPS改善専用タスク：潜水艦戦闘補助に必要な負荷へ絞る
 
 <a id="fps-latest-summary"></a>
-## 最新状況サマリー（0.3.39・実機根拠は0.3.38）
+## 最新状況サマリー（0.3.40・実機根拠は0.3.38／L/3時点）
 
-追加実機結果：[ATM B09・新build13533378](PERFORMANCE_WITH_ATM_B09_0.3.38.ja.md)。ユーザーはmin40程度で目立つカクつきなし、負荷増でmin30程度では体感ありと報告。記録上最大92／95魚雷で、near約85%・全detail省略約8～9%。1/3条件は機能し、farの連続存在区間平均sampleは約1.95Hz。大量時の実用FPSは未達として残す。nearの本数budgetは未採用で、情報維持型のavatar固定費／同期出力削減を先に調査する。145ファイル退避済み。
+追加実機結果：[ATM B09・新build13533378](PERFORMANCE_WITH_ATM_B09_0.3.38.ja.md)。ユーザーはmin40程度で目立つカクつきなし、負荷増でmin30程度では体感ありと報告。記録上最大92／95魚雷で、near約85%・全detail省略約8～9%。1/3条件は機能し、farの連続存在区間平均sampleは約1.95Hz。**これらは0.3.38・半径L/3の履歴であり、現行L/5や自艦全距離HIGHの実機根拠ではない。** 大量時の実用FPSは未達として残す。nearの本数budgetは未採用で、情報維持型のavatar固定費／同期出力削減を先に調査する。145ファイル退避済み。
 
-- 最新ソースは **`0.3.39-own-torpedo-cadence`**。全564 tests（私有replay含む）＋9 module checker成功。自艦魚雷は全距離HIGH、その他は現行L/3距離枠を維持する。[収集頻度表](COLLECTION_CADENCE.ja.md)を更新。未導入・未実機で、実機数値は0.3.38の根拠。
+- 最新ソースは **`0.3.40-radius-l5`**。全566 testsで**557 passed, 9 skipped**（私有replay含む。skipはWoWS起動中のためinstaller 9件が安全上skip）＋9 module checker成功。分類半径をL/3から`R=L/5`（L=マップ短辺の較正world長）へ正式変更し、L/5～L/3帯はLOWになる。自艦魚雷は全距離HIGH、その他は近5Hz／遠平均2Hz・5秒再分類を維持する。[収集頻度表](COLLECTION_CADENCE.ja.md)を更新。未導入・未実機で、実機数値は0.3.38・L/3の根拠。
 - B46実機限定試験（heavy OFF・独立4群ON）：1,335 records（active 1,333）。ユーザー報告 minFPS 約50以上・カクつきなし（録画なし）。HP平均約2 Hz、比較／damage平均約1 Hz・非due省略を実機記録で確認。独立 profiler phase（gun／submarine含む）を計上。通常参考48窓の cycle 平均3.763 ms／最大7.359 ms。
 - 独立4群（depth／WaveHit／Battery／gun）の新経路は今回の条件で実機可用性確認済み。depth／WaveHit／gun は全1,333 active state で available、Battery は272 available／1,061 notSampled。
 - B46は同時最大6本・low0だったが、後のATM B09で最大95本・near／far両枠を観測。遠距離枠の約2Hz動作と省略を実機確認した。200本規模と因果的FPS改善率は未検証、負荷増加時の体感カクつきは未解決。
-- A（魚雷距離5秒再分類＋5 Hz／2 Hz分岐）はoffline実装・216魚雷／22owner fixture・B43／B44 replayを完了。ATM B09でnear／far両枠の実周期・省略も確認したが、最終的な実用FPS判定は未達。
+- A（魚雷距離5秒再分類＋5 Hz／2 Hz分岐）はoffline実装・216魚雷／22owner fixture・B43／B44 replayを完了。ATM B09でL/3時点のnear／far両枠の実周期・省略も確認したが、L/5と自艦全距離HIGHは今回未実機で、最終的な実用FPS判定は未達。
 - B（砲弾道計算）は完全撤去済み。
 - C（damage snapshot 1 Hz化・自艦 depth／Battery／WaveHit 独立化・gun reload raw 独立化）は実装・offline検証完了。独立4群はB46で実機可用性確認済み、C個別の因果的FPS効果は未確認。
 - E（情報群の低頻度化）：①HP 2 Hz、②avatar比較1 Hz、⑦Battery 1 Hz、⑨damage 1 Hz、⑧初回TTXのみを完了。③遠距離艦、④⑤消耗品／search、⑥module故障修理、⑩較正診断／coverage 1 Hz は未実装／設計事項で保留。
@@ -58,6 +58,17 @@ byte数は元行の観測値をsample対象だけ残し、新sampling metadata�
 
 分類contextが使えないstateはB43で43、B44で33あり、安全側highとして再生。toolは欠測件数と警告を出す。既に間引かれた0.3.33記録は全位置入力を復元できないためbaseline再生に使わず拒否する。torpedoes-only等の入力不足を距離分類成立と偽らない。
 
+### 0.3.40 L/5適用後の私有replay期待更新
+
+半径をL/5へ変更したため、同じB43／B44記録でもL/5～L/3帯のIDがLOWへ移り、digestとsample予算が変わる。機械的に期待値だけを置換せず、次を確認した。
+
+| 記録 | membership／元行 | sample行（high＋low） | 位置・詳細field read | owner key共有lookup | 投影bytes |
+|---|---:|---:|---:|---:|---:|
+| B43 | 95,413／95,413 | 73,711（59,145＋14,566） | 73,711 | 11,371（元予算12,654以下） | 126,684,130 |
+| B44 | 9,671／9,671 | 6,044（3,640＋2,404） | 6,044 | 1,391（元予算1,998以下） | 26,170,810 |
+
+全件列挙・membership行数・`incompleteMembershipStates=0`は不変で、位置・ownerId以外の詳細field read数（ownerTeamId/ownerType/position/type）がsample行数と一致する。owner lookupはsample内でowner keyを共有するため元予算（originalOwnerBudget）以下で、sample行数とは一致しない。L/3時点のB43 85,987行／owner 12,293、B44 7,870行／owner 1,833からsample行とowner lookupは減ったが、これは**収集対象がLOWへ移った結果**であり、FPS改善率や実機の取得時間短縮ではない。テストにもこれらの不変条件を追加した。L/5の実機周期は未確認。
+
 **ホストの安価なgetterではscheduler overheadが勝る。** Python3.11、216魚雷／22owner、500 tick×3反復の中央値（getter・sampling／metadata生成のみ、motion/map/JSONなし）は、旧→新でall near 1.630→3.546ms、半数far 1.665→2.926ms、all far 1.667→2.546ms。これは実API内部費用を含まないが、単純な条件分岐を追加すれば必ず高速になるという仮定を否定する。実機のgetter削減と追加Python処理の差引きは未計測。改善済みとして通常プレイへ投入しない。
 
 その後、重複record生成・ID変換・decision辞書・context検証を削減。変更前後のB43/B44の行順・sampling・membership・API予算は一致。親の最終5反復中央値は旧0.3.32→0.3.33でall near 1.718→2.526ms、半数far 1.763→2.141ms、all far 1.629→1.605ms。並行replay等のホスト状況でも値は変動し、all farの小差を有意な改善としない。遠距離が少ない場合の固定費リスクは残る。次の実機計測までFPS改善の認定・通常プレイ導入は保留する。
@@ -68,14 +79,14 @@ byte数は元行の観測値をsample対象だけ残し、新sampling metadata�
 
 0.3.32更新（履歴）：Bの砲弾道撤去を実装。tracker・専用イベント・計算・出力を削除。魚雷距離別cadence（A）はこの時点で未実装（0.3.33で実装）。
 
-更新：2026-11-06。現行ソース **`0.3.39-own-torpedo-cadence`**（offline検証済み）。Aの距離枠は0.3.33で実装しB09で両枠動作を確認、B砲弾道撤去・C独立化は完了。新しい自艦全距離HIGH例外の実機確認と最終実用FPS判定は未完。汎用WoWSテレメトリ収集器ではなく、潜水艦の攻撃・回避・潜航判断を優先する。
+更新：2026-11-06。現行ソース **`0.3.40-radius-l5`**（offline検証済み）。Aの距離枠は0.3.33で実装し、B09ではL/3時点の両枠動作を確認した。0.3.40で半径はL/5へ変更済みだが、L/5・自艦全距離HIGHの実機確認と最終実用FPS判定は未完。B砲弾道撤去・C独立化は完了。汎用WoWSテレメトリ収集器ではなく、潜水艦の攻撃・回避・潜航判断を優先する。
 
 関連：[既知の問題](KNOWN_ISSUES.ja.md)、[用途の絞り込み](../../TASKS.md#task-scope)、[性能実績](../../TASKS.md#task-performance)、[B44計測](PERFORMANCE_B44_TORPEDO_PROFILE.ja.md)。FPS改善作業の詳細・チェック欄は本書へ集約する。
 
 ## 目標・制約
 
 - 通常プレイへの影響を抑え、近距離の回避と魚雷戦に必要な観測を優先する。FPS改善は実機未確認のまま断言しない。
-- ユーザー指定：**自艦からマップサイズの1/3を半径とする円の外側の魚雷を2Hzとする。** 内側は既存5Hzを維持する案。
+- ユーザー指定（2026-11-06更新）：**自艦から`L/5`（L=マップ短辺の較正world長）を半径とする円の外側の魚雷を平均2Hz、内側・境界上を5Hzとする。** L/3は0.3.33～0.3.39の履歴で、現行はL/5。遠方1Hz化ではない。
 - 遠距離を永久除外しない。非due・取得失敗・正常0本・一覧からの消失を区別する。
 - 生のゲームobjectをframe間保存しない。過去sampleを保持する設計では、現在値と別の時刻・状態を持たせる。現行の一体snapshot契約は変更設計が必要。
 - 開始直後FPS低下の追加調査、即時の高負荷再試験は行わない。
@@ -93,9 +104,9 @@ byte数は元行の観測値をsample対象だけ残し、新sampling metadata�
 
 ### 最新の指定：5秒ごとの枠振り分け
 
-2026-11-05追加調査：[L/3→L/5試算](RESEARCH_RADIUS_L5_B09.ja.md)。分類tickの現行near約47～52%が帯へ移る幾何観測を確認。詳細行約25～27%減は静的・定常仮定の参考計算に限り、実scheduler／FPSの削減率ではない。半径変更は未適用、近5Hz／遠2Hz・5秒分類も変更せずATMなしB47を比較する。
+2026-11-05追加調査（当時の履歴）：[L/3→L/5試算](RESEARCH_RADIUS_L5_B09.ja.md)。分類tickの現行near約47～52%が帯へ移る幾何観測を確認。詳細行約25～27%減は静的・定常仮定の参考計算に限り、実scheduler／FPSの削減率ではない。当時は半径変更未適用だったが、**2026-11-06の0.3.40でL/5を正式適用**した。ATMなしB47比較は中止し、L/5と自艦5Hzの実機確認は今回行っていない。
 
-ユーザー指定（2026-11-04）：距離による2Hz／5Hz判定は**5秒ごと**に行い、IDを収集枠へ振り分ける。マップサイズは対角線でなく一辺、長方形は`L=min(width,height)`、半径`R=L/3`で確定。以下の毎tick距離判定案は旧案であり、本節を優先する。offline 実装は0.3.33で完了し、216魚雷／22 owner fixture および B43／B44 replay で検証済み。実機 near／far 両側試験・最終 FPS 判定は未完。
+ユーザー指定（2026-11-04、半径は2026-11-06更新）：距離による2Hz／5Hz判定は**5秒ごと**に行い、IDを収集枠へ振り分ける。マップサイズは対角線でなく一辺、長方形は`L=min(width,height)`、**現行半径`R=L/5`**（0.3.33～0.3.39は`R=L/3`）。以下の毎tick距離判定案は旧案であり、本節を優先する。offline 実装は0.3.33で完了し、216魚雷／22 owner fixture および B43／B44 replay で検証済み。L/3の実機 near／far 両側はB09で確認したが、L/5の実機周期・最終 FPS 判定は未完。
 
 | 処理 | 周期 | 提案する動作 |
 |---|---|---|
@@ -111,7 +122,11 @@ byte数は元行の観測値をsample対象だけ残し、新sampling metadata�
 if classification_due:  # 5秒ごと
     現在の全体一覧・位置を取得
     for each valid identity:
-        if current distance unknown or distanceSquared <= (L/3)^2:
+        # 自艦判定はowner.isPlayerが厳密bool Trueの場合だけ。整数1・文字列・欠測は自艦扱いせず、
+        # ownerId/vehicleIdの推測joinもしない。所有者不明は距離ルールに従う。
+        if owner is confirmed and owner.isPlayer is True:
+            assign HIGH_5HZ
+        elif current distance unknown or distanceSquared <= (L/5)^2:
             assign HIGH_5HZ
         else:
             assign LOW_2HZ
@@ -137,11 +152,11 @@ if low_due:
 
 ### 距離・境界の提案
 
-正方形マップの一辺をL、R=L/3とする。横方向world平面の自艦位置(x0,z0)と魚雷(x,z)を同じ座標系で比較する。
+正方形マップの一辺をL、R=L/5とする（長方形はL=短辺）。横方向world平面の自艦位置(x0,z0)と魚雷(x,z)を同じ座標系で比較する。
 
 ```text
 distanceSquared = (x - x0)^2 + (z - z0)^2
-if distanceSquared <= (L / 3)^2:
+if distanceSquared <= (L / 5)^2:
     near  # 5Hz。境界上もnear
 else:
     far   # 2Hz
@@ -151,7 +166,7 @@ else:
 - **マップサイズは対角線ではなく一辺**。長方形ならL=min(width,height)。ユーザー承認済み。短辺基準なので長辺基準より円は小さくなる。
 - normalized map座標で判定する場合は自艦と魚雷の両方を同じ変換へ揃える。長方形で単純な正規化距離を使うとworld上の円ではなく楕円になるため、軸別scaleを反映する。worldの単位をkmと推測しない。
 - map寸法・変換・自艦位置・魚雷位置が不明／不正なら**距離unknownとして高頻度側**へ送る。観戦対象を無断で自艦の代用にしない。
-- 自艦魚雷を距離だけで除外しない。今回の指定どおりなら自艦魚雷も円外は2Hz。5Hz例外を設けるなら別途理由を明示し、ownerId推測joinで選別しない。
+- 自艦魚雷を距離だけで除外しない。0.3.39以降は厳密bool `owner.isPlayer is True`の自艦魚雷を全距離HIGHにする。整数1・文字列・欠測は自艦扱いせず、ownerIdやvehicleIdの推測joinで選別しない。所有者不明は距離ルールに従う。
 - 移籍は最新指定の5秒再分類で行う。新規は暫定HIGH案。ヒステリシスや毎tick緊急昇格は指定外なので無断追加しない。
 
 ### 旧案：毎tick距離判定と現APIの限界
@@ -204,7 +219,7 @@ else:
 
 ### Aのタスク
 
-- [x] Lは一辺、長方形は短辺、半径L/3でユーザー承認。境界上near・unknownはHIGHを提案。
+- [x] Lは一辺、長方形は短辺。半径は当初L/3で承認され、0.3.40でL/5へ正式変更した。L/5～L/3帯がLOWになる回帰と境界上nearを含めてoffline検証。unknownはHIGHを維持。
 - [x] 全件列挙と分類用最小read、詳細取得を分割。
 - [x] 平均2Hz・群別sample契約を実装。consumer参照を調査しviewer・recorder・仕様を対応。
 - [x] B43/B44 replayで近／遠sample・省略可能な詳細処理数を集計。判定不能はhighと警告で区別。

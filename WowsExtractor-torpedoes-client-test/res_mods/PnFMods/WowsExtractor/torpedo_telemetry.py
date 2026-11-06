@@ -2722,7 +2722,8 @@ def _sampling_context(context):
             width <= 0 or height <= 0):
         info['reason'] = 'mapDimensionsUnavailable'
         return info
-    radius = min(width, height) / 3.0
+    # Calibrated world-space radius: one fifth of the map's short side.
+    radius = min(width, height) / 5.0
     if not _finite(radius) or radius <= 0:
         info['reason'] = 'radiusUnavailable'
         return info
@@ -2940,7 +2941,7 @@ class TorpedoSamplingGroups(object):
             'nextDue': self._next_classification,
             'intervalSeconds': self.CLASSIFICATION_INTERVAL,
             'radiusWorld': info['radius'],
-            'radiusSource': ('min(mapWidth,mapHeight)/3'
+            'radiusSource': ('min(mapWidth,mapHeight)/5'
                              if available_context else None),
             'radiusSquared': info['radiusSquared'],
             'mapWidth': info['width'], 'mapHeight': info['height'],

@@ -1,25 +1,29 @@
 # 開発タスク
 
-現在：ユーザー指定でATMなし比較は実施しない。B47は待機のみで試験結果なし、試験用collector11ファイルはhash照合退避、ATMは比較準備前構成へ復元・baseline照合済み。ゲーム起動・新規テストは行わず、[前回B09の詳細プロファイラ表](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_WITH_ATM_B09_0.3.38.ja.md)へ平均／単発最大／約5秒窓分布／同一最重窓の内訳を追記した。以下の比較準備中・記録待機中は履歴。
+2026-11-06：[大規模構造変更の高速化調査](WowsExtractor-torpedoes-client-test/docs/RESEARCH_ARCHITECTURAL_PERFORMANCE.ja.md)。軽量転送＋外部でのJSON復元が有力。B09 active1,843件を再符号化すると平均99,438.6byte、自己完結key辞書方式で77,822.2byte（21.74%減、全件復号等値）。容量試算でありCPU/FPS効果は未測定。実装・導入・追加実機は行わず、外部bridge化の方針選択が必要。
 
-半径L/5案の[記録試算](WowsExtractor-torpedoes-client-test/docs/RESEARCH_RADIUS_L5_B09.ja.md)完了：分類tickでは現行nearの約47～52%がL/5～L/3帯にあり、全87本tickのhighは67→37／65→30。静的・定常2/5仮定の参考detail削減は約25～27%だが完全反実仮想再生・FPS改善率ではない。未実装・未適用、ATMなしB47は現行L/3を維持する。
+2026-11-06 ユーザー判断：上記の大規模構造変更・外部bridge案は**「一旦なし」で保留**。実装キューへ入れず、方針変更も行わない。調査記録のみ保持する。
 
-次の比較準備（2026-11-05）：build13533378へ0.3.38をATMなしで導入・10 source hash照合。**半径L/3・近5Hz／遠2Hzを維持**、L/5案は別の記録試算のみ。現行他modは保持したためB09と厳密なATM単独比較ではない。B47全field記録を起動、実機結果未取得。[条件](WowsExtractor-torpedoes-client-test/docs/VALIDATION_PLAN_13533378_NO_ATM_COMPARISON.ja.md)。
+## 現在の最新状況（0.3.40-radius-l5、2026-11-06）
 
-ATM B09負荷解析：[結果](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_WITH_ATM_B09_0.3.38.ja.md)。記録3セッションの魚雷あり2つは最大92／95本（200本ではない）。near約85%で、far非due省略は全体約8～9%。1/3条件は機能したが大半が円内。cycle平均約10.7ms、高負荷窓平均約15ms、固定avatar約4ms。ATM描画は計測外で体感FPSとの因果同期は未確定。near情報を減らすbudget案は未採用、情報維持型の固定費／同期出力削減をコード調査する。ゲーム停止・145fileshash照合退避済み。
-
-ATM併用負荷試験終了（2026-11-05）：ユーザーはbot魚雷を観察、ソナーで魚雷発見。minFPS約40では目立つカクつきなし、約30へ低下時は体感あり。with-atm-b09約199MBを回収し戦闘別に解析中（3 battleIdがあるため申告の2回目との対応を確認する）。新build13533378のcollector／ATM供給は確認、ゲーム停止確認後に今回導入物・依存・生成UIの145ファイルをhash照合退避済み。以下の試験準備中／導入済み表記は履歴。
-
-試験準備中の導入状態（2026-11-05）：ユーザー指定12対12＋ATM用に、実起動先の新build13533378へ0.3.38と作者公式ATM／TTaroModUtils／ModForgeを導入・hash照合済み。heavy OFF、独立4群・profiler ON、ATM state1Hz。全field記録`with-atm-b09`を起動、実機結果は未取得。[試験構成](WowsExtractor-torpedoes-client-test/docs/VALIDATION_PLAN_13533378_ATM_12V12.ja.md)。以下の「B46後退避済み」は前回試験終了時の状態。
-
-## 最新サマリー（0.3.39・実機根拠は0.3.38）
-
-- 最新ソースは **`0.3.39-own-torpedo-cadence`**。自艦魚雷の全距離HIGH例外と[収集頻度表](WowsExtractor-torpedoes-client-test/docs/COLLECTION_CADENCE.ja.md)を更新済み。私有replayを含む全564 tests＋9 module checker成功。未導入・未実機、追加実機試験は行わない。
-- ユーザー受入：TTX値は合っていたため、現行の初回TTX variant表示候補を実用上受け入れる。初回pinger選択はユーザー見解で仕様上おそらく回避不可とみなし、事前に魚雷を選ぶ操作や追加再試験は行わない。スキル発動時の実戦値／動的補正は未確認だが、追加取得・再試験は行わず受入済みとする。`selectedTTXnotApplicable`・`ammoParams={}` は追加取得の阻害課題として再オープンせず、source／raw／`liveAdjusted=false` という出典契約を維持する。
-- B46実機限定試験（0.3.38・heavy OFF・独立4群ON）：1,335 records（active 1,333）。ユーザー報告 minFPS 約50以上・カクつきなし（録画なし）。HP平均約2 Hz、比較／damage平均約1 Hz・非due省略を実機確認。独立 profiler phase（gun／submarine含む）を計上。通常参考48窓 cycle 平均3.763 ms／最大7.359 ms。depth／WaveHit／gun は全1,333 available、Battery は272 available／1,061 notSampled。
-- FPSタスク到達点：Aのoffline実装・216魚雷／22owner fixture・B43／B44 replayと、ATM B09でのnear／far実周期・省略を確認。B砲弾道撤去、Cのdamage1Hz／独立4群は完了。Dの各版回帰・限定実機試験は実施済みだが、負荷増加時に体感カクつきがあり最終実用FPSは未達。Eは①②⑦⑨⑧を完了、③④⑤⑥⑩は未実装／設計保留。
-- ATM B09は最大95魚雷を観測、200本規模・因果的FPS改善率は未検証。startup FPS追跡は中止維持。同条件再試験の追加要求はしない。
+- 最新ソースは **`0.3.40-radius-l5`**。魚雷分類半径を`R=L/3`から**`R=L/5`**へ正式変更した。`L=min(map width,height)`の較正world基準、境界上をHIGHに含める判定、5秒再分類、近5Hz／遠平均2Hzは維持する。L/5～L/3帯の魚雷はLOWになる。**1Hz遠方化ではない。**
+- 自艦と厳密boolで確認できた魚雷（`owner.isPlayer is True`）は全距離HIGH（0.2秒期限）を維持。整数1・文字列・欠測は自艦扱いせず、ownerId等の推測joinやnear本数budgetもしない。非due LOWの位置／owner追加read 0、membership／partial／unknown／strict ID／Python2互換も維持する。
+- 未導入・未実機。private replayを含む全566 testsで**557 passed, 9 skipped**＋9 module checker成功。skipはWoWS起動中のためinstaller 9件が安全上skip。**L/5と自艦全距離HIGHの実機周期は今回未確認。**
+- 実機確認の区別：Aの距離cadenceはB09（0.3.38・**L/3**）でnear／farの実周期・非due省略を確認済み。B09の最大92／95魚雷、near約85%、全detail省略約8～9%、cycle平均約10.7ms、高負荷窓約15msは**旧L/3・0.3.38の履歴**であり、現行L/5の根拠や改善率として使わない。
+- B砲弾道撤去は完了。Cのdamage 1Hzと独立4群（depth／Battery／WaveHit／gun）は実装・offline検証済み。Eは①②⑦⑧⑨完了、③④⑤⑥⑩は未実装／設計保留。Dは各版回帰・限定実機試験を実施済みだが、負荷増加時の体感カクつきがあり**実用FPSは未達**。
+- B47 ATMなし比較は中止（待機のみ・結果なし）。startup FPS追跡も中止維持。ゲーム起動・新規実機テストは行わず、追加実機は依頼しない。試験用collector11ファイルはhash照合退避、ATMは比較準備前構成へ復元・baseline照合済み。
+- TTXはユーザー受入済み。初回pinger選択・`ammoParams={}`は追加取得の阻害課題として再オープンせず、再試験も行わない。source／raw／`liveAdjusted=false`の出典契約を維持する。
 - 既知の問題・優先度・到達点は [KNOWN_ISSUES.ja.md](WowsExtractor-torpedoes-client-test/docs/KNOWN_ISSUES.ja.md)、詳細タスクは [FPS_TASKS.ja.md](WowsExtractor-torpedoes-client-test/docs/FPS_TASKS.ja.md) を参照。
+
+## 2026-11-05までの調査・試験履歴
+
+以下は当時の記録であり、現行L/5の実機根拠ではない。試験準備中・記録待機中・導入済みの表記も履歴。
+
+- 半径L/5案の[記録試算](WowsExtractor-torpedoes-client-test/docs/RESEARCH_RADIUS_L5_B09.ja.md)完了：分類tickでは当時のnear（L/3）の約47～52%がL/5～L/3帯にあり、全87本tickのhighは67→37／65→30。静的・定常2/5仮定の参考detail削減は約25～27%だが完全反実仮想再生・FPS改善率ではない。**調査時点は未実装・未適用**で、ATMなしB47はL/3を維持する方針だった。2026-11-06の0.3.40でL/5のみを適用済み。
+- 次の比較準備（2026-11-05）：build13533378へ0.3.38をATMなしで導入・10 source hash照合。半径L/3・近5Hz／遠2Hzを維持し、L/5案は記録試算のみだった。B47全field記録を起動したが、**比較は中止され実機結果なし**。[条件](WowsExtractor-torpedoes-client-test/docs/VALIDATION_PLAN_13533378_NO_ATM_COMPARISON.ja.md)。
+- ATM B09負荷解析（0.3.38・L/3の履歴）：[結果](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_WITH_ATM_B09_0.3.38.ja.md)。記録3セッションの魚雷あり2つは最大92／95本（200本ではない）。near約85%で、far非due省略は全体約8～9%。1/3条件は機能したが大半が円内。cycle平均約10.7ms、高負荷窓平均約15ms、固定avatar約4ms。ATM描画は計測外で体感FPSとの因果同期は未確定。near情報を減らすbudget案は未採用。ゲーム停止・145fileshash照合退避済み。
+- ATM併用負荷試験終了（2026-11-05）：ユーザーはbot魚雷を観察、ソナーで魚雷発見。minFPS約40では目立つカクつきなし、約30へ低下時は体感あり。with-atm-b09約199MBを回収し戦闘別に解析した。新build13533378のcollector／ATM供給は確認、ゲーム停止確認後に今回導入物・依存・生成UIの145ファイルをhash照合退避済み。
+- 試験準備中の導入状態（2026-11-05・履歴）：ユーザー指定12対12＋ATM用に、実起動先の新build13533378へ0.3.38と作者公式ATM／TTaroModUtils／ModForgeを導入・hash照合済み。heavy OFF、独立4群・profiler ON、ATM state1Hz。全field記録`with-atm-b09`を起動。[試験構成](WowsExtractor-torpedoes-client-test/docs/VALIDATION_PLAN_13533378_ATM_12V12.ja.md)。
 
 ## 旧版履歴（要約）
 
@@ -36,7 +40,7 @@ ATM併用負荷試験終了（2026-11-05）：ユーザーはbot魚雷を観察�
 <a id="task-performance"></a>
 ## 緊急優先：通常プレイのFPS低下
 
-- 共通HP群2Hz＋avatar照合／集計1Hz、damage snapshot 1Hz化、自艦depth／Battery／WaveHit／gun reload独立化、砲弾道撤去、魚雷距離cadenceのoffline実装は完了。残る未確認・未実装は[FPS専用タスクE](WowsExtractor-torpedoes-client-test/docs/FPS_TASKS.ja.md#fps-slow-groups)の③④⑤⑥⑩、実機near／far両側試験・最終FPS判定など。既知の未知を理由に同条件の実機試験を繰り返さない。
+- 共通HP群2Hz＋avatar照合／集計1Hz、damage snapshot 1Hz化、自艦depth／Battery／WaveHit／gun reload独立化、砲弾道撤去、魚雷距離cadenceのoffline実装は完了。実機near／far両側試験はB09でL/3時点確認済み。残る未確認・未実装はL/5・自艦全距離HIGHの実機確認、[FPS専用タスクE](WowsExtractor-torpedoes-client-test/docs/FPS_TASKS.ja.md#fps-slow-groups)の③④⑤⑥⑩、最終FPS判定など。既知の未知を理由に同条件の実機試験を繰り返さない。
 
 - 最新の低頻度化指定と依存調査：[10項目の調査](WowsExtractor-torpedoes-client-test/docs/RESEARCH_SLOW_GROUPS.ja.md)、[実装タスクE](WowsExtractor-torpedoes-client-test/docs/FPS_TASKS.ja.md#fps-slow-groups)。①HP群2Hz・②avatar1Hz・⑦Battery1Hz・⑨damage1Hz・⑧初回TTXのみは完了。③遠距離艦、④⑤短期状態／消耗品・search、⑥module故障修理、⑩較正診断／coverage1Hzは未実装／設計保留。
 
@@ -84,18 +88,18 @@ FPS改善の実施順・詳細タスクは[専用タスクファイル](WowsExtr
 - B28の4集計窓では`ships`がsnapshot buildの約84%を占める（同一時計の記録値の比率）。191 sampleの`ships`平均約27.4ms・最大約40ms、魚雷処理平均約0.03ms。診断OFFを確認済み。B28静的調査でposition/worldPosition/positionHullが各9,100 missing、同一frame player lookup重複を確認。0.3.21ではship.getPosition一回、同frame player再利用、重いfallbackをdiagnostic due+opt-inだけにした。FPS因果と`time.clock`のruntime意味は未確定。通常戦での再現・再導入は依頼しない。
 - [ ] 0.3.14導入後の通常プレイで「自艦撃沈までminFPS 25、撃沈後110まで回復」と報告（外部記録ツール未使用）。因果未確定。追加FPS比較実機試験は依頼しない。0.3.15で既定収集停止、0.3.16で診断既定1Hz、0.3.17でdiagnostic sample内共有、0.3.18でcore avatar getterを3→1へ、0.3.19でself getterを各state 1回へ共有。0.3.20-opt-in-profiling（source only・未導入）でcollection/diagnostics/profiler既定OFFのまま最大9区間の5秒phase集計を追加。OFF時clock calls 0、FPS未計測・改善未確認、timer候補はWoWS runtime未検証。writer thread/FPS/API内部時間未計測、24艦core処理時間・armament/public_data等は未評価。通常プレイにはmod退避を推奨。0.3.14 mod退避先はユーザー許可済み、再導入禁止。[性能問題記録](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_INCIDENT_0.3.14.ja.md)。
 
-現在の正本ソース：`WowsExtractor-torpedoes-client-test/`。作業版は **`0.3.38-independent-gun-reload`**（通常導入は保留・B46試験後退避済み・B46で実機可用性確認済み）。collection/diagnostics/profiler/独立群はすべて既定OFF。state は core tick 0.2秒（約5Hz、0.1秒明示で10Hz互換）を基準とし、各情報群の期限・sample metadata に応じて取得を省略・出力する（同一 `state.json` に格納されても、すべての項目が毎tick揃うわけではない）。HP 2Hz・avatar比較1Hz・damage 1Hz・自艦depth／Battery／WaveHit／gun reload独立取得は明示ON・collection必須で利用可能。meta arena探索0.5秒gate、較正observe戻り値再利用、strict players index/row-local field共有を維持。9 module維持。全555 tests＋9 module checker成功。遠距離2Hz・多数魚雷・因果的FPS改善率は未検証。通常プレイには引き続きmod退避を推奨。更新：2026-11-05。
+現在の正本ソース：`WowsExtractor-torpedoes-client-test/`。作業版は **`0.3.40-radius-l5`**（source only・未導入・未実機）。collection/diagnostics/profiler/独立群はすべて既定OFF。state は core tick 0.2秒（約5Hz、0.1秒明示で10Hz互換）を基準とし、各情報群の期限・sample metadata に応じて取得を省略・出力する（同一 `state.json` に格納されても、すべての項目が毎tick揃うわけではない）。HP 2Hz・avatar比較1Hz・damage 1Hz・自艦depth／Battery／WaveHit／gun reload独立取得は明示ON・collection必須で利用可能。魚雷は5秒再分類で、自艦の厳密bool Trueは全距離HIGH、他はL/5内・境界上HIGH／外LOW平均2Hz。meta arena探索0.5秒gate、較正observe戻り値再利用、strict players index/row-local field共有を維持。9 module維持。全566 testsで**557 passed, 9 skipped**＋9 module checker成功。skipはWoWS起動中のためinstaller 9件が安全上skip、私有replayは実施。L/5・自艦全距離HIGHの実機周期、多数魚雷・因果的FPS改善率は未検証。通常プレイには引き続きmod退避を推奨。更新：2026-11-06。
 
 開発目標・収集層の責務は [DEVELOPMENT.md](DEVELOPMENT.md)、AI向け指示・自律進行・Git運用は [.ai/INSTRUCTIONS.md](.ai/INSTRUCTIONS.md) を参照。以下は進捗と残課題。
 
 <a id="task-scope"></a>
 ## P0：潜水艦戦闘補助への絞り込み
 
-最新指定：2Hz／5Hzの距離判定は5秒ごとの枠振り分け方式。Lはマップ一辺、長方形はmin(width,height)、半径L/3で承認済み。[FPS詳細設計](WowsExtractor-torpedoes-client-test/docs/FPS_TASKS.ja.md#fps-torpedoes)参照。offline実装は0.3.33で完了、B43／B44 replay・216魚雷fixtureで検証済み。実機near／far両側試験・最終FPS判定は未完。
+最新指定：2Hz／5Hzの距離判定は5秒ごとの枠振り分け方式。Lはマップ一辺、長方形は`L=min(width,height)`、**現行半径`R=L/5`**（0.3.33～0.3.39はL/3）。[FPS詳細設計](WowsExtractor-torpedoes-client-test/docs/FPS_TASKS.ja.md#fps-torpedoes)参照。offline実装は0.3.33、L/5への変更は0.3.40で完了し、B43／B44 replay・216魚雷fixtureを更新検証済み。実機はB09でL/3のnear／far周期を確認済みだが、**L/5と自艦全距離HIGHは今回未実機**で、最終FPS判定も未完。
 
 - [x] 汎用ダメージ集計は維持、砲弾弾道計算は0.3.32で全撤去済み。依存consumer・テスト・出力契約は整理済み。
 - [x] 自艦深度・Battery・WaveHit・gun reloadを、汎用診断一式のONを必要としない専用opt-inで独立取得可能にした（0.3.37・0.3.38、既定OFF・collection必須）。
-- [x] 距離別魚雷cadenceを設計・実装済み。ユーザー指定：自艦から半径マップサイズ1/3より外は2Hz、内側5Hz案。詳細は[FPS専用タスク](WowsExtractor-torpedoes-client-test/docs/FPS_TASKS.ja.md#fps-torpedoes)を参照。自艦魚雷の確定識別ができない場合に推測で分類しない。
+- [x] 距離別魚雷cadenceを設計・実装済み。現行指定：自艦から半径`L/5`（L=マップ短辺の較正world長）より外はLOW平均2Hz、内側・境界上はHIGH 5Hz。0.3.40でL/3から正式変更。詳細は[FPS専用タスク](WowsExtractor-torpedoes-client-test/docs/FPS_TASKS.ja.md#fps-torpedoes)を参照。自艦は`owner.isPlayer is True`の厳密boolだけで全距離HIGHとし、確定識別できない場合は推測で分類しない。
 - [x] 全魚雷列挙・分類用位置readの費用と、owner取得・motion・map変換・serialize費用を分け、2Hz化で何が減るかoffline確認済み（B43／B44 replay、216魚雷fixture）。
 - [x] 群別sampleTs／周期／状態を出力契約へ追加し、非dueを0本・消失と扱わず、保持する場合は過去sampleとして分離する。live位置のframe間cache禁止は変更していない。
 
@@ -130,11 +134,11 @@ FPS改善の実施順・詳細タスクは[専用タスクファイル](WowsExtr
 <a id="task-torpedoes"></a>
 ## P1：魚雷識別・運動・単位（mod）
 
-- [ ] 自艦魚雷／僚艦魚雷／敵魚雷の確実な識別。`ownerId/ownerTeamId/ownerType`はcore rowから取得済み、owner objectは別API `getTorpedoOwnerById(ownerId)`で取得する。現在のcollectorに`ownerShip` field readはなく、`isOwn`は返却ownerの厳密bool `isPlayer`がある場合だけ。ownerIdとplayerId/vehicleId/GUI ownerIDのnamespaceは未確定で推測joinを避ける。
-- [ ] 複数魚雷・複数斉射の識別、shotIdの共有範囲、uiId再利用、途中取得／消失を検証。
-- [ ] 魚雷の深度を含む位置成分と、艦のyaw／speed、座標軸、時刻・距離単位を検証。
-- [ ] ATM `isSpotted=false`の実測とtrue／false／unknownの遷移確認。
-- [ ] ATMあり／なしのtype・isHoming・isSpottedの対応、供給元、更新差を整理。0.3.29で`isHoming`/`isSpotted`固定2候補を専用`torpedo_state_sampling_enabled` 1Hz opt-inへ分離する（source only・実機未確認）。producer unknown・semantics unverifiedを維持。`isHoming`は誘導先ID・停止距離／地点／理由ではない。誘導先ID・停止情報は未取得。
+- [△] 自艦魚雷／僚艦魚雷／敵魚雷の識別。`ownerId/ownerTeamId/ownerType`はcore rowから取得済み、owner objectは`getTorpedoOwnerById(ownerId)`で取得する。`isOwn`は返却ownerの厳密bool値のみTrue/Falseを出力し、非bool・欠測はNoneとする。自艦扱いはTrueのみ。ownerIdとplayerId/vehicleId/GUI ownerIDのnamespaceは未確定で推測joinを避ける。B43/B44 replay、B46、B09で複数owner・敵／味方混在を観測しているが、全namespace対応は未確認。
+- [△] 複数魚雷・複数斉射の識別、shotIdの共有範囲、uiId再利用、途中取得／消失を検証。B46で同時最大6本、B09で最大92／95本を観測。ID再利用や戦闘途中の消失／再取得の網羅的確認は未完了。
+- [△] 魚雷の深度を含む位置成分と、艦のyaw／speed、座標軸、時刻・距離単位を検証。B40で`dataHub.torpedo.depth`候補262行を取得し、`position.y`・地図補助y=0は代用しない。深度単位・対象艦深度・深度差は未確定。
+- [△] ATM `isSpotted`の実測とtrue／false／unknownの遷移確認。B08でspotted推定値を取得（true 108／false 170／none 140）。falseは実測済みだが、true→false→unknownの操作・時刻同期した遷移検証とATMなし対照は未確定。noneは値未取得で、falseと区別する。
+- [△] ATMあり／なしのtype・isHoming・isSpottedの対応、供給元、更新差を整理。0.3.29で`isHoming`/`isSpotted`固定2候補を専用`torpedo_state_sampling_enabled` 1Hz opt-inへ分離（source実装済み）。B41では供給なしでunknown、0.3.30で`advanced_torpedo_marker`等を供給元として区別。B08でATM由来homing true 162／false 116・spotted true 108／false 170を観測済み。producer unknown・semantics unverifiedを維持。意味・操作同期・更新遅延は未確定。`isHoming`は誘導先ID・停止距離／地点・理由ではなく、誘導先ID・停止情報は未取得。
 - [ ] 停止・旋回・欠測・再取得時の速度／航向／観測距離・時間の挙動を検証。
 
 <a id="task-armament"></a>
@@ -174,7 +178,7 @@ FPS改善の実施順・詳細タスクは[専用タスクファイル](WowsExtr
 - [ ] 別地図で較正の成立、係数・軸・境界を確認。Oceanの係数を一般化しない。
 - [ ] 停船・直進・旋回・狭い移動・較正前後・座標ドリフトへの対応を検証。
 - [ ] 敵／味方／画面外魚雷、複数本斉射、失探／再取得を確認。
-- [ ] 12対12相当で取得漏れ、負荷、JSON更新頻度と容量を確認。
+- [△] 12対12相当で取得漏れ、負荷、JSON更新頻度と容量を確認。B09は12対12＋ATMで最大92／95本を観測したが、取得漏れ・JSON頻度・容量の系統的確認は未実施。
 - [ ] 連続戦闘・退出・再入場・観戦・自艦撃沈時のライフサイクルを検証。
 - [ ] 退出ハングが再発した場合のみ切り分け再開（現状は保留、原因未確定）。
 - [ ] クライアントbuild変更時の互換確認、安全停止、導入／復元手順を維持。

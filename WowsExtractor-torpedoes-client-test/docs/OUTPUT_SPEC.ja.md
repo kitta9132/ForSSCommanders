@@ -2,7 +2,15 @@
 
 現在の群別周期は[収集頻度表](COLLECTION_CADENCE.ja.md)を参照。以下の版別節は変更時点の契約履歴であり、同じ項目に差分があれば最新の適用版を優先する。
 
-## 0.3.39：自艦魚雷の全距離HIGH例外
+## 0.3.40：魚雷分類半径をL/5へ変更
+
+- 分類半径を`R=L/5`へ正式変更する。`L=min(mapWidth,mapHeight)`は同じsnapshotのavailable較正係数から得るworld長で、長方形では短辺を使う。L/3からの変更点は半径だけで、境界上（`distanceSquared <= R^2`）をHIGHに含める判定、5秒再分類、近HIGH 0.2秒／遠LOW平均0.5秒、新規・距離不明・分類context喪失のHIGHは維持する。
+- **L/5とL/3の間にある魚雷はLOWになる。** 旧L/3でnearだった中距離帯は、位置sampleが平均約2Hz（0.4/0.6秒間隔）のLOWになり、円外→円内へ移動しても次の5秒再分類まで最大約5秒＋実行遅延はLOWのまま。これを「位置sampleの鮮度が5秒遅れる」と混同しない。1Hz化ではない。
+- 自艦と厳密boolで確認できた魚雷（`owner.isPlayer is True`）は距離に関係なくHIGH（0.2秒期限）のまま。整数1・文字列・欠測は自艦扱いせず、ownerIdやvehicleIdとの推測joinもしない。
+- `classification.radiusWorld`／`radiusSource=min(mapWidth,mapHeight)/5`を新しい境界根拠として出す。非dueのLOWで位置・owner・派生値を追加readせず、membership・partial・unknown・strict ID・Python2互換の既存契約は変更しない。
+- 私有B43／B44 replayのdigest・予算期待は半径変更に伴い更新した。membership行数、incomplete 0、sample行数と位置・詳細field readの一致、owner lookupが元予算以下であることなどをtestで確認し、FPS改善率は主張しない。offlineのみで、L/5と自艦5Hzの実機確認は未実施。
+
+## 0.3.39：自艦魚雷の全距離HIGH例外（当時。半径は0.3.40でL/5へ変更）
 
 - 今回取得したownerの`isPlayer is True`だけを自艦判定の根拠とし、全距離HIGH（0.2秒期限）にする。整数1・文字列・欠測は自艦判定に使わず、unknownをfalseへ変換しない。ownerIdとplayer／vehicle IDの推測joinはしない。
 - その他は半径L/3内HIGH／外LOW（平均2Hz）、5秒再分類を維持。距離不明・新規は従来どおりHIGH。幾何分類farCountには自艦farも含むため、HIGH本数とnearCountは一致しない場合がある。
@@ -71,6 +79,8 @@ schema=1/apiVersion=1.0を維持。実機FPS改善・初回性能取得の実機
 ## 0.3.33：魚雷の周期別sample
 
 `torpedoes[]`は今回実際にsampleした魚雷行だけとなる。**配列にないことは消失ではない。** `torpedoStatus.available/status`は全体API列挙の成否、`membershipComplete`と`membership`は全件識別の観測、`sampling`は群別sampleの状態を表す。`membershipFields=["uiId","ownerId","shotId"]`の順に、membershipは`[[uiId,ownerId,shotId], ...]`を出す。重複／不明IDがあればcomplete=falseと件数を出し、match可能なIDのみをmembershipへ出す。far非dueで空rowsでも魚雷0本と判断しない。旧consumerは対応が必要。schema=1/apiVersion=1.0を維持し、変更境界はmeta.mod.versionとsampling有無で判定する。
+
+以下は0.3.33時点の半径L/3の記録。半径は0.3.40でL/5へ変更済み。
 
 5秒ごとに現在位置を分類し、半径L/3以内はhigh（既定0.2秒）、外側low（目標0.5秒）。新規は次の再分類まで暫定high。位置・半径の判定不能はhigh。5Hz tickへ0.5秒dueを量子化するためlowは0.4/0.6秒相当の交互で平均約2Hzとなり、実際のフレーム遅延でさらに変動する。catch-upで同tickに複数sampleしない。far→nearは次の再分類まで最大約5秒＋遅延はlowのまま。
 

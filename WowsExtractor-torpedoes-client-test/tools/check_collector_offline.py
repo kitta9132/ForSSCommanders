@@ -122,7 +122,7 @@ def main():
     collector._torpedoSamplingGroups.clear()
     collector._torpedoMotion.clear()
     first = collector._build_state(10.)
-    assert abs(first['torpedoStatus']['sampling']['classification']['radiusWorld'] - 1000.) < 1e-8
+    assert abs(first['torpedoStatus']['sampling']['classification']['radiusWorld'] - 600.) < 1e-8
     assert all(row['sampling']['group'] == 'high' for row in first['torpedoes'])
     classified = collector._build_state(15.)
     assert classified['torpedoes'][0]['sampling']['group'] == 'low'

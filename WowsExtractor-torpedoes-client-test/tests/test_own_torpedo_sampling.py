@@ -236,6 +236,29 @@ def test_own_true_survives_new_and_near_to_far_classifications():
     assert status['sampling']['classification']['farCount'] == 2
 
 
+def test_own_strict_true_stays_high_inside_the_l5_to_l3_band():
+    own = CountedTorpedo(uiId=1, ownerId=9350, shotId=1,
+                         position=(0, 0, 700.0))
+    other = CountedTorpedo(uiId=2, ownerId=9351, shotId=2,
+                           position=(0, 0, 700.0))
+    telemetry, battle = adapter([own, other], {9350: True, 9351: False})
+    sampler = TorpedoSamplingGroups()
+    ctx = context()  # L/5 = 600, L/3 = 1000
+    telemetry.torpedoes(0, sampler, 0.0, ctx)
+    out, status = telemetry.torpedoes(0, sampler, 5.0, ctx)
+    groups = dict((row['uiId'], row['sampling']) for row in out)
+    assert groups[1]['group'] == 'high'
+    assert groups[1]['distanceStatus'] == 'far'
+    assert groups[1]['intervalSeconds'] == 0.2
+    assert groups[2]['group'] == 'low'
+    assert status['sampling']['classification']['farCount'] == 2
+
+    out, _ = telemetry.torpedoes(0, sampler, 5.2, ctx)
+    assert [row['uiId'] for row in out] == [1]
+    assert battle.owner_calls[9350] == 3
+    assert battle.owner_calls[9351] == 2
+
+
 def test_only_strict_bool_true_is_own_and_unknown_never_becomes_false():
     rows = [
         CountedTorpedo(uiId=1, ownerId=9401, shotId=1,

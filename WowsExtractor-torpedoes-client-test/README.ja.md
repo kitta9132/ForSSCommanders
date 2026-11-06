@@ -3,12 +3,14 @@
 現在の情報群ごとの周期は[収集頻度表](docs/COLLECTION_CADENCE.ja.md)を参照。
 
 作成日：2026-11-04（日本時間）
-modバージョン：`0.3.39-own-torpedo-cadence` / ModsAPI：`API_v1.0`（全564 tests＋9 module checker成功・未導入／未実機）
+modバージョン：`0.3.40-radius-l5` / ModsAPI：`API_v1.0`（557 passed, 9 skipped＋9 module checker成功・未導入／未実機。skipはWoWS起動中のためinstaller 9件が安全上skip、私有replayは実施）
 
 B46は限定条件（heavy OFF・独立4群ON）で、ユーザー報告 minFPS 約50以上・カクつきなし（録画なし）。1,335 records（active 1,333）、HP平均約2 Hz、比較／damage平均約1 Hz・非due省略、独立 profiler phase を確認。depth／WaveHit／gun は全1,333 available、Battery 272 available／1,061 notSampled。遠距離2 Hz・多数魚雷・全項目の意味保証は未確認。以下の未実機記述は版公開時の履歴。
 
 ## 最近の版別到達点（履歴）
 
+- 0.3.40 `radius-l5`：魚雷分類半径を`R=L/5`（L=マップ短辺の較正world長）へ正式変更。L/5～L/3帯はLOW、境界上はHIGH、自艦の厳密bool Trueは全距離HIGH、他は近5Hz／遠平均2Hz・5秒再分類を維持。1Hz遠方化ではない。offlineのみ・未実機。
+- 0.3.39 `own-torpedo-cadence`：自艦と厳密boolで確認できた魚雷を全距離HIGHに変更。当時の分類半径はL/3。
 - 0.3.38 `independent-gun-reload`：gun reload raw を heavy 診断なしで core 周期から採取（既定OFF・collection必須）。装填数・物理管ID・修理timer の意味確定ではない。B46で独立4群の実機可用性確認。
 - 0.3.37 `independent-submarine`：自艦 depth／Battery／WaveHit を個別opt-inで診断から独立（既定false・collection必須）。WaveHit対象 namespace／TTL・装填数・管ID は未解決。
 - 0.3.36 `damage-cadence`：damage イベント受付を維持し、台帳 snapshot 生成・出力だけを共通1 Hz 枠へ移す。
@@ -24,7 +26,7 @@ B46は限定条件（heavy OFF・独立4群ON）で、ユーザー報告 minFPS 
 
 0.3.14導入後「自艦が沈むまでminFPS 25、撃沈後110まで回復」と報告されています。因果は未確定です。B46（0.3.38・heavy OFF・独立4群ON）ではユーザー報告 minFPS 約50以上・カクつきなしを確認しましたが、今回は魚雷同時最大6本・low群0であり、遠距離2 Hz や多数魚雷時の FPS は未検証です。因果的な改善率・開始直後 FPS 低下も未解明です。
 
-現行ソースは **`0.3.39-own-torpedo-cadence`**（offline検証済み・未導入）。collection/diagnostics/profiler/depth/state/gun reload 独立群はすべて既定OFFです。state は core tick 0.2 秒（約5 Hz、0.1 秒明示で10 Hz互換）を基準とし、各情報群の期限・sample metadata に応じて取得を省略・出力します（同一 `state.json` ファイルに出力されるだけで、すべての項目が毎tick揃うわけではありません）。HP 2 Hz・avatar 比較1 Hz・damage 1 Hz・自艦 depth／Battery／WaveHit／gun reload の独立取得は、明示ON・collection必須で利用可能です。意味・単位・実機 FPS 効果には制約が残ります。通常プレイでは引き続き mod 退避を推奨します。
+現行ソースは **`0.3.40-radius-l5`**（offline検証済み・未導入／未実機）。魚雷は5秒再分類で、自艦の厳密bool Trueは全距離HIGH、他は`L=min(map width,height)`のL/5内・境界上HIGH／外LOW平均2Hzです。collection/diagnostics/profiler/depth/state/gun reload 独立群はすべて既定OFFです。state は core tick 0.2 秒（約5 Hz、0.1 秒明示で10 Hz互換）を基準とし、各情報群の期限・sample metadata に応じて取得を省略・出力します（同一 `state.json` ファイルに出力されるだけで、すべての項目が毎tick揃うわけではありません）。HP 2 Hz・avatar 比較1 Hz・damage 1 Hz・自艦 depth／Battery／WaveHit／gun reload の独立取得は、明示ON・collection必須で利用可能です。意味・単位・実機 FPS 効果には制約が残ります。通常プレイでは引き続き mod 退避を推奨します。
 
 `config.ini` がない場合・読み込みに失敗した場合も収集停止です。明示的に `collection_enabled = true` のときだけ通常収集を開始します。heavy UI/dataHub probeはさらに `diagnostics_enabled = true`、profilerは独立して `profiler_enabled = true` が必要です。魚雷depth/state samplerはそれぞれ専用opt-inでdiagnostics非依存にできますが、collection opt-inが必須です（全option既定OFF）。intervalは既定・最小1秒、invalid値は1秒へ戻します。同時sampleではheavy/depth/stateのtorpedo collection getter／列挙を共有します。state samplerは`isHoming`/`isSpotted`以外の任意data keyを探索しません。収集停止中はprobe/API poll・定期tickを行わず、戦闘開始時のdisabled stateと終了stateだけを書きます。core収集（既定0.2秒）およびarmament/public_dataの負荷は未評価です。
 

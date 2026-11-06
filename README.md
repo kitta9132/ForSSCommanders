@@ -4,7 +4,7 @@
 
 最新実機状況：[B46・0.3.38](WowsExtractor-torpedoes-client-test/docs/VALIDATION_B46_0.3.38.ja.md)は限定条件（heavy OFF・独立4群ON）で minFPS 約50以上・カクつきなし（ユーザー報告、録画なし）。1,335 records（active 1,333）、HP平均約2 Hz、比較／damage平均約1 Hz・非due省略、独立 profiler phase を確認。depth／WaveHit／gun は全1,333 available、Battery 272 available／1,061 notSampled。遠距離2 Hz・多数魚雷・因果的 FPS 改善率は未検証。試験後 collector 退避済み。以下の未実機表記は各版公開時の履歴。
 
-最新ソース：**0.3.39-own-torpedo-cadence**（全564 tests＋9 module checker成功・未導入）。自艦と確認できた魚雷を全距離HIGHの対象にする。他の魚雷はL/3内5Hz／外平均2Hzを維持し、L/5案は適用しない。0.3.38実機記録の評価と今回の未実機変更を区別する。
+最新ソース：**0.3.40-radius-l5**（557 passed, 9 skipped＋9 module checker成功・未導入／未実機。skipはWoWS起動中のためinstaller 9件が安全上skip、私有replayは実施）。魚雷の分類半径をL/3から`R=L/5`へ正式変更し、L/5～L/3帯はLOWになる。自艦と厳密boolで確認できた魚雷は全距離HIGHのまま。境界上HIGH・近5Hz／遠平均2Hz・5秒再分類は維持し、1Hz遠方化ではない。0.3.38実機記録（L/3時点）の評価と、今回の未実機変更を区別する。
 
 ## 最近の版別到達点（履歴）
 
@@ -39,7 +39,7 @@ World of Warshipsの潜水艦向け外部2Dマップと、公開ModsAPIを使う
 
 0.3.14導入後「自艦が沈むまでminFPS 25、撃沈後は110まで回復」と報告されています（外部記録ツール未使用）。因果は未確定です。B46（0.3.38・heavy OFF・独立4群ON）ではユーザー報告 minFPS 約50以上・カクつきなしを確認しましたが、今回は魚雷同時最大6本・low群0であり、遠距離2 Hz や多数魚雷時の FPS は未検証です。因果的な改善率・開始直後 FPS 低下も未解明です。
 
-現行ソースは **`0.3.39-own-torpedo-cadence`**（offline検証済み・未導入）。collection/diagnostics/profiler/独立群はすべて既定OFFです。state は core tick 0.2 秒（約5 Hz、0.1 秒明示で10 Hz互換）を基準とし、各情報群の期限・sample metadata に応じて取得を省略・出力します（同一 `state.json` ファイルに出力されるだけで、すべての項目が毎tick揃うわけではありません）。HP 2 Hz・avatar 比較1 Hz・damage 1 Hz・自艦 depth／Battery／WaveHit／gun reload の独立取得は、明示ON・collection必須で利用可能です。意味・単位・実機 FPS 効果には制約が残ります。通常プレイでは引き続き mod 退避を推奨します。
+現行ソースは **`0.3.40-radius-l5`**（offline検証済み・未導入／未実機）。魚雷は5秒再分類で、自艦の厳密bool Trueは全距離HIGH、他は`L=min(map width,height)`のL/5内・境界上HIGH／外LOW平均2Hzです。collection/diagnostics/profiler/独立群はすべて既定OFFです。state は core tick 0.2 秒（約5 Hz、0.1 秒明示で10 Hz互換）を基準とし、各情報群の期限・sample metadata に応じて取得を省略・出力します（同一 `state.json` ファイルに出力されるだけで、すべての項目が毎tick揃うわけではありません）。HP 2 Hz・avatar 比較1 Hz・damage 1 Hz・自艦 depth／Battery／WaveHit／gun reload の独立取得は、明示ON・collection必須で利用可能です。意味・単位・実機 FPS 効果には制約が残ります。通常プレイでは引き続き mod 退避を推奨します。
 
 旧0.3.1ではSteam版build 13357625の訓練戦で、魚雷位置・type、
 ATM由来の誘導/被発見状態、移動履歴による座標較正などを試験しています。

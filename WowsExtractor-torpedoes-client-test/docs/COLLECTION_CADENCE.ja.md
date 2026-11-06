@@ -1,6 +1,6 @@
 # 現行の収集頻度表
 
-対象：0.3.39-own-torpedo-cadence。標準設定`state_interval=0.2`のcore tickを基準にする。以下はゲームからの採取・計算の目安で、厳密なHzや全遷移捕捉を保証しない。設定によってcoreが遅ければ、各群もそれより速く採取できない。
+対象：0.3.40-radius-l5。標準設定`state_interval=0.2`のcore tickを基準にする。以下はゲームからの採取・計算の目安で、厳密なHzや全遷移捕捉を保証しない。設定によってcoreが遅ければ、各群もそれより速く採取できない。
 
 collectionは既定OFF。専用opt-in／heavy diagnostics／profilerも既定OFFであり、表の周期を記載しただけで有効になるわけではない。[出力契約](OUTPUT_SPEC.ja.md)／[設定](INSTALL.ja.md)を参照。過去の[B31頻度調査](RESEARCH_COLLECTION_CADENCE_B31.ja.md)は現況表ではない。
 
@@ -10,15 +10,15 @@ collectionは既定OFF。専用opt-in／heavy diagnostics／profilerも既定OFF
 | --- | --- | --- |
 | 全魚雷の列挙・最小ID・membership | core、約5Hz | 遠距離非dueでも一覧の識別を観測。完全性／不明IDを別に示す |
 | 自艦発射と確認できた魚雷の詳細 | HIGH、目標5Hz | 距離に関係なくhigh。ownerの`isPlayer`が厳密bool Trueである観測を使い、ownerIdのnamespace推測で補わない |
-| その他の魚雷・半径L/3以内／境界上 | HIGH、目標5Hz | Lはマップ短辺の較正由来world長。物理kmの保証ではない |
-| その他の魚雷・半径L/3より外 | LOW、平均約2Hz | 0.5秒期限をcore tickへ量子化するため約0.4／0.6秒等に変動 |
+| その他の魚雷・半径L/5以内／境界上 | HIGH、目標5Hz | Lはマップ短辺の較正由来world長。物理kmの保証ではない |
+| その他の魚雷・半径L/5より外 | LOW、平均約2Hz | 0.5秒期限をcore tickへ量子化するため約0.4／0.6秒等に変動 |
 | 新規・距離判定不能・分類context喪失 | 暫定／安全側HIGH | 所有者不明を自艦と断定する意味ではない |
 | 距離による枠再分類 | 約5秒ごと | 自艦例外以外のfar→near昇格は次回分類まで待つ場合がある |
 | owner詳細・motion・地図変換 | 各魚雷の今回sampleと同周期 | low非dueでは省略し、前回の位置／owner／派生値を現在値としてコピーしない |
 | 魚雷UI深度の専用probe | 既定1Hz・最小間隔1秒 | `torpedo_depth_sampling_enabled`必須。固定候補のraw、意味・単位は未確定 |
 | ATM等の誘導／被発見候補probe | 既定1Hz・最小間隔1秒 | `torpedo_state_sampling_enabled`必須。第三者由来値と供給元unknownを区別、最大64候補 |
 
-L/5は記録試算だけで、**現行半径はL/3を維持**する。自艦HIGH例外は情報量削減ではなく、自艦魚雷の遠方詳細取得を増やす変更であり、FPS改善策と呼ばない。所有者不明はunknownを維持し、距離ルールに従う。low非dueでは所有者を再取得せず、後のdue sampleでTrueと確認できた時点でhighへ昇格する。coreを0.1秒にしてもHIGH期限は0.2秒のまま。
+**0.3.40で半径をL/3からL/5へ正式変更した。** L=min(map width,height)の較正world基準、境界上をHIGHに含める判定、5秒再分類、近5Hz／遠平均2Hzは変更しない。L/5とL/3の間にある魚雷はLOWになる。自艦HIGH例外は情報量削減ではなく、自艦魚雷の遠方詳細取得を増やす変更であり、FPS改善策と呼ばない。所有者不明はunknownを維持し、距離ルールに従う。ownerIdの推測joinやnear本数budgetは行わない。low非dueでは所有者を再取得せず、後のdue sampleでTrueと確認できた時点でhighへ昇格する。coreを0.1秒にしてもHIGH期限は0.2秒のまま。
 
 ## 艦・自艦・診断など
 

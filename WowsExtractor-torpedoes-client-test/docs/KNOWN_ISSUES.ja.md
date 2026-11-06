@@ -1,6 +1,8 @@
 # 既知の問題と実用化の到達点
 
-0.3.39：自艦と厳密boolで確認できた魚雷を全距離HIGH（目標5Hz）に変更。[収集頻度表](COLLECTION_CADENCE.ja.md)を更新、offline564 tests・9 module checker成功。未導入・未実機。所有者不明は距離ルールに従い、low非dueで再確認しない。FPS課題を解決済みとはしない。以下の実機根拠は0.3.38。
+0.3.40：魚雷分類半径を`R=L/5`（`L=min(mapWidth,mapHeight)`の較正world長）へ正式変更。L/5～L/3帯はLOWになり、自艦の厳密bool Trueは全距離HIGH（0.2秒期限）、他は近5Hz／遠平均2Hz、5秒再分類を維持する。[収集頻度表](COLLECTION_CADENCE.ja.md)・[出力仕様](OUTPUT_SPEC.ja.md)を更新。offline検証のみで未導入・未実機、L/5と自艦5Hzの実機周期は未確認。FPS改善や1Hz遠方化を主張しない。以下の実機根拠は0.3.38で、L/3の履歴である。
+
+0.3.39（履歴）：自艦と厳密boolで確認できた魚雷を全距離HIGH（目標5Hz）に変更。当時の分類半径はL/3。offline564 tests・9 module checker成功。未導入・未実機。所有者不明は距離ルールに従い、low非dueで再確認しない。
 
 ## 到達点サマリー（0.3.38・ATM B09後）
 
@@ -61,7 +63,7 @@ FPS改善を先行する。[専用タスク・距離分岐案](FPS_TASKS.ja.md#f
 | 位置・較正・運動 | [魚雷運動・単位](../../TASKS.md#task-torpedoes)、[別地図・境界・drift](../../TASKS.md#task-stability) |
 | ダメージ・弾道 | [潜水艦用途に不要な経路の削減](../../TASKS.md#task-scope) |
 
-距離別魚雷収集はユーザー指定により自艦から半径マップサイズ1/3より外を2Hz、内側5Hz案とする。offline 実装は0.3.33で完了し、B43／B44 replay・216魚雷fixtureで検証済み。実機 near／far 両側試験・最終FPS判定は未完。全魚雷API列挙と分類用位置取得が必要なら、それ自体は低頻度化できない可能性がある。後段の加工・owner取得・出力との費用を分けて判断する。詳細な分岐と周期・互換性は[FPS専用タスク](FPS_TASKS.ja.md#fps-torpedoes)へ集約。詳細診断に束ねられた潜水艦固有情報の独立化も対象。
+距離別魚雷収集は、0.3.40で自艦から半径`L/5`（L=マップ短辺の較正world長）より外をLOW平均2Hz、内側・境界上をHIGH 5Hzとする。0.3.33～0.3.39はL/3だった。offline 実装は0.3.33で完了し、B43／B44 replay・216魚雷fixtureで検証済み。L/5の実機near／far周期・自艦全距離HIGH・最終FPS判定は未完（B09のnear／far実周期確認はL/3時点の履歴）。全魚雷API列挙と分類用位置取得が必要なら、それ自体は低頻度化できない可能性がある。後段の加工・owner取得・出力との費用を分けて判断する。詳細な分岐と周期・互換性は[FPS専用タスク](FPS_TASKS.ja.md#fps-torpedoes)へ集約。詳細診断に束ねられた潜水艦固有情報の独立化も対象。
 
 ## 優先度A：実用前に詰める問題
 

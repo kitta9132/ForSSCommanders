@@ -97,11 +97,11 @@ def member(ui_id, owner_id=7000, shot_id=1, group=None):
 
 def test_initial_classification_samples_all_and_reports_complete_membership():
     rows = [CountedTorpedo(uiId=1, ownerId=7001, shotId=1,
-                           position=(0, 0, 999.0)),
+                           position=(0, 0, 599.0)),
             CountedTorpedo(uiId=2, ownerId=7002, shotId=2,
-                           position=(0, 0, 1000.0)),
+                           position=(0, 0, 600.0)),
             CountedTorpedo(uiId=3, ownerId=7003, shotId=3,
-                           position=(0, 0, 1000.1))]
+                           position=(0, 0, 600.1))]
     telemetry, battle = adapter(rows)
     sampler = TorpedoSamplingGroups()
     out, status = telemetry.torpedoes(0, sampler, 100.0, context())
@@ -114,7 +114,7 @@ def test_initial_classification_samples_all_and_reports_complete_membership():
     assert all(row['sampling']['sampleTs'] == 100.0 for row in out)
     assert all(row['sampling']['classificationTs'] == 100.0 for row in out)
     assert [row['position'] for row in out] == [
-        [0.0, 0.0, 999.0], [0.0, 0.0, 1000.0], [0.0, 0.0, 1000.1]]
+        [0.0, 0.0, 599.0], [0.0, 0.0, 600.0], [0.0, 0.0, 600.1]]
     assert status['membership'] == [
         member(1, 7001, 1, 'high'), member(2, 7002, 2, 'high'),
         member(3, 7003, 3, 'high')]
@@ -122,8 +122,8 @@ def test_initial_classification_samples_all_and_reports_complete_membership():
     sampling = status['sampling']
     assert sampling['status'] == 'available'
     assert sampling['classification']['ts'] == 100.0
-    assert sampling['classification']['radiusWorld'] == 1000.0
-    assert sampling['classification']['radiusSource'] == 'min(mapWidth,mapHeight)/3'
+    assert sampling['classification']['radiusWorld'] == 600.0
+    assert sampling['classification']['radiusSource'] == 'min(mapWidth,mapHeight)/5'
     assert sampling['classification']['mapSource'] == 'calibratedMapExtents'
     assert sampling['classification']['mapInferred'] is True
     assert sampling['classification']['selfPositionStatus'] == 'available'
@@ -284,9 +284,9 @@ def test_unknown_context_forces_every_identity_to_high(bad_context, reason):
 
 def test_boundary_is_near_and_missing_position_stays_unknown_high():
     boundary = CountedTorpedo(uiId=1, ownerId=7001, shotId=1,
-                              position=(0, 0, 1000.0))
+                              position=(0, 0, 600.0))
     outside = CountedTorpedo(uiId=2, ownerId=7002, shotId=2,
-                             position=(0, 0, 1000.0001))
+                             position=(0, 0, 600.0001))
     unknown = CountedTorpedo(uiId=3, ownerId=7003, shotId=3, position=None)
     telemetry, _ = adapter([boundary, outside, unknown])
     sampler = TorpedoSamplingGroups()
@@ -303,6 +303,41 @@ def test_boundary_is_near_and_missing_position_stays_unknown_high():
     assert classification['nearCount'] == 1
     assert classification['farCount'] == 1
     assert classification['unknownDistanceCount'] == 1
+
+
+def test_radius_is_l5_of_short_side_and_l5_to_l3_band_is_low():
+    rows = [
+        CountedTorpedo(uiId=1, ownerId=7001, shotId=1,
+                       position=(0, 0, 399.0)),
+        CountedTorpedo(uiId=2, ownerId=7002, shotId=2,
+                       position=(0, 0, 400.0)),  # L/5 boundary is inclusive
+        CountedTorpedo(uiId=3, ownerId=7003, shotId=3,
+                       position=(0, 0, 400.0001)),
+        CountedTorpedo(uiId=4, ownerId=7004, shotId=4,
+                       position=(0, 0, 650.0)),  # inside the old L/3 radius
+        CountedTorpedo(uiId=5, ownerId=7005, shotId=5,
+                       position=(0, 0, 800.0)),
+    ]
+    telemetry, _ = adapter(rows)
+    sampler = TorpedoSamplingGroups()
+    ctx = context(width=5000, height=2000)  # short side 2000, not 5000
+    telemetry.torpedoes(0, sampler, 0.0, ctx)
+    out, status = telemetry.torpedoes(0, sampler, 5.0, ctx)
+    groups = dict((row['uiId'], row['sampling']) for row in out)
+    assert [groups[index]['group'] for index in range(1, 6)] == [
+        'high', 'high', 'low', 'low', 'low']
+    assert groups[4]['distanceStatus'] == 'far'
+    assert groups[5]['distanceStatus'] == 'far'
+    classification = status['sampling']['classification']
+    assert classification['radiusWorld'] == pytest.approx(400.0)
+    assert classification['radiusSource'] == 'min(mapWidth,mapHeight)/5'
+    assert classification['nearCount'] == 2
+    assert classification['farCount'] == 3
+    # 650 was inside the previous L/3 radius of the same 2000-unit short side.
+    assert classification['mapWidth'] == 5000
+    assert classification['mapHeight'] == 2000
+    assert 650.0 < min(classification['mapWidth'],
+                       classification['mapHeight']) / 3.0
 
 
 def test_duplicate_and_unknown_identities_are_unmatchable_and_never_prune():
@@ -604,11 +639,11 @@ def test_normalized_context_uses_axis_scales_for_a_world_circle():
     telemetry.torpedoes(0, sampler, 0.0, ctx)
     out, status = telemetry.torpedoes(0, sampler, 5.0, ctx)
     groups = dict((row['uiId'], row['sampling']['group']) for row in out)
-    assert groups[1] == 'high'  # dx 400 in world units
-    assert groups[2] == 'low'   # dz 800 > min(4000,2000)/3
+    assert groups[1] == 'high'  # dx 400 is exactly min(4000,2000)/5
+    assert groups[2] == 'low'   # dz 800 > min(4000,2000)/5
     classification = status['sampling']['classification']
     assert classification['positionsNormalized'] is True
-    assert classification['radiusWorld'] == pytest.approx(2000.0 / 3.0)
+    assert classification['radiusWorld'] == pytest.approx(2000.0 / 5.0)
 
 
 def test_motion_membership_retains_non_due_numeric_history_and_prunes():
@@ -677,7 +712,7 @@ def test_compact_wire_metadata_preserves_identity_and_freshness_without_game_fie
     assert wire['membership'] == [[1, 7001, 1]]
     assert rows[0]['position'] == position
     assert rows[0]['sampling'] == {'group': 'high', 'sampleTs': 0., 'provisional': True}
-    assert wire['sampling']['classification']['radiusWorld'] == 1000.
+    assert wire['sampling']['classification']['radiusWorld'] == 600.
 
 
 # Captured from the pre-optimization post-parent telemetry module. The full
@@ -686,56 +721,56 @@ def test_compact_wire_metadata_preserves_identity_and_freshness_without_game_fie
 REFERENCE_REPLAY = (
     (0.0, [(1, 7001, 1, 'high', 0.0), (2, 7002, 2, 'high', 0.0)],
      [(1, 7001, 1), (2, 7002, 2)], True,
-     ('available', None, 0.0, 1000.0),
+     ('available', None, 0.0, 600.0),
      (('sampled', 2, 2, 0.0), ('notSampled', 0, 0, None), False)),
     (0.2, [(1, 7001, 1, 'high', 0.2), (2, 7002, 2, 'high', 0.2)],
      [(1, 7001, 1), (2, 7002, 2)], True,
-     ('available', None, 0.0, 1000.0),
+     ('available', None, 0.0, 600.0),
      (('sampled', 2, 2, 0.2), ('notSampled', 0, 0, None), False)),
     (0.6, [(1, 7001, 1, 'high', 0.6), (2, 7002, 2, 'high', 0.6)],
      [(1, 7001, 1), (2, 7002, 2)], True,
-     ('available', None, 0.0, 1000.0),
+     ('available', None, 0.0, 600.0),
      (('sampled', 2, 2, 0.6), ('notSampled', 0, 0, None), False)),
     (5.0, [(1, 7001, 1, 'high', 5.0), (2, 7002, 2, 'low', 5.0)],
      [(1, 7001, 1), (2, 7002, 2)], True,
-     ('available', None, 5.0, 1000.0),
+     ('available', None, 5.0, 600.0),
      (('sampled', 1, 1, 5.0), ('sampled', 1, 1, 5.0), False)),
     (5.2, [(1, 7001, 1, 'high', 5.2)],
      [(1, 7001, 1), (2, 7002, 2)], True,
-     ('available', None, 5.0, 1000.0),
+     ('available', None, 5.0, 600.0),
      (('sampled', 1, 1, 5.2), ('notSampled', 0, 1, 5.0), False)),
     (5.6, [(1, 7001, 1, 'high', 5.6), (2, 7002, 2, 'low', 5.6)],
      [(1, 7001, 1), (2, 7002, 2)], True,
-     ('available', None, 5.0, 1000.0),
+     ('available', None, 5.0, 600.0),
      (('sampled', 1, 1, 5.6), ('sampled', 1, 1, 5.6), False)),
     (6.0, [(1, 7001, 1, 'high', 6.0), (2, 7002, 2, 'low', 6.0)],
      [(1, 7001, 1), (2, 7002, 2)], True,
-     ('available', None, 5.0, 1000.0),
+     ('available', None, 5.0, 600.0),
      (('sampled', 1, 1, 6.0), ('sampled', 1, 1, 6.0), False)),
     (6.2, [(1, 7001, 1, 'high', 6.2), (2, 7002, 2, 'high', 6.2),
            (None, 7003, 3, 'high', 6.2)],
      [(1, 7001, 1), (2, 7002, 2)], False,
-     ('available', None, 5.0, 1000.0),
+     ('available', None, 5.0, 600.0),
      (('sampled', 3, 2, 6.2), ('notSampled', 0, 0, 6.0), True)),
     (6.4, [(1, 7001, 1, 'high', 6.4), (2, 7002, 2, 'high', 6.4)],
      [(1, 7001, 1), (2, 7002, 2)], True,
-     ('available', None, 5.0, 1000.0),
+     ('available', None, 5.0, 600.0),
      (('sampled', 2, 2, 6.4), ('notSampled', 0, 0, 6.0), False)),
     (10.0, [(1, 7001, 1, 'high', 10.0), (2, 7002, 2, 'low', 10.0)],
      [(1, 7001, 1), (2, 7002, 2)], True,
-     ('available', None, 10.0, 1000.0),
+     ('available', None, 10.0, 600.0),
      (('sampled', 1, 1, 10.0), ('sampled', 1, 1, 10.0), False)),
     (10.2, [(1, 7001, 1, 'high', 10.2)],
      [(1, 7001, 1), (2, 7002, 2)], True,
-     ('available', None, 10.0, 1000.0),
+     ('available', None, 10.0, 600.0),
      (('sampled', 1, 1, 10.2), ('notSampled', 0, 1, 10.0), False)),
     (10.6, [(1, 7001, 1, 'high', 10.6), (2, 7002, 2, 'low', 10.6)],
      [(1, 7001, 1), (2, 7002, 2)], True,
-     ('available', None, 10.0, 1000.0),
+     ('available', None, 10.0, 600.0),
      (('sampled', 1, 1, 10.6), ('sampled', 1, 1, 10.6), False)),
 )
 REFERENCE_REPLAY_DIGEST = (
-    'a0723ccc1dac4fe08e87d9bfd62017c8d9f535d98995830f075d8a436eb73bcf')
+    '988cc592a3a4c08f6877f8b13432057aeefe0ba7a387ec39bfe9d0d80a8a7152')
 
 
 def _reference_snapshot(rows, status):
@@ -803,33 +838,33 @@ def test_reference_replay_matches_pre_optimization_snapshot_sequence():
 
 REFERENCE_RECORDINGS = {
     'without-atm-b43.jsonl': {
-        'digest': 'fceea141693d6072aa9afb2e9776b2510f2c800cc0d5dca89e6158192b5dc86a',
+        'digest': '0a95759ed126ac2ea13dc932e3554905122edee9ceead1ecefd8b050e0006425',
         'budgets': {
             'states': 1194, 'originalRows': 95413,
-            'originalOwnerBudget': 12654, 'sampledRows': 85987,
+            'originalOwnerBudget': 12654, 'sampledRows': 73711,
             'membershipRows': 95413, 'incompleteMembershipStates': 0,
             'originalCompactBytes': 137408822,
-            'projectedCompactBytes': 137312512,
-            'sampled.high': 79643, 'sampled.low': 6344},
+            'projectedCompactBytes': 126684130,
+            'sampled.high': 59145, 'sampled.low': 14566},
         'api': {
             'collection': 1194, 'field.ownerId': 95413,
-            'field.ownerTeamId': 85987, 'field.ownerType': 85987,
-            'field.position': 85987, 'field.shotId': 95413,
-            'field.type': 85987, 'field.uiId': 95413, 'owner': 12293}},
+            'field.ownerTeamId': 73711, 'field.ownerType': 73711,
+            'field.position': 73711, 'field.shotId': 95413,
+            'field.type': 73711, 'field.uiId': 95413, 'owner': 11371}},
     'without-atm-b44.jsonl': {
-        'digest': 'e52389754219c96d25e89a63da7d5d8648decf59f5cad90bbf53ff1f4328d528',
+        'digest': '7de4fa244554946faeb8515d9d734030e9b028b1873cb52135222c176add3533',
         'budgets': {
             'states': 743, 'originalRows': 9671,
-            'originalOwnerBudget': 1998, 'sampledRows': 7870,
+            'originalOwnerBudget': 1998, 'sampledRows': 6044,
             'membershipRows': 9671, 'incompleteMembershipStates': 0,
             'originalCompactBytes': 28110393,
-            'projectedCompactBytes': 27750363,
-            'sampled.high': 6678, 'sampled.low': 1192},
+            'projectedCompactBytes': 26170810,
+            'sampled.high': 3640, 'sampled.low': 2404},
         'api': {
             'collection': 743, 'field.ownerId': 9671,
-            'field.ownerTeamId': 7870, 'field.ownerType': 7870,
-            'field.position': 7870, 'field.shotId': 9671,
-            'field.type': 7870, 'field.uiId': 9671, 'owner': 1833}},
+            'field.ownerTeamId': 6044, 'field.ownerType': 6044,
+            'field.position': 6044, 'field.shotId': 9671,
+            'field.type': 6044, 'field.uiId': 9671, 'owner': 1391}},
 }
 
 
@@ -974,6 +1009,15 @@ def test_private_recording_reference_replay_keeps_exact_snapshot_budget(
         pytest.skip('private recording is not available')
     expected = REFERENCE_RECORDINGS[recording]
     digest_value, counts, api_counts = _replay_recording(path)
+    # L/5 changes which rows are sampled, but not the full collection or
+    # membership facts. Verify those invariants before comparing digests.
+    assert counts['membershipRows'] == counts['originalRows']
+    assert counts['incompleteMembershipStates'] == 0
+    assert counts['sampled.high'] + counts['sampled.low'] == counts['sampledRows']
+    assert counts['sampledRows'] <= counts['originalRows']
+    assert api_counts['field.position'] == counts['sampledRows']
+    assert api_counts['field.ownerTeamId'] == counts['sampledRows']
+    assert api_counts['owner'] <= counts['originalOwnerBudget']
     assert digest_value == expected['digest']
     assert dict(counts) == expected['budgets']
     assert dict(api_counts) == expected['api']
