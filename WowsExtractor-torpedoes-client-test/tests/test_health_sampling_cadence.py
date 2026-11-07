@@ -226,6 +226,18 @@ class MapCalibration(object):
     def observe(self, samples, now):
         return {'status': 'unknown'}
 
+    def update(self, samples, now):
+        pass
+
+    def live_model_status(self):
+        return {'status': 'unknown', 'coefficients': None}
+
+    def snapshot(self):
+        return {'status': 'unknown'}
+
+    def map_to_world(self, *args):
+        return None
+
     def world_to_map(self, *args):
         return None
 
@@ -278,6 +290,7 @@ METHODS = (
     '_collect_map_positions', '_build_avatar_observations', '_build_ships',
     '_build_self', '_build_state', '_self_team', '_relation',
     '_get_ship_position', '_position_from_obj', '_map_to_world',
+    '_ship_world_position_threshold',
 )
 
 
@@ -332,6 +345,21 @@ def make_collector(entities, ships, players, self_info, self_ship):
     c._comparisonSamplingDue = True
     c._healthSamplingInterval = 0.5
     c._comparisonSamplingInterval = 1.0
+    c._selfSystemsSamplingEnabled = True
+    c._selfSystemsSamplingDue = True
+    c._torpedoArmamentSamplingEnabled = True
+    c._torpedoArmamentSamplingDue = True
+    c._mapCalibrationSnapshotInterval = 1.0
+    c._mapCalibrationSnapshotDue = False
+    c._shipWorldPositionSamplingEnabled = True
+    c._shipWorldPositionSamplingDue = True
+    c._shipWorldPositionSamplingInterval = 1.0
+    c._shipWorldPositionSamplingNextDue = None
+    c._shipWorldPositionSamplingLastNow = None
+    c._shipWorldPositionFarDivisor = 5.0
+    c._shipWorldPositionSeenIds = {}
+    c._shipWorldPositionSeenOrder = []
+    c._shipWorldPositionSeenIdsLimit = 512
     return c, ns
 
 

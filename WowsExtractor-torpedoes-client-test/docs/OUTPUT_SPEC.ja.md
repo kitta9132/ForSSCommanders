@@ -2,6 +2,19 @@
 
 現在の群別周期は[収集頻度表](COLLECTION_CADENCE.ja.md)を参照。以下の版別節は変更時点の契約履歴であり、同じ項目に差分があれば最新の適用版を優先する。
 
+## 0.3.45-slow-information-groups：情報群の独立低頻度化
+
+0.3.44 の自艦判定を維持しつつ、③遠距離艦 world position/yaw、④⑤自艦システム群、⑥魚雷 module 群、⑩較正診断 snapshot を独立した 1 Hz 群に分離する。minimap の `nx`/`ny`/visibility/IDs、HP 群、avatar 比較群、魚雷分類の動作は変更しない。
+
+- `selfSystems.sampling = {status, sampleTs, intervalSeconds}` を追加。`status` は `sampled`/`notSampled`。OFF（`_enabled=false`）時は core cadence（毎tick sampled）に戻す。
+- `torpedoArmament.sampling` を同形で追加。OFF も core cadence に戻す。
+- `diag.mapCalibration` は軽量な `MapCalibration.live_model_status()`（status/reason/sampleCount/fitSampleCount/coefficients）を毎 core tick 出力する。重い診断（span/rmse/holdout/residual/drift等）は `diag.mapCalibrationSnapshot` に分離し、独立した 1 Hz ゲート `map_calibration_snapshot_interval` で出力する。`diagnostics_enabled` とは別に動作する。
+- 艦行の `positionReadStatus`/`positionReadPolicy` に `policy='farShip1Hz'`・`reason='farShipWorldPositionSampling'`・`status='notSampled'` を追加する場合がある。これは遠距離艦で非 due 時に `ship.getPosition()` を呼ばなかったことを示す。`nx`/`ny`/visibility/IDs は core で維持するため、該当行には `mapPositionRaw`/`nx`/`ny` 等が残る。`position` キーは出力しない（推定 world 値で補完しない）。
+- 遠距離判定は live model の `worldX`/`worldZ` scale から `min(width,height)/ship_world_position_far_divisor` を計算し、自艦 world position から各艦の map 座標を `MapCalibration.map_to_world()` した推定位置までの距離で行う。較正未成立・自位置不明・model 未確定艦は core で読む。
+- 新しい設定キーは `config.example.ini` に記載。interval は min 0.2 秒、非有限値は 1.0 秒へフォールバック。OFF は core cadence 復帰を意味する。
+- 終了 frame・戦闘切替・時計逆行では既存の軽量形状を維持し、新しい slow group のみのために追加 API 呼出しを行わない。
+- 全て offline 検証のみで、実機 FPS 改善・周期の実戦確認は未達。FPS 改善を主張しない。
+
 ## 0.3.44-self-owner-id：自艦 shipId による `isOwn` 分類
 
 0.3.43 で観測した `battle.getSelfPlayerInfo().shipId` を、同一 snapshot の `torpedo.ownerId` と厳密に比較し、`isOwn` を導出する。

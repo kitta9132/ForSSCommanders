@@ -186,6 +186,11 @@ def test_main_build_ships_24_direct_getters_and_vehicle_lookups_are_one_each():
         def __init__(self):
             self.observe_calls = 0
             self.snapshot_calls = 0
+            self.update_calls = 0
+        def update(self, *args):
+            self.update_calls += 1
+        def live_model_status(self):
+            return {'status': 'unknown', 'updateCalls': self.update_calls}
         def observe(self, *args):
             self.observe_calls += 1
             return {'status': 'unknown', 'observeBatch': self.observe_calls}
@@ -205,6 +210,7 @@ def test_main_build_ships_24_direct_getters_and_vehicle_lookups_are_one_each():
           '_strict_player_lookup_key': lambda value: (
               None if value is None or isinstance(value, bool)
               else (type(value), value)),
+          '_identity_reject': __import__('torpedo_telemetry')._identity_reject,
           '_map_norm_xy': lambda *args: None,
           '_visibility_raw': lambda value: value,
           '_visibility_observation': lambda *args: {}, 'long': int,
@@ -217,6 +223,7 @@ def test_main_build_ships_24_direct_getters_and_vehicle_lookups_are_one_each():
         _collect_map_positions = collect_maps
         _relation = lambda self, team: 1
         _map_to_world = lambda self, *args: None
+        _ship_world_position_threshold = lambda self: None
     c = Harness()
     c._diagnosticsEnabled = False
     c._diagnosticsSampleDue = False
@@ -224,12 +231,16 @@ def test_main_build_ships_24_direct_getters_and_vehicle_lookups_are_one_each():
     c._positionDiagnostics = {}
     c._damage = Damage()
     c._mapCalibration = Calibration()
+    c._shipWorldPositionSamplingEnabled = True
+    c._shipWorldPositionSamplingDue = True
+    c._shipWorldPositionFarDivisor = 5.0
     rows, diag = c._build_ships(1.0)
     assert len(rows) == 24
     assert calls == {'vehicle': 24, 'direct': 24, 'info': 0, 'maps': 1}
-    assert c._mapCalibration.observe_calls == 1
+    assert c._mapCalibration.update_calls == 1
+    assert c._mapCalibration.observe_calls == 0
     assert c._mapCalibration.snapshot_calls == 0
-    assert diag['mapCalibration'] == {'status': 'unknown', 'observeBatch': 1}
+    assert diag['mapCalibration'] == {'status': 'unknown', 'updateCalls': 1}
     assert diag['positionReadPolicy'] == {
         'policy': 'coreDirectOnly', 'sampledShips': 0, 'notSampledShips': 24}
     assert rows[0]['positionReadStatus']['status'] == 'unknown'
@@ -256,6 +267,6 @@ def test_main_build_ships_24_direct_getters_and_vehicle_lookups_are_one_each():
     assert rows_due[0]['position'] == [4, 5, 6]
     assert diag_due['positionReads']['sampledShips'] == 1
     assert diag_due['positionReads']['notSampledShips'] == 23
-    assert c._mapCalibration.observe_calls == 3
+    assert c._mapCalibration.update_calls == 3
     assert c._mapCalibration.snapshot_calls == 0
-    assert diag_due['mapCalibration'] == {'status': 'unknown', 'observeBatch': 3}
+    assert diag_due['mapCalibration'] == {'status': 'unknown', 'updateCalls': 3}

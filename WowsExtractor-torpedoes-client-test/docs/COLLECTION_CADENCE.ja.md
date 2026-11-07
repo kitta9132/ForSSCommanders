@@ -1,6 +1,6 @@
 # 現行の収集頻度表
 
-対象：0.3.41-team-torpedo-budget。標準設定`state_interval=0.2`のcore tickを基準にする。以下はゲームからの採取・計算の目安で、厳密なHzや全遷移捕捉を保証しない。設定によってcoreが遅ければ、各群もそれより速く採取できない。
+対象：0.3.45-slow-information-groups。標準設定`state_interval=0.2`のcore tickを基準にする。以下はゲームからの採取・計算の目安で、厳密なHzや全遷移捕捉を保証しない。設定によってcoreが遅ければ、各群もそれより速く採取できない。
 
 collectionは既定OFF。専用opt-in／heavy diagnostics／profilerも既定OFFであり、表の周期を記載しただけで有効になるわけではない。[出力契約](OUTPUT_SPEC.ja.md)／[設定](INSTALL.ja.md)を参照。過去の[B31頻度調査](RESEARCH_COLLECTION_CADENCE_B31.ja.md)は現況表ではない。
 
@@ -26,7 +26,8 @@ collectionは既定OFF。専用opt-in／heavy diagnostics／profilerも既定OFF
 
 | 情報群 | 標準周期 | 条件・注意 |
 | --- | --- | --- |
-| 自艦・API艦の位置、yaw、visibility、必要ID | core、約5Hz | 遠距離艦1Hz化は未実装。観測範囲外の艦を合成しない |
+| 自艦・API艦の位置、yaw、visibility、必要ID | core、約5Hz | 遠距離艦の`worldPosition`/`yaw`は1Hz。`nx`/`ny`/visibility/IDsはcore維持。較正未成立・自位置不明・新規・model未確定艦はcoreで読む |
+| 遠距離艦の`worldPosition`/`yaw` | 約1Hz | `ship_world_position_sampling_enabled=true`・既定間隔1.0秒・最小0.2秒。farは較正world半径`/ship_world_position_far_divisor`（既定5）で判定。非dueでは`getPosition()`を呼ばず、推定world値も補完しない |
 | avatar列挙・識別候補・map位置 | core、約5Hz | API艦一覧とは別の観測源。未確認namespaceを確定joinしない |
 | 共通HP・生存値（self／ships／avatar） | 平均約2Hz | 0.5秒期限。非dueは省略／notSampled、古いHPを現在値として補完しない |
 | avatarのAPI範囲比較・candidate比較・coverage集計 | 約1Hz | 必要ID・位置の5HzやHP2Hzは別枠。較正診断の1Hz化とは別 |
@@ -34,12 +35,13 @@ collectionは既定OFF。専用opt-in／heavy diagnostics／profilerも既定OFF
 | WaveHitの専用取得 | core、約5Hz | `wave_hit_sampling_enabled`必須。TTL・対象ID namespaceの確定ではない |
 | Batteryの専用取得 | 約1Hz | `battery_sampling_enabled`必須、comparison共通期限。depth／WaveHitを遅くしない |
 | gun reload raw／progressの専用取得 | core、約5Hz | `gun_reload_sampling_enabled`必須。modifier getEntity探索を省く。装填残数・物理管IDの確定ではない |
-| module HP／故障候補／critTimer | core、約5Hz | `torpedoArmament.modules`。1Hz化は未実装、装填進捗と別 |
-| 自艦消耗品・radar／hydro／locator等 | core、約5Hz | `selfSystems`。短期状態の取り逃しを伴う1Hz化は未実装 |
+| 自艦魚雷module状態（装填・故障候補／critTimer） | 約1Hz | `torpedo_armament_sampling_enabled=true`・既定間隔1.0秒・最小0.2秒。OFF時はcore cadence（毎tick）に戻す。装填進捗とは別 |
+| 自艦消耗品・radar／hydro／locator等 | 約1Hz | `self_systems_sampling_enabled=true`・既定間隔1.0秒・最小0.2秒。OFF時はcore cadenceに戻す。短期状態の取り逃しあり |
 | damageイベント受付・台帳更新 | イベント発生時 | ポーリングの1Hz制限はかけない |
 | damage snapshot生成・出力 | 約1Hz | comparison共通期限。終了frameは周期を無視して最新台帳を試行 |
 | 初回魚雷弾薬／TTX候補 | 1戦1回 | 初回の対象外・欠測も固定。周期再取得・スキル補正値取得は行わない |
-| 較正observe／drift判定・診断辞書 | core、約5Hzで評価 | fitは必要条件成立時。診断だけ1Hz化する案は未実装 |
+| 較正live model更新 | core、約5Hz | `MapCalibration.update()`でサンプル取り込み・model更新。重い診断出力は分離 |
+| 較正診断辞書（span・rmse・holdout等） | 約1Hz | `map_calibration_snapshot_interval`で独立スケジュール。`diagnostics_enabled`とは別に動作し、OFFにできない（間隔変更可） |
 | heavy diagnostics | 既定約1Hz | `diagnostics_enabled`必須、`diagnostics_interval`で変更可。専用ON群の周期を上書きしない |
 | profiler | 各計測対象の実行時／集計出力は約5秒窓 | `profiler_enabled`必須。ゲームframe timeやCPU使用率とは別 |
 | state.json出力 | core、約5Hz | 同じファイルでも各情報群が毎回揃うわけではない |
@@ -47,3 +49,5 @@ collectionは既定OFF。専用opt-in／heavy diagnostics／profilerも既定OFF
 専用depth／Battery／WaveHit／gun設定がOFFでもheavy diagnosticsがONなら、その群は従来のheavy due経路で観測する場合がある。両方OFFでは採取しない。collection無効時は通常の採取tickを開始しない。
 
 `sampleTs`、`sampling.status`、rawの取得状態を併読する。sampledは採取試行であり成功保証ではなく、非due・欠測・正常な空一覧・消失を区別する。履歴保持・表示補間は外部アプリ側の責務である。
+
+0.3.45の新しい設定キー（`config.example.ini`参照）：`self_systems_sampling_enabled`/`self_systems_sampling_interval`、`torpedo_armament_sampling_enabled`/`torpedo_armament_sampling_interval`、`ship_world_position_sampling_enabled`/`ship_world_position_sampling_interval`/`ship_world_position_far_divisor`、`map_calibration_snapshot_interval`。いずれもOFFは「その群をcore cadenceに戻す」意味で、完全に無効化するわけではない。intervalはmin 0.2秒、非有限値はフォールバックして1.0秒。

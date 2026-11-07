@@ -78,6 +78,15 @@ class _Calibration(object):
     def observe(self, samples, now):
         return {'status': 'unknown', 'sampleCount': len(samples)}
 
+    def update(self, samples, now):
+        pass
+
+    def live_model_status(self):
+        return {'status': 'unknown', 'coefficients': None}
+
+    def snapshot(self):
+        return {'status': 'unknown'}
+
     def map_to_world(self, x, y):
         return None
 
@@ -161,6 +170,7 @@ def _ship_builder(battle):
             setattr(self, '_mapVisibilityDiagnostics', {}) or {})
         _relation = lambda self, team: 1 if team in (0, 1) else 2
         _map_to_world = lambda self, *args: None
+        _ship_world_position_threshold = lambda self: None
 
     collector = Harness()
     collector._diagnosticsEnabled = False
@@ -169,6 +179,9 @@ def _ship_builder(battle):
     collector._positionDiagnostics = {}
     collector._damage = DamageTracker()
     collector._mapCalibration = _Calibration()
+    collector._shipWorldPositionSamplingEnabled = True
+    collector._shipWorldPositionSamplingDue = True
+    collector._shipWorldPositionFarDivisor = 5.0
     return collector
 
 

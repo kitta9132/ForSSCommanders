@@ -36,6 +36,24 @@ def _fixture_avatar_observations(snapshot, now, ships):
             'coverage': {'sampledEntityCount': len(snapshot.get('entities', []))}}
 
 
+def _get_callable(value):
+    if callable(value):
+        try:
+            return value()
+        except Exception:
+            return None
+    return value
+
+
+def _vec(value):
+    if value is None:
+        return None
+    try:
+        return [float(value[0]), float(value[1]), float(value[2])]
+    except Exception:
+        return None
+
+
 def _read_observation_field(obj, name):
     try:
         value = obj.get(name) if isinstance(obj, dict) else getattr(obj, name)
@@ -129,7 +147,9 @@ def test_depth_sampler_can_run_without_heavy_diagnostics_and_joins_current_rows(
     c._build_avatar_observations = _fixture_avatar_observations
     c._remember_roster_vehicles = lambda entities: None
     c._collect_avatar_health = lambda entities: {}
-    c._build_ships = lambda now, hp, entities, players: ([], {})
+    c._build_ships = (lambda now, hp, entities, players,
+                      health_due=True, calibration_snapshot_due=False,
+                      self_position=None: ([], {}))
     c._self_team = lambda self_info=None: 1
     c._torpedoes = type('Torpedoes', (), {
         'torpedoes': lambda self, team, self_ship_id=None: ([{'uiId': 7,
@@ -137,7 +157,21 @@ def test_depth_sampler_can_run_without_heavy_diagnostics_and_joins_current_rows(
         'armament': lambda self, ship=None: {},
         'systems': lambda self, ship=None: {}})()
     c._torpedoMotion = type('Motion', (), {'update': lambda *args: None})()
-    c._mapCalibration = type('Map', (), {'world_to_map': lambda *args: None})()
+    c._mapCalibration = type('Map', (), {'world_to_map': lambda *args: None,
+                                          'update': lambda *args: None,
+                                          'live_model_status': lambda: {
+                                              'status': 'unknown',
+                                              'coefficients': None}})()
+    c._selfSystemsSamplingEnabled = True
+    c._selfSystemsSamplingDue = True
+    c._torpedoArmamentSamplingEnabled = True
+    c._torpedoArmamentSamplingDue = True
+    c._mapCalibrationSnapshotInterval = 1.0
+    c._mapCalibrationSnapshotDue = False
+    c._shipWorldPositionSamplingEnabled = True
+    c._shipWorldPositionSamplingDue = True
+    c._shipWorldPositionFarDivisor = 5.0
+    c._ship_world_position_threshold = lambda: None
     c._build_self = lambda hp, info=None, ship=None: {'shipId': 7}
     c._damage = type('Damage', (), {'snapshot': lambda self: {}})()
 
@@ -243,6 +277,18 @@ def test_main_tick_keeps_collection_alive_when_profiler_clock_fails(monkeypatch)
     c._torpedoStateSamplingEnabled = False
     c._torpedoStateSamplingDue = False
     c._torpedo_state_sampling_due = lambda now: False
+    c._selfSystemsSamplingEnabled = True
+    c._selfSystemsSamplingDue = False
+    c._self_systems_sampling_due = lambda now: False
+    c._torpedoArmamentSamplingEnabled = True
+    c._torpedoArmamentSamplingDue = False
+    c._torpedo_armament_sampling_due = lambda now: False
+    c._mapCalibrationSnapshotInterval = 1.0
+    c._mapCalibrationSnapshotDue = False
+    c._map_calibration_snapshot_due = lambda now: False
+    c._shipWorldPositionSamplingEnabled = True
+    c._shipWorldPositionSamplingDue = False
+    c._ship_world_position_sampling_due = lambda now: False
     c._refresh_meta = lambda now: None
     c._stateInterval, c._lastWrite = .1, 0.0
     c._performanceProfiler, c._profilerEnabled = profiler, True
@@ -383,12 +429,28 @@ def test_diagnostics_off_builds_fresh_disabled_shapes_without_probe_calls():
     c._build_avatar_observations = _fixture_avatar_observations
     c._remember_roster_vehicles = lambda entities: None
     c._collect_avatar_health = lambda entities: {}
-    c._build_ships = lambda now, hp, entities, players: ([], {})
+    c._build_ships = (lambda now, hp, entities, players,
+                      health_due=True, calibration_snapshot_due=False,
+                      self_position=None: ([], {}))
     c._self_team = lambda self_info=None: 1
     c._torpedoes = type('T', (), {'torpedoes': lambda self, team, self_ship_id=None: ([], {'available': True}),
         'armament': lambda self, ship=None: {}, 'systems': lambda self, ship=None: {}})()
     c._torpedoMotion = type('T', (), {'update': lambda *args: None})()
-    c._mapCalibration = type('M', (), {'world_to_map': lambda *args: None})()
+    c._mapCalibration = type('M', (), {'world_to_map': lambda *args: None,
+                                        'update': lambda *args: None,
+                                        'live_model_status': lambda: {
+                                            'status': 'unknown',
+                                            'coefficients': None}})()
+    c._selfSystemsSamplingEnabled = True
+    c._selfSystemsSamplingDue = True
+    c._torpedoArmamentSamplingEnabled = True
+    c._torpedoArmamentSamplingDue = True
+    c._mapCalibrationSnapshotInterval = 1.0
+    c._mapCalibrationSnapshotDue = False
+    c._shipWorldPositionSamplingEnabled = True
+    c._shipWorldPositionSamplingDue = True
+    c._shipWorldPositionFarDivisor = 5.0
+    c._ship_world_position_threshold = lambda: None
     c._build_self = lambda hp, info=None, ship=None: {'shipId': 1}
     c._damage = type('D', (), {'snapshot': lambda self: {}})()
     snapshot = build(c, 1.)
@@ -566,13 +628,29 @@ def test_build_state_shares_fresh_core_snapshot_even_when_diagnostics_off():
     c._remember_roster_vehicles = lambda entities: (
         calls.append(('roster', entities)) or player_sample)
     c._collect_avatar_health = lambda entities: calls.append(('health', entities)) or {}
-    c._build_ships = lambda now, hp, entities, players: (
-        calls.append(('ships', entities, players)) or ([], {}))
+    c._build_ships = (lambda now, hp, entities, players,
+                      health_due=True, calibration_snapshot_due=False,
+                      self_position=None: (
+        calls.append(('ships', entities, players)) or ([], {})))
     c._self_team = lambda self_info=None: 1
     c._torpedoes = type('T', (), {'torpedoes': lambda self, team, self_ship_id=None: ([], {'available': True}),
         'armament': lambda self, ship=None: {}, 'systems': lambda self, ship=None: {}})()
     c._torpedoMotion = type('T', (), {'update': lambda *args: None})()
-    c._mapCalibration = type('M', (), {'world_to_map': lambda *args: None})()
+    c._mapCalibration = type('M', (), {'world_to_map': lambda *args: None,
+                                        'update': lambda *args: None,
+                                        'live_model_status': lambda: {
+                                            'status': 'unknown',
+                                            'coefficients': None}})()
+    c._selfSystemsSamplingEnabled = True
+    c._selfSystemsSamplingDue = True
+    c._torpedoArmamentSamplingEnabled = True
+    c._torpedoArmamentSamplingDue = True
+    c._mapCalibrationSnapshotInterval = 1.0
+    c._mapCalibrationSnapshotDue = False
+    c._shipWorldPositionSamplingEnabled = True
+    c._shipWorldPositionSamplingDue = True
+    c._shipWorldPositionFarDivisor = 5.0
+    c._ship_world_position_threshold = lambda: None
     c._build_self = lambda hp, info=None, ship=None: {'shipId': 1}
     c._damage = type('D', (), {'snapshot': lambda self: {}})()
     complete = build(c, 1.)
@@ -637,10 +715,11 @@ def test_main_state_reuses_actual_self_producers_once_and_never_across_frames():
             return {'status': 'available' if self_ship is not None else 'unknown'}
 
     ns = {'_UNSET': object(), '_try': _attempt,
-        '_get': lambda obj, key, default=None: (obj.get(key, default)
-            if isinstance(obj, dict) else getattr(obj, key, default)),
+        '_get': lambda obj, key, default=None: _get_callable(
+            obj.get(key, default) if isinstance(obj, dict)
+            else getattr(obj, key, default)),
         '_is_mapping': lambda obj: isinstance(obj, dict),
-        '_vec': lambda value: list(value) if value is not None else None,
+        '_vec': _vec,
         '_identity_reject': _identity_reject,
         'apply_ui_health': lambda data, hp: None,
         'SCHEMA_VERSION': 1, 'WIRE_API_VERSION': '1.0',
@@ -659,10 +738,26 @@ def test_main_state_reuses_actual_self_producers_once_and_never_across_frames():
     c._build_avatar_observations = _fixture_avatar_observations
     c._remember_roster_vehicles = lambda entities: None
     c._collect_avatar_health = lambda entities: {}
-    c._build_ships = lambda now, hp, entities, players: ([], {'totalShips': 0})
+    c._build_ships = (lambda now, hp, entities, players,
+                      health_due=True, calibration_snapshot_due=False,
+                      self_position=None: ([], {'totalShips': 0}))
     c._torpedoes = Torpedoes()
     c._torpedoMotion = type('Motion', (), {'update': lambda *args: None})()
-    c._mapCalibration = type('Map', (), {'world_to_map': lambda *args: None})()
+    c._mapCalibration = type('Map', (), {'world_to_map': lambda *args: None,
+                                          'update': lambda *args: None,
+                                          'live_model_status': lambda: {
+                                              'status': 'unknown',
+                                              'coefficients': None}})()
+    c._selfSystemsSamplingEnabled = True
+    c._selfSystemsSamplingDue = True
+    c._torpedoArmamentSamplingEnabled = True
+    c._torpedoArmamentSamplingDue = True
+    c._mapCalibrationSnapshotInterval = 1.0
+    c._mapCalibrationSnapshotDue = False
+    c._shipWorldPositionSamplingEnabled = True
+    c._shipWorldPositionSamplingDue = True
+    c._shipWorldPositionFarDivisor = 5.0
+    c._ship_world_position_threshold = lambda: None
     c._build_self = MethodType(build_self, c)
     c._self_team = MethodType(self_team, c)
     c._damage = type('Damage', (), {'snapshot': lambda self: {}})()

@@ -4,14 +4,20 @@
 
 2026-11-06 ユーザー判断：上記の大規模構造変更・外部bridge案は**「一旦なし」で保留**。実装キューへ入れず、方針変更も行わない。調査記録のみ保持する。
 
-## 現在の最新状況（0.3.44-self-owner-id、2026-11-07）
+## 現在の最新状況（0.3.45-slow-information-groups、2026-11-07）
 
-- 最新ソースは **`0.3.44-self-owner-id`**。0.3.41の`team-torpedo-budget`（`R=L/5`距離cadence・チーム別予算）と0.3.42のrestricted builtin修正を維持し、自艦判定を`owner.isPlayer`から同一snapshotの`battle.getSelfPlayerInfo().shipId == torpedo.ownerId`へ変更。`self.shipId`は毎sample新鮮に取得し、cache/fallbackしない。`owner.isPlayer`は`owner`行に生の観測値として残すが分類には使わない。sample済み魚雷行に`isOwn`・`isOwnSource`・`isOwnReason`を公開。自艦（`isOwn is True`）は全距離HIGH（敵予算外）、同一チームかつ`isOwn is False`の確認済み味方は全距離LOW（初観測含む）、敵は半径内の最近`enemy_high_budget`本（既定20、設定可）だけHIGH、残り・半径外はLOW。チーム不明・距離不明・同一チームで`isOwn`不明は安全側HIGH。型不一致・self shipId欠測は`isOwn: null`（unknown）とし味方と誤分類しない。新規敵は初観測でただちに予算へ参加し、一斉HIGH burstは出さない。`L=min(map width,height)`の較正world基準、境界上をHIGHに含める判定、5秒再分類、近5Hz／遠平均2Hzは維持し、**1Hz遠方化ではない。**
-- 整数1・文字列・欠測は自艦扱いせず、ownerId等の推測joinをしない。非due LOWの位置／owner追加read 0、membership／partial／unknown／strict ID／Python2互換も維持する。設定変更はtick冒頭gateで適用し、motion・較正・群を消さず一斉HIGH burstも出さない。strict type+value / ini broader / UI ranges / 敵20 policy を維持。
+- 最新ソースは **`0.3.45-slow-information-groups`**。0.3.44の自艦 shipId 判定を維持しつつ、③遠距離艦 world position/yaw、④⑤自艦システム群（radar/hydro/locator/consumables）、⑥魚雷 module 群、⑩較正診断 snapshot を独立した 1 Hz 群に分離。minimap の `nx`/`ny`/visibility/IDs、HP 群、avatar 比較群、魚雷分類の動作は変更しない。各群は独立した `enabled`/`interval` 設定を持ち、OFF は core cadence（毎tick）に戻す。`ship_world_position_far_divisor`（既定5）で較正 world 半径を計算し、自艦 world position と各艦 map 座標の `map_to_world` 推定から far/near を判定。較正未成立・自位置不明・model 未確定艦は core で読む。非 due far 艦は `ship.getPosition()` を呼ばず、推定 world 値で補完もしない。`MapCalibration.observe()` は後方互換のため `update()` + `snapshot()` に委譲。core path では `update()` + `live_model_status()` を使い、重い診断 snapshot は独立 1 Hz ゲート `map_calibration_snapshot_interval` で出力する。
+- 整数1・文字列・欠測は自艦扱いせず、ownerId等の推測joinをしない。非due LOWの`position`読み込みと`owner` object lookupは通常0を維持するが、0.3.44-fix以降は`ownerTeamId`を毎tick読み込み、self_ship_id一致によるown-high昇格時にはそのtickで現在`position`と`owner`を再取得する。membership／partial／unknown／strict ID／Python2互換も維持する。設定変更はtick冒頭gateで適用し、motion・較正・群を消さず一斉HIGH burstも出さない。strict type+value / ini broader / UI ranges / 敵20 policy を維持。
 - `self.identityCandidates`は継続して出力し、`battle.getSelfPlayerInfo().shipId`由来candidateの`usedForIsOwn`を`true`とする。observer fallback由来をself candidateとして誤記しない。`id`/`vehicleId`/`_Ship__id`は非公開・未検証属性として明示し、候補混合によるfallback joinや`isOwn`昇格は禁止。
-- 未導入・未実機。offline全回帰 pass（743 passed, 7 skipped）＋11 module checker成功（`tools/check_collector_offline.py` を Python 3.13+ の lib2to3 削除に対応し regex fallback で実行）。pytest による restricted-builtin（`globals` 欠如）実起動経路回帰テストを追加済み。**B49は0.3.41導入済みbuild13533378でmodコアが起動せず、0 byte記録・meta/stateなしの無効試験（[記録](WowsExtractor-torpedoes-client-test/docs/VALIDATION_B49_0.3.41_INVALID.ja.md)）。修正完了をもって実機成功を主張せず、親がcore起動出力確認まで先行する。**
+- 0.3.45は未導入・未実機。親がPython 3.11で私有replay用環境変数3種を有効にして **773 passed、skipなし** と11 module checker成功を確認。Python 3.13+のregex置換をPython 2構文検証の代替には使わない。B49の0.3.41起動失敗後、0.3.42では有効記録を取得済み（最低22FPS・カクつきあり）。B50では0.3.43の自艦ID候補と自己発射魚雷ownerIdの一致を確認したが、0.3.44以降の判定・新周期の実機成功とは区別する。
 - 実機確認の区別：Aの距離cadenceはB09（0.3.38・**L/3**）でnear／farの実周期・非due省略を確認済み。B09の最大92／95魚雷、near約85%、全detail省略約8～9%、cycle平均約10.7ms、高負荷窓約15msは**旧L/3・0.3.38の履歴**であり、現行L/5の根拠や改善率として使わない。
-- B砲弾道撤去は完了。Cのdamage 1Hzと独立4群（depth／Battery／WaveHit／gun）は実装・offline検証済み。Eは①②⑦⑧⑨完了、③④⑤⑥⑩は未実装／設計保留。Dは各版回帰・限定実機試験を実施済みだが、負荷増加時の体感カクつきがあり**実用FPSは未達**。
+- B砲弾道撤去は完了。Cのdamage 1Hzと独立4群（depth／Battery／WaveHit／gun）は実装・offline検証済み。**Eは①②③④⑤⑥⑦⑧⑨⑩をoffline実装完了**（実機周期・FPS効果は未確認）。Dは各版回帰・限定実機試験を実施済みだが、負荷増加時の体感カクつきがあり**実用FPSは未達**。
+- 次の作業（優先順）：
+  1. 次回承認された導入時に起動・記録出力を先に確認し、自艦／味方のID判定とE各群の実周期・非due省略を同じ記録で検証する。B50のID照合そのものを再試験する必要はない。
+  2. 同じ実機機会でTTaro Mod Configの名前表示・既存2項目のtick境界適用を確認する。新E設定はINI対応であり、全項目のゲーム内変更対応済みとはしない。
+  3. 取得欠落・較正安定性を確認した上で、多数魚雷時の区間別処理時間とFPS・体感を評価する。B49の最低22FPSを未解決の基準として残し、周期削減だけで改善済みとしない。
+  4. 現在位置が得られない死亡後の安全側HIGH負荷は未解決。低頻度化には別途方針判断が必要で、自動変更しない。
+- startup FPS調査は中止、大規模構造変更・外部bridge案は保留を維持する。今回の実機操作・導入・pushは行わない。
 - B47 ATMなし比較は中止（待機のみ・結果なし）。startup FPS追跡も中止維持。ゲーム起動・新規実機テストは行わず、追加実機は依頼しない。試験用collector11ファイルはhash照合退避、ATMは比較準備前構成へ復元・baseline照合済み。
 - TTXはユーザー受入済み。初回pinger選択・`ammoParams={}`は追加取得の阻害課題として再オープンせず、再試験も行わない。source／raw／`liveAdjusted=false`の出典契約を維持する。
 - 既知の問題・優先度・到達点は [KNOWN_ISSUES.ja.md](WowsExtractor-torpedoes-client-test/docs/KNOWN_ISSUES.ja.md)、詳細タスクは [FPS_TASKS.ja.md](WowsExtractor-torpedoes-client-test/docs/FPS_TASKS.ja.md) を参照。
@@ -41,9 +47,9 @@
 <a id="task-performance"></a>
 ## 緊急優先：通常プレイのFPS低下
 
-- 共通HP群2Hz＋avatar照合／集計1Hz、damage snapshot 1Hz化、自艦depth／Battery／WaveHit／gun reload独立化、砲弾道撤去、魚雷距離cadenceのoffline実装は完了。実機near／far両側試験はB09でL/3時点確認済み。残る未確認・未実装はL/5・自艦全距離HIGHの実機確認、[FPS専用タスクE](WowsExtractor-torpedoes-client-test/docs/FPS_TASKS.ja.md#fps-slow-groups)の③④⑤⑥⑩、最終FPS判定など。既知の未知を理由に同条件の実機試験を繰り返さない。
+- 共通HP群2Hz＋avatar照合／集計1Hz、damage snapshot 1Hz化、自艦depth／Battery／WaveHit／gun reload独立化、砲弾道撤去、魚雷距離cadenceのoffline実装は完了。実機near／far両側試験はB09でL/3時点確認済み。残る未確認はL/5・自艦全距離HIGHの実機確認、[FPS専用タスクE](WowsExtractor-torpedoes-client-test/docs/FPS_TASKS.ja.md#fps-slow-groups)の③④⑤⑥⑩の実機周期・FPS効果、最終FPS判定など。既知の未知を理由に同条件の実機試験を繰り返さない。
 
-- 最新の低頻度化指定と依存調査：[10項目の調査](WowsExtractor-torpedoes-client-test/docs/RESEARCH_SLOW_GROUPS.ja.md)、[実装タスクE](WowsExtractor-torpedoes-client-test/docs/FPS_TASKS.ja.md#fps-slow-groups)。①HP群2Hz・②avatar1Hz・⑦Battery1Hz・⑨damage1Hz・⑧初回TTXのみは完了。③遠距離艦、④⑤短期状態／消耗品・search、⑥module故障修理、⑩較正診断／coverage1Hzは未実装／設計保留。
+- 最新の低頻度化指定と依存調査：[10項目の調査](WowsExtractor-torpedoes-client-test/docs/RESEARCH_SLOW_GROUPS.ja.md)、[実装タスクE](WowsExtractor-torpedoes-client-test/docs/FPS_TASKS.ja.md#fps-slow-groups)。①HP群2Hz・②avatar1Hz・③遠距離艦world position/yaw・④⑤自艦システム群・⑥魚雷module群・⑦Battery1Hz・⑧初回TTXのみ・⑨damage1Hz・⑩較正診断snapshotは**offline実装完了**（実機周期・FPS効果未確認）。
 
 FPS改善の実施順・詳細タスクは[専用タスクファイル](WowsExtractor-torpedoes-client-test/docs/FPS_TASKS.ja.md)へ集約。砲弾道計算は撤去済み、距離枠による魚雷5Hz／平均2Hzもソース実装済み（offline検証完了）。位置判定は5秒ごと、全件列挙・最小IDは通常tick。実機速度・因果的FPS改善率は未検証。
 
@@ -89,7 +95,7 @@ FPS改善の実施順・詳細タスクは[専用タスクファイル](WowsExtr
 - B28の4集計窓では`ships`がsnapshot buildの約84%を占める（同一時計の記録値の比率）。191 sampleの`ships`平均約27.4ms・最大約40ms、魚雷処理平均約0.03ms。診断OFFを確認済み。B28静的調査でposition/worldPosition/positionHullが各9,100 missing、同一frame player lookup重複を確認。0.3.21ではship.getPosition一回、同frame player再利用、重いfallbackをdiagnostic due+opt-inだけにした。FPS因果と`time.clock`のruntime意味は未確定。通常戦での再現・再導入は依頼しない。
 - [ ] 0.3.14導入後の通常プレイで「自艦撃沈までminFPS 25、撃沈後110まで回復」と報告（外部記録ツール未使用）。因果未確定。追加FPS比較実機試験は依頼しない。0.3.15で既定収集停止、0.3.16で診断既定1Hz、0.3.17でdiagnostic sample内共有、0.3.18でcore avatar getterを3→1へ、0.3.19でself getterを各state 1回へ共有。0.3.20-opt-in-profiling（source only・未導入）でcollection/diagnostics/profiler既定OFFのまま最大9区間の5秒phase集計を追加。OFF時clock calls 0、FPS未計測・改善未確認、timer候補はWoWS runtime未検証。writer thread/FPS/API内部時間未計測、24艦core処理時間・armament/public_data等は未評価。通常プレイにはmod退避を推奨。0.3.14 mod退避先はユーザー許可済み、再導入禁止。[性能問題記録](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_INCIDENT_0.3.14.ja.md)。
 
-現在の正本ソース：`WowsExtractor-torpedoes-client-test/`。作業版は **`0.3.44-self-owner-id`**（source only・未導入・未実機）。collection/diagnostics/profiler/独立群はすべて既定OFF。state は core tick 0.2秒（約5Hz、0.1秒明示で10Hz互換）を基準とし、各情報群の期限・sample metadata に応じて取得を省略・出力する（同一 `state.json` に格納されても、すべての項目が毎tick揃うわけではない）。HP 2Hz・avatar比較1Hz・damage 1Hz・自艦depth／Battery／WaveHit／gun reload独立取得は明示ON・collection必須で利用可能。魚雷は5秒再分類で、自艦判定を同一snapshotの`battle.getSelfPlayerInfo().shipId == torpedo.ownerId`厳密一致で行い、`isOwn`・`isOwnSource`・`isOwnReason`をsample済み行に公開。自艦（`isOwn is True`）は全距離HIGH、同一チームかつ`isOwn is False`の確認済み味方は全距離LOW、敵は半径L/5内・境界上かつ最近`enemy_high_budget`本（既定20）がHIGH／他はLOW平均2Hz。型不一致・self shipId欠測は`isOwn: null`（unknown）で安全側HIGH。meta arena探索0.5秒gate、較正observe戻り値再利用、strict players index/row-local field共有を維持。11 module維持。全pytest pass＋`tools/check_collector_offline.py` 11 module checker成功。L/5・自艦全距離HIGH・チーム別予算の実機周期、多数魚雷・因果的FPS改善率は未検証。通常プレイには引き続きmod退避を推奨。更新：2026-11-07。
+現在の正本ソース：`WowsExtractor-torpedoes-client-test/`。**`0.3.45-slow-information-groups`**（未導入・未実機）。collectionは明示ONが必要。core約5Hz、HP約2Hz、avatar比較・damage・Battery約1Hzを維持し、E③④⑤⑥⑩を追加。較正はliveモデル更新と重い診断snapshotを分離した。自艦魚雷は同一sampleのshipIdとownerIdを厳密比較して全距離5Hz、確認済み味方2Hz、敵L/5内の近い20本まで5Hz・他2Hz。自艦IDや距離の欠測は安全側とし、推測joinや古い値の現在値化をしない。親検証は私有replay込み773 passed・skipなし、11 module checker成功。B48/B49の旧版実測とB50のID観測は今回の周期・FPS効果と区別する。通常プレイには引き続きmod退避を推奨。更新：2026-11-07。
 
 開発目標・収集層の責務は [DEVELOPMENT.md](DEVELOPMENT.md)、AI向け指示・自律進行・Git運用は [.ai/INSTRUCTIONS.md](.ai/INSTRUCTIONS.md) を参照。以下は進捗と残課題。
 

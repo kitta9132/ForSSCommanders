@@ -629,11 +629,25 @@ def test_main_state_reuses_existing_getter_budget_for_24_avatars_and_20_ships():
     c._remember_player_vehicle = lambda player: None
     c._damage = Obj(remember=lambda *args: None,
                     snapshot=lambda: {'inflicted': {}, 'received': {}, 'teamTotal': {}})
-    c._mapCalibration = Obj(observe=lambda samples, now: {'status': 'unknown'},
-                             world_to_map=lambda *args: None)
+    c._mapCalibration = Obj(
+        observe=lambda samples, now: {'status': 'unknown'},
+        update=lambda samples, now: None,
+        live_model_status=lambda: {'status': 'unknown', 'coefficients': None},
+        snapshot=lambda: {'status': 'unknown'},
+        world_to_map=lambda *args: None)
     c._positionFallbacksEnabled = False
     c._relation = lambda team: 1 if team == 1 else 2
     c._map_to_world = lambda *args: None
+    c._ship_world_position_threshold = lambda: None
+    c._selfSystemsSamplingEnabled = True
+    c._selfSystemsSamplingDue = True
+    c._torpedoArmamentSamplingEnabled = True
+    c._torpedoArmamentSamplingDue = True
+    c._mapCalibrationSnapshotInterval = 1.0
+    c._mapCalibrationSnapshotDue = False
+    c._shipWorldPositionSamplingEnabled = True
+    c._shipWorldPositionSamplingDue = True
+    c._shipWorldPositionFarDivisor = 5.0
     c._get_ship_position = lambda *args, **kwargs: (None, {
         'status': 'unknown', 'source': 'ship.getPosition', 'attempted': True,
         'reason': 'none', 'policy': 'coreDirectOnly', 'fallbackStatus': 'notSampled',

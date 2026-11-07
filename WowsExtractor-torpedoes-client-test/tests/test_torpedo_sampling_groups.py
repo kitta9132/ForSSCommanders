@@ -865,7 +865,7 @@ REFERENCE_RECORDINGS = {
             'sampled.high': 59145, 'sampled.low': 14566},
         'api': {
             'collection': 1194, 'field.ownerId': 95413,
-            'field.ownerTeamId': 73711, 'field.ownerType': 73711,
+            'field.ownerTeamId': 95413, 'field.ownerType': 73711,
             'field.position': 73711, 'field.shotId': 95413,
             'field.type': 73711, 'field.uiId': 95413, 'owner': 11371}},
     'without-atm-b44.jsonl': {
@@ -879,7 +879,7 @@ REFERENCE_RECORDINGS = {
             'sampled.high': 3640, 'sampled.low': 2404},
         'api': {
             'collection': 743, 'field.ownerId': 9671,
-            'field.ownerTeamId': 6044, 'field.ownerType': 6044,
+            'field.ownerTeamId': 9671, 'field.ownerType': 6044,
             'field.position': 6044, 'field.shotId': 9671,
             'field.type': 6044, 'field.uiId': 9671, 'owner': 1391}},
 }
@@ -1033,7 +1033,11 @@ def test_private_recording_reference_replay_keeps_exact_snapshot_budget(
     assert counts['sampled.high'] + counts['sampled.low'] == counts['sampledRows']
     assert counts['sampledRows'] <= counts['originalRows']
     assert api_counts['field.position'] == counts['sampledRows']
-    assert api_counts['field.ownerTeamId'] == counts['sampledRows']
+    # 0.3.45 regression fix recomputes identity facts (ownerTeamId,
+    # teamRelation, isOwn, teamClass) for every record every tick, so the
+    # ownerTeamId getter is exercised on all membership rows, not just sampled
+    # ones. It must still never exceed the original membership rows.
+    assert api_counts['field.ownerTeamId'] == counts['originalRows']
     assert api_counts['owner'] <= counts['originalOwnerBudget']
     assert digest_value == expected['digest']
     assert dict(counts) == expected['budgets']
@@ -1094,3 +1098,77 @@ def test_sampling_does_not_require_optional_sandbox_builtins():
         assert status['sampling']['low']['status'] == 'notSampled'
     finally:
         torpedo_telemetry.__dict__['__builtins__'] = original
+
+
+def test_non_due_low_row_promotes_to_own_at_next_due_with_current_self_ship_id():
+    """0.3.45 regression: identity facts must be recomputed every tick.
+
+    A same-team torpedo classified as ally-low while self_ship_id differed
+    must be promoted to own-high on the next tick as soon as self_ship_id
+    matches. The promoted row is sampled with a current world position and one
+    owner lookup; normal non-promoted LOW rows still skip both.
+    """
+    rows = [CountedTorpedo(uiId=1, ownerId=7001, ownerTeamId=1,
+                           position=(0, 0, 100.0))]
+    telemetry, battle = adapter(rows)
+    sampler = TorpedoSamplingGroups()
+    out, status = telemetry.torpedoes(
+        1, sampler, 0.0, context(), self_ship_id=9999)
+    assert len(out) == 1
+    assert out[0]['sampling']['group'] == 'low'
+    assert out[0]['isOwn'] is False
+    assert out[0]['isOwnReason'] == 'selfShipIdDiffers'
+    entry_key = ((type(1), 1), (type(7001), 7001), (type(1), 1))
+    assert sampler._entries[entry_key]['teamClass'] == 'ally'
+
+    # Non-due tick: self_ship_id now matches and the row is promoted to
+    # own-high immediately because the current teamClass is recomputed every
+    # tick. The promoted row needs one fresh position read and one owner lookup
+    # so the published sample reflects the current world state.
+    rows[0].reads.clear()
+    battle.owner_calls.clear()
+    out, status = telemetry.torpedoes(
+        1, sampler, 0.1, context(), self_ship_id=7001)
+    assert len(out) == 1
+    assert out[0]['sampling']['group'] == 'high'
+    assert out[0]['sampling']['reason'] == 'highDue'
+    assert out[0]['isOwn'] is True
+    assert out[0]['isOwnReason'] == 'exactSelfShipIdMatch'
+    assert sampler._entries[entry_key]['teamClass'] == 'own'
+    assert sum(battle.owner_calls.values()) == 1
+    assert rows[0].reads['position'] == 1
+
+    # A subsequent due tick as own-high reads the position once and performs
+    # one owner lookup (the per-tick owner cache is local to each sample).
+    rows[0].reads.clear()
+    battle.owner_calls.clear()
+    out, status = telemetry.torpedoes(
+        1, sampler, 0.3, context(), self_ship_id=7001)
+    assert len(out) == 1
+    assert out[0]['sampling']['reason'] == 'highDue'
+    assert sum(battle.owner_calls.values()) == 1
+    assert rows[0].reads['position'] == 1
+
+
+def test_self_ship_id_unknown_then_match_promotes_without_waiting_for_due():
+    """A safety-high allyUnknown row must become own-high once self_ship_id
+    resolves, without waiting beyond the classification interval."""
+    rows = [CountedTorpedo(uiId=1, ownerId=7001, ownerTeamId=1,
+                           position=(0, 0, 100.0))]
+    telemetry, _ = adapter(rows)
+    sampler = TorpedoSamplingGroups()
+    out, status = telemetry.torpedoes(
+        1, sampler, 0.0, context(), self_ship_id=None)
+    assert len(out) == 1
+    assert out[0]['sampling']['group'] == 'high'
+    assert out[0]['isOwn'] is None
+    assert out[0]['isOwnReason'] == 'selfShipIdUnavailable'
+    entry_key = ((type(1), 1), (type(7001), 7001), (type(1), 1))
+    assert sampler._entries[entry_key]['teamClass'] == 'allyUnknown'
+
+    out, status = telemetry.torpedoes(
+        1, sampler, 5.0, context(), self_ship_id=7001)
+    assert len(out) == 1
+    assert out[0]['sampling']['group'] == 'high'
+    assert out[0]['isOwn'] is True
+    assert out[0]['isOwnReason'] == 'exactSelfShipIdMatch'

@@ -502,16 +502,16 @@ class MapCalibration(object):
         self._holdout_outliers = 0
         self._drift_streak = 0
 
-    def observe(self, samples, now):
-        """Observe ``(nx, ny, worldX, worldZ)`` pairs at monotonic ``now``.
+    def update(self, samples, now):
+        """Ingest samples and update the live model without building the heavy
+        diagnostics snapshot. This stays on the core tick path.
 
-        Invalid and non-finite values are ignored. A backwards timestamp
-        starts a fresh calibration epoch before processing the new batch.
-        Returns a diagnostics snapshot for convenient call-site logging.
+        Invalid and non-finite values are ignored. A backwards timestamp starts
+        a fresh calibration epoch before processing the new batch.
         """
         timestamp = _number(now)
         if timestamp is None:
-            return self.snapshot()
+            return
         if self._last_now is not None and timestamp < self._last_now:
             self.clear()
         self._last_now = timestamp
@@ -526,17 +526,58 @@ class MapCalibration(object):
                 if self._drift_streak >= _DRIFT_BATCHES:
                     self._reset_fit_and_samples()
                     self._append_many(parsed)
-                    return self.snapshot()
                 # Do not contaminate an established reservoir with suspect data.
-                return self.snapshot()
+                return
             self._drift_streak = 0
             self._append_many([values for values, is_bad in zip(parsed, bad)
                                if not is_bad])
-            return self.snapshot()
+            return
 
         if self._append_many(parsed):
             self._try_fit()
+
+    def observe(self, samples, now):
+        """Observe ``(nx, ny, worldX, worldZ)`` pairs at monotonic ``now``.
+
+        Invalid and non-finite values are ignored. A backwards timestamp
+        starts a fresh calibration epoch before processing the new batch.
+        Returns a diagnostics snapshot for convenient call-site logging.
+
+        This method is kept for backward compatibility; new call sites should
+        use :meth:`update` on the core path and :meth:`snapshot` for heavy
+        diagnostics.
+        """
+        self.update(samples, now)
         return self.snapshot()
+
+    def live_model_status(self):
+        """Lightweight status and coefficients for live consumers.
+
+        Heavy fit diagnostics (span, rmse, holdout details) are only available
+        through :meth:`snapshot` so the core tick path stays cheap.
+        """
+        coefficients = None
+        if self._model is not None:
+            x_map_name = "nx" if self._model["x_index"] == 0 else "ny"
+            z_map_name = "nx" if self._model["z_index"] == 0 else "ny"
+            coefficients = {
+                "axis": self._model["axis"],
+                "worldX": {"mapAxis": x_map_name,
+                           "scale": self._model["x"][0],
+                           "offset": self._model["x"][1]},
+                "worldZ": {"mapAxis": z_map_name,
+                           "scale": self._model["z"][0],
+                           "offset": self._model["z"][1]},
+            }
+        return {
+            "source": "temporal_map_fit",
+            "status": self._status,
+            "reason": self._reason,
+            "sampleCount": len(self._samples),
+            "fitSampleCount": self._fit_sample_count,
+            "coefficients": coefficients,
+            "inferred": True,
+        }
 
     def _span_snapshot(self):
         if not self._samples:

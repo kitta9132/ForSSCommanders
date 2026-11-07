@@ -1,6 +1,8 @@
 # 既知の問題と実用化の到達点
 
-0.3.44-self-owner-id：魚雷の自艦判定を `owner.isPlayer` から、同一 snapshot の `battle.getSelfPlayerInfo().shipId == torpedo.ownerId` へ変更。`owner.isPlayer` は `owner` 行に生の観測値として残すが分類には使わない。`isOwn`・`isOwnSource`・`isOwnReason` を sample 済み行へ公開。自艦（`isOwn is True`）は全距離 HIGH で敵予算外、確認済み味方（同一チームかつ `isOwn is False`）は全距離 LOW（初観測含む）、敵は半径内の最近 `enemy_high_budget` 本（既定20）だけ HIGH。チーム不明・距離不明・同一チームで `isOwn` 不明は安全側 HIGH。型不一致・self shipId 欠測は `isOwn: null`（unknown）とし味方と誤分類しない。`self.shipId` は毎 sample 新鮮に取得し cache/fallback しない。半径・周期（近0.2秒／遠0.5秒／5秒再分類）は0.3.40のまま。TTaro Mod Config 連携・UI adapter 契約も維持。offline検証のみで**未導入・未実機**、実機周期・負荷・分類一致は未確認。FPS改善や実機取得時間短縮を主張しない。研究用`high_budget_25`は研究のまま維持する。\n\n0.3.43（履歴）：自艦 ID candidate 観測。`battle.getSelfPlayerInfo()` から `id`（playerId）と `shipId`、`battle.getSelfPlayerShip()` から公開 `uiId`、Ship 非公開属性候補 `_Ship__id`/`id`/`vehicleId` を別々の candidate として記録。B50 では `getSelfPlayerInfo().shipId` と自艦発射魚雷の `ownerId` が全行厳密一致。`isOwn` 上書きは行わなかった。
+0.3.45-slow-information-groups：0.3.44 の自艦判定を維持しつつ、③遠距離艦 world position/yaw、④⑤自艦システム群（radar/hydro/locator/consumables）、⑥魚雷 module 群、⑩較正診断 snapshot を独立した 1 Hz 群に分離。minimap の `nx`/`ny`/visibility/IDs、HP 群、avatar 比較群、魚雷分類の動作は変更しない。各群は独立した `enabled`/`interval` 設定を持ち、OFF は core cadence（毎tick）に戻す。`ship_world_position_far_divisor`（既定5）で較正 world 半径を計算し、自艦 world position と各艦 map 座標の `map_to_world` 推定から far/near を判定。較正未成立・自位置不明・model 未確定艦は core で読む。非 due far 艦は `ship.getPosition()` を呼ばず、推定 world 値で補完もしない。`MapCalibration.observe()` は後方互換のため `update()` + `snapshot()` に委譲。core path では `update()` + `live_model_status()` を使い、重い診断 snapshot は独立 1 Hz ゲート `map_calibration_snapshot_interval` で出力する。offline 検証のみで**未導入・未実機**、実機 FPS 改善・周期の実戦確認は未達。FPS 改善を主張しない。研究用 `high_budget_25` は研究のまま維持する。
+
+0.3.44-self-owner-id（履歴）：魚雷の自艦判定を `owner.isPlayer` から、同一 snapshot の `battle.getSelfPlayerInfo().shipId == torpedo.ownerId` へ変更。`owner.isPlayer` は `owner` 行に生の観測値として残すが分類には使わない。`isOwn`・`isOwnSource`・`isOwnReason` を sample 済み行へ公開。自艦（`isOwn is True`）は全距離 HIGH で敵予算外、確認済み味方（同一チームかつ `isOwn is False`）は全距離 LOW（初観測含む）、敵は半径内の最近 `enemy_high_budget` 本（既定20）だけ HIGH。チーム不明・距離不明・同一チームで `isOwn` 不明は安全側 HIGH。型不一致・self shipId 欠測は `isOwn: null`（unknown）とし味方と誤分類しない。`self.shipId` は毎 sample 新鮮に取得し cache/fallback しない。半径・周期（近0.2秒／遠0.5秒／5秒再分類）は0.3.40のまま。TTaro Mod Config 連携・UI adapter 契約も維持。offline検証のみで**未導入・未実機**、実機周期・負荷・分類一致は未確認。FPS改善や実機取得時間短縮を主張しない。研究用`high_budget_25`は研究のまま維持する。\n\n0.3.43（履歴）：自艦 ID candidate 観測。`battle.getSelfPlayerInfo()` から `id`（playerId）と `shipId`、`battle.getSelfPlayerShip()` から公開 `uiId`、Ship 非公開属性候補 `_Ship__id`/`id`/`vehicleId` を別々の candidate として記録。B50 では `getSelfPlayerInfo().shipId` と自艦発射魚雷の `ownerId` が全行厳密一致。`isOwn` 上書きは行わなかった。
 
 0.3.40（履歴）：魚雷分類半径を`R=L/5`（`L=min(mapWidth,mapHeight)`の較正world長）へ正式変更。L/5～L/3帯はLOWになり、自艦は全距離HIGH（0.2秒期限）、他は近5Hz／遠平均2Hz、5秒再分類を維持する。offline検証のみで未導入・未実機、L/5と自艦5Hzの実機周期は未確認。以下の実機根拠は0.3.38で、L/3の履歴である。
 
@@ -12,7 +14,7 @@
 
 - 0.3.38実装版で全555 tests＋9 module checker成功。
 - B46実機（0.3.38・heavy OFF・独立4群ON）：1,335 records（active 1,333）。ユーザー報告 minFPS 約50以上・カクつきなし（録画なし）。HP 2 Hz／比較・damage 1 Hz・非due省略、独立 phase 計上を確認。depth／WaveHit／gun 全1,333 available、Battery 272 available／1,061 notSampled。
-- FPSタスク：AのofflineとATM B09でのnear／far実周期確認、B撤去、C実装・独立取得、Dの既存回帰と限定実機試験は実施済み。最終実用FPSは未達。Eは①②⑦⑨⑧完了・③④⑤⑥⑩保留。
+- FPSタスク：AのofflineとATM B09でのnear／far実周期確認、B撤去、C実装・独立取得、Dの既存回帰と限定実機試験は実施済み。最終実用FPSは未達。Eは①②③④⑤⑥⑦⑧⑨⑩を0.3.45までに実装。ただし実機確認・因果的FPS改善率は未達。
 - ATM B09で最大95魚雷時の負荷を観測し、ユーザーはmin30程度で体感カクつきを報告。200本規模・因果的FPS改善率は未検証。startup追跡中止、同条件再試験は即要求しない。
 - 初回 pinger 選択はユーザー見解で仕様上おそらく回避不可とみなす。TTX 値は合っていたため現行初回 variant 表示候補を実用受入済み。スキル発動時の実戦値／動的補正は未確認だが、追加取得・再試験は行わず受入済みとする。`selectedTTXnotApplicable`・`ammoParams={}` は阻害課題として再オープンせず、source／raw／`liveAdjusted=false` 契約を維持。
 
@@ -65,13 +67,13 @@ FPS改善を先行する。[専用タスク・距離分岐案](FPS_TASKS.ja.md#f
 | 位置・較正・運動 | [魚雷運動・単位](../../TASKS.md#task-torpedoes)、[別地図・境界・drift](../../TASKS.md#task-stability) |
 | ダメージ・弾道 | [潜水艦用途に不要な経路の削減](../../TASKS.md#task-scope) |
 
-距離別魚雷収集は、0.3.40で自艦から半径`L/5`（L=マップ短辺の較正world長）より外をLOW平均2Hz、内側・境界上をHIGH 5Hzとする。0.3.33～0.3.39はL/3だった。offline 実装は0.3.33で完了し、B43／B44 replay・216魚雷fixtureで検証済み。L/5の実機near／far周期・自艦全距離HIGH・最終FPS判定は未完（B09のnear／far実周期確認はL/3時点の履歴）。全魚雷API列挙と分類用位置取得が必要なら、それ自体は低頻度化できない可能性がある。後段の加工・owner取得・出力との費用を分けて判断する。0.3.44 では自艦判定を `owner.isPlayer` から `battle.getSelfPlayerInfo().shipId == torpedo.ownerId` へ変更した。詳細な分岐と周期・互換性は[FPS専用タスク](FPS_TASKS.ja.md#fps-torpedoes)へ集約。詳細診断に束ねられた潜水艦固有情報の独立化も対象。
+距離別魚雷収集は、0.3.40で自艦から半径`L/5`（L=マップ短辺の較正world長）より外をLOW平均2Hz、内側・境界上をHIGH 5Hzとする。0.3.33～0.3.39はL/3だった。offline 実装は0.3.33で完了し、B43／B44 replay・216魚雷fixtureで検証済み。L/5の実機near／far周期・自艦全距離HIGH・最終FPS判定は未完（B09のnear／far実周期確認はL/3時点の履歴）。全魚雷API列挙と分類用位置取得が必要なら、それ自体は低頻度化できない可能性がある。後段の加工・owner取得・出力との費用を分けて判断する。0.3.44 では自艦判定を `owner.isPlayer` から `battle.getSelfPlayerInfo().shipId == torpedo.ownerId` へ変更。0.3.45 では艦 world position/yaw、自艦システム群、魚雷 module 群、較正診断 snapshot を独立 1 Hz 群に分離した。詳細な分岐と周期・互換性は[FPS専用タスク](FPS_TASKS.ja.md#fps-torpedoes)へ集約。詳細診断に束ねられた潜水艦固有情報の独立化も対象。
 
 ## 優先度A：実用前に詰める問題
 
 | 問題 | 現状・影響 | 到達点／次の確認 |
 |---|---|---|
-| 通常利用への負荷 | 過去にFPS低下の報告あり。B46（0.3.38・heavy OFF・独立4群ON）でユーザー報告minFPS約50以上・カクつきなし。ただし今回は魚雷最大6本・low群0、因果的改善率・遠距離2Hz・多数魚雷FPSは未検証。B43最大216魚雷でmin30以上、B44最大63魚雷でmin40～50の記録も残る | 既存offline検証を維持し、必要な実機試験では段階的な規模・悪化時中止を徹底。開始直後FPS低下は追わない。同条件再試験を直ちに追加しない |
+| 通常利用への負荷 | 過去にFPS低下の報告あり。B46（0.3.38・heavy OFF・独立4群ON）でユーザー報告minFPS約50以上・カクつきなし。0.3.45で③④⑤⑥⑩を1Hz化したが、実機確認・因果的改善率は未検証。B43最大216魚雷でmin30以上、B44最大63魚雷でmin40～50の記録も残る | 既存offline検証を維持し、必要な実機試験では段階的な規模・悪化時中止を徹底。開始直後FPS低下は追わない。同条件再試験を直ちに追加しない |
 | API艦一覧とavatarの範囲差 | B39はavatar12対API ships9。API一覧だけでは観測できた地図位置・HPを落とす。avatarは別出力済み | consumerが両一覧・取得範囲を区別できる契約にする。avatar.idを未検証のままplayerIdへ確定joinしない。未取得艦を死亡扱いしない |
 | 魚雷・艦・pingのID対応 | ownerIdと同state vehicleIdはB43の93,297行で候補一致、2,116行未一致。一般namespace契約なし。avatar.playerId未取得の実績あり | 確定IDと候補IDを分けたまま使える状態にする。isOwn unknownを保持し、誤った所有者・ping対象・誘導対象を表示しない |
 | ファイル読取りの一貫性 | state.jsonは非原子的上書き。読取り途中に不完全JSONとなる可能性。5Hzは厳密周期ではない | 読取側の再試行・鮮度・取得失敗の扱いを確認する。書込契約を変える場合はconsumer互換性も検証。途中失敗を魚雷0本へ変換しない |

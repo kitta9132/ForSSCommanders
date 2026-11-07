@@ -6,7 +6,7 @@
 
 API_VERSION = 'API_v1.0'
 MOD_NAME = 'WowsExtractor'
-MOD_VERSION = '0.3.44-self-owner-id'
+MOD_VERSION = '0.3.45-slow-information-groups'
 
 # ---------------------------------------------------------------------------
 # WowsExtractor -- observations for an external submarine-combat map.
@@ -181,6 +181,9 @@ STATE_INTERVAL = 0.2          # default seconds between state.json writes (~5 Hz
 # tick rate; only these two groups are gated.
 HEALTH_SAMPLING_INTERVAL = 0.5      # average 2 Hz on 0.2 s ticks (0.4/0.6 s)
 COMPARISON_SAMPLING_INTERVAL = 1.0  # avatar apiPresence/consistency/coverage
+# Bounded tracker for "first observation must be sampled" in the far-ship
+# world-position slow group. Overflow resets safely to core cadence for one tick.
+SHIP_WORLD_POSITION_SEEN_IDS_LIMIT = 512
 META_RETRY_INTERVAL = 0.5     # battleInfo/map can be late in very small battles
                               # (also gates the arena-id promotion probe)
 META_RETRY_SECONDS = 12.0
@@ -855,6 +858,32 @@ class Collector(object):
         self._comparisonSamplingNextDue = None
         self._comparisonSamplingLastNow = None
         self._comparisonSamplingDue = False
+        self._selfSystemsSamplingEnabled = True
+        self._selfSystemsSamplingInterval = 1.0
+        self._selfSystemsSamplingNextDue = None
+        self._selfSystemsSamplingLastNow = None
+        self._selfSystemsSamplingDue = False
+        self._torpedoArmamentSamplingEnabled = True
+        self._torpedoArmamentSamplingInterval = 1.0
+        self._torpedoArmamentSamplingNextDue = None
+        self._torpedoArmamentSamplingLastNow = None
+        self._torpedoArmamentSamplingDue = False
+        self._mapCalibrationSnapshotInterval = 1.0
+        self._mapCalibrationSnapshotNextDue = None
+        self._mapCalibrationSnapshotLastNow = None
+        self._mapCalibrationSnapshotDue = False
+        self._shipWorldPositionSamplingEnabled = True
+        self._shipWorldPositionSamplingInterval = 1.0
+        self._shipWorldPositionSamplingNextDue = None
+        self._shipWorldPositionSamplingLastNow = None
+        self._shipWorldPositionSamplingDue = False
+        self._shipWorldPositionFarDivisor = 5.0
+        self._shipWorldPositionSeenIdsLimit = 512
+        # Bounded FIFO tracker for "first observation must be sampled" guarantee.
+        # On overflow the oldest ids are evicted, so only a bounded number of
+        # ships are treated as "already seen" while memory stays capped.
+        self._shipWorldPositionSeenIds = {}
+        self._shipWorldPositionSeenOrder = []
         self._lastMetaWrite = 0.0
         self._metaRetryUntil = 0.0
         self._metaReady = False
@@ -1019,10 +1048,82 @@ class Collector(object):
         self._comparisonSamplingNextDue = None
         self._comparisonSamplingLastNow = None
         self._comparisonSamplingDue = False
+        self._selfSystemsSamplingEnabled = (
+            cfg.get('self_systems_sampling_enabled', 'true').lower() == 'true')
+        systems_interval = _cfg_float(cfg, 'self_systems_sampling_interval', 1.0)
+        try:
+            systems_interval = float(systems_interval)
+            if (systems_interval != systems_interval or
+                    systems_interval == float('inf') or
+                    systems_interval == -float('inf')):
+                systems_interval = 1.0
+        except Exception:
+            systems_interval = 1.0
+        self._selfSystemsSamplingInterval = max(systems_interval, 0.2)
+        self._selfSystemsSamplingNextDue = None
+        self._selfSystemsSamplingLastNow = None
+        self._selfSystemsSamplingDue = False
+        self._torpedoArmamentSamplingEnabled = (
+            cfg.get('torpedo_armament_sampling_enabled', 'true').lower() == 'true')
+        armament_interval = _cfg_float(cfg, 'torpedo_armament_sampling_interval', 1.0)
+        try:
+            armament_interval = float(armament_interval)
+            if (armament_interval != armament_interval or
+                    armament_interval == float('inf') or
+                    armament_interval == -float('inf')):
+                armament_interval = 1.0
+        except Exception:
+            armament_interval = 1.0
+        self._torpedoArmamentSamplingInterval = max(armament_interval, 0.2)
+        self._torpedoArmamentSamplingNextDue = None
+        self._torpedoArmamentSamplingLastNow = None
+        self._torpedoArmamentSamplingDue = False
+        self._shipWorldPositionSamplingEnabled = (
+            cfg.get('ship_world_position_sampling_enabled', 'true').lower() == 'true')
+        ship_world_interval = _cfg_float(
+            cfg, 'ship_world_position_sampling_interval', 1.0)
+        try:
+            ship_world_interval = float(ship_world_interval)
+            if (ship_world_interval != ship_world_interval or
+                    ship_world_interval == float('inf') or
+                    ship_world_interval == -float('inf')):
+                ship_world_interval = 1.0
+        except Exception:
+            ship_world_interval = 1.0
+        self._shipWorldPositionSamplingInterval = max(ship_world_interval, 0.2)
+        self._shipWorldPositionSamplingNextDue = None
+        self._shipWorldPositionSamplingLastNow = None
+        self._shipWorldPositionSamplingDue = False
+        self._shipWorldPositionFarDivisor = _cfg_float(
+            cfg, 'ship_world_position_far_divisor', 5.0)
+        try:
+            divisor = float(self._shipWorldPositionFarDivisor)
+            if (divisor != divisor or divisor == float('inf') or
+                    divisor == -float('inf') or divisor <= 0.0):
+                divisor = 5.0
+        except Exception:
+            divisor = 5.0
+        self._shipWorldPositionFarDivisor = divisor
+        self._shipWorldPositionSeenIds = {}
+        self._shipWorldPositionSeenOrder = []
+        calib_interval = _cfg_float(
+            cfg, 'map_calibration_snapshot_interval', 1.0)
+        try:
+            calib_interval = float(calib_interval)
+            if (calib_interval != calib_interval or
+                    calib_interval == float('inf') or
+                    calib_interval == -float('inf')):
+                calib_interval = 1.0
+        except Exception:
+            calib_interval = 1.0
+        self._mapCalibrationSnapshotInterval = max(calib_interval, 0.2)
+        self._mapCalibrationSnapshotNextDue = None
+        self._mapCalibrationSnapshotLastNow = None
+        self._mapCalibrationSnapshotDue = False
         if self._performanceProfiler is not None:
             self._performanceProfiler.reset_battle()
         # clamp the interval so a typo (0 / negative) can't hammer the disk
-        self._stateInterval = max(_cfg_float(cfg, 'state_interval', STATE_INTERVAL), 0.02)
+        self._stateInterval = max(_cfg_float(cfg, 'state_interval', 0.2), 0.02)
 
     # -- team torpedo sampling policy (0.3.41) ------------------------------
     def _apply_pending_torpedo_sampling_settings(self, now):
@@ -1719,6 +1820,20 @@ class Collector(object):
             self._comparisonSamplingNextDue = None
             self._comparisonSamplingLastNow = None
             self._comparisonSamplingDue = False
+            self._selfSystemsSamplingNextDue = None
+            self._selfSystemsSamplingLastNow = None
+            self._selfSystemsSamplingDue = False
+            self._torpedoArmamentSamplingNextDue = None
+            self._torpedoArmamentSamplingLastNow = None
+            self._torpedoArmamentSamplingDue = False
+            self._mapCalibrationSnapshotNextDue = None
+            self._mapCalibrationSnapshotLastNow = None
+            self._mapCalibrationSnapshotDue = False
+            self._shipWorldPositionSamplingNextDue = None
+            self._shipWorldPositionSamplingLastNow = None
+            self._shipWorldPositionSamplingDue = False
+            self._shipWorldPositionSeenIds = {}
+            self._shipWorldPositionSeenOrder = []
             if previous_now is not None and clock_ok:
                 self._lastWrite = 0.0
         # Consume optional TTaro Mod Config edits, then apply any queued policy
@@ -1740,6 +1855,10 @@ class Collector(object):
         self._diagnosticsSampleDue = self._diagnostics_due(now)
         self._torpedoDepthSamplingDue = self._torpedo_depth_sampling_due(now)
         self._torpedoStateSamplingDue = self._torpedo_state_sampling_due(now)
+        self._selfSystemsSamplingDue = self._self_systems_sampling_due(now)
+        self._torpedoArmamentSamplingDue = self._torpedo_armament_sampling_due(now)
+        self._mapCalibrationSnapshotDue = self._map_calibration_snapshot_due(now)
+        self._shipWorldPositionSamplingDue = self._ship_world_position_sampling_due(now)
         # Runtime collectors provide the shared group schedulers. Legacy test
         # harnesses that only patch the older due methods keep working (no HP
         # group sampling flag -> their previous full-frame behaviour).
@@ -1788,6 +1907,10 @@ class Collector(object):
             self._torpedoStateSamplingDue = False
             self._healthSamplingDue = False
             self._comparisonSamplingDue = False
+            self._selfSystemsSamplingDue = False
+            self._torpedoArmamentSamplingDue = False
+            self._mapCalibrationSnapshotDue = False
+            self._shipWorldPositionSamplingDue = False
 
     def _deadline_due(self, now, enabled, interval, next_due, last_now):
         """Shared anchored deadline scheduler; never replays missed periods.
@@ -1911,6 +2034,102 @@ class Collector(object):
             self._torpedoStateSamplingNextDue = now + interval
         return due
 
+    def _self_systems_sampling_due(self, now):
+        """Schedule self systems at 1 Hz; OFF reverts to core cadence."""
+        if not _get(self, '_selfSystemsSamplingEnabled', True):
+            self._selfSystemsSamplingNextDue = None
+            self._selfSystemsSamplingLastNow = None
+            return True
+        interval = _get(self, '_selfSystemsSamplingInterval', 1.0)
+        try:
+            interval = float(interval)
+            if not (interval == interval and interval != float('inf')
+                    and interval != -float('inf')):
+                interval = 1.0
+            interval = max(interval, 0.2)
+        except Exception:
+            interval = 1.0
+        due, next_due, last_now = self._deadline_due(
+            now, True, interval,
+            _get(self, '_selfSystemsSamplingNextDue'),
+            _get(self, '_selfSystemsSamplingLastNow'))
+        self._selfSystemsSamplingNextDue = next_due
+        self._selfSystemsSamplingLastNow = last_now
+        return due
+
+    def _torpedo_armament_sampling_due(self, now):
+        """Schedule torpedo armament at 1 Hz; OFF reverts to core cadence."""
+        if not _get(self, '_torpedoArmamentSamplingEnabled', True):
+            self._torpedoArmamentSamplingNextDue = None
+            self._torpedoArmamentSamplingLastNow = None
+            return True
+        interval = _get(self, '_torpedoArmamentSamplingInterval', 1.0)
+        try:
+            interval = float(interval)
+            if not (interval == interval and interval != float('inf')
+                    and interval != -float('inf')):
+                interval = 1.0
+            interval = max(interval, 0.2)
+        except Exception:
+            interval = 1.0
+        due, next_due, last_now = self._deadline_due(
+            now, True, interval,
+            _get(self, '_torpedoArmamentSamplingNextDue'),
+            _get(self, '_torpedoArmamentSamplingLastNow'))
+        self._torpedoArmamentSamplingNextDue = next_due
+        self._torpedoArmamentSamplingLastNow = last_now
+        return due
+
+    def _map_calibration_snapshot_due(self, now):
+        """Schedule the heavy map-calibration diagnostics snapshot at 1 Hz.
+
+        This is independent of the heavy diagnostics group so the snapshot is
+        emitted even when general diagnostics are disabled.
+        """
+        interval = _get(self, '_mapCalibrationSnapshotInterval', 1.0)
+        try:
+            interval = float(interval)
+            if not (interval == interval and interval != float('inf')
+                    and interval != -float('inf')):
+                interval = 1.0
+            interval = max(interval, 0.2)
+        except Exception:
+            interval = 1.0
+        due, next_due, last_now = self._deadline_due(
+            now, True, interval,
+            _get(self, '_mapCalibrationSnapshotNextDue'),
+            _get(self, '_mapCalibrationSnapshotLastNow'))
+        self._mapCalibrationSnapshotNextDue = next_due
+        self._mapCalibrationSnapshotLastNow = last_now
+        return due
+
+    def _ship_world_position_sampling_due(self, now):
+        """Schedule far-ship world position/yaw sampling at 1 Hz.
+
+        Near ships and any ship without a reliable map estimate are always read
+        on the core tick path; only known-far ships are gated to this interval.
+        """
+        if not _get(self, '_shipWorldPositionSamplingEnabled', True):
+            self._shipWorldPositionSamplingNextDue = None
+            self._shipWorldPositionSamplingLastNow = None
+            return True
+        interval = _get(self, '_shipWorldPositionSamplingInterval', 1.0)
+        try:
+            interval = float(interval)
+            if not (interval == interval and interval != float('inf')
+                    and interval != -float('inf')):
+                interval = 1.0
+            interval = max(interval, 0.2)
+        except Exception:
+            interval = 1.0
+        due, next_due, last_now = self._deadline_due(
+            now, True, interval,
+            _get(self, '_shipWorldPositionSamplingNextDue'),
+            _get(self, '_shipWorldPositionSamplingLastNow'))
+        self._shipWorldPositionSamplingNextDue = next_due
+        self._shipWorldPositionSamplingLastNow = last_now
+        return due
+
     def _diagnostics_due(self, now):
         """Schedule one complete diagnostics sample; never replay missed periods."""
         if not self._diagnosticsEnabled:
@@ -1963,7 +2182,7 @@ class Collector(object):
         any_opt_in = depth_enabled or battery_enabled or wave_hit_enabled
         diagnostics_enabled = _get(self, '_diagnosticsEnabled', False) is True
         diagnostic_interval = _get(self, '_diagnosticsInterval', 1.0)
-        core_interval = _get(self, '_stateInterval', STATE_INTERVAL)
+        core_interval = _get(self, '_stateInterval', 0.2)
         comparison_interval = _get(
             self, '_comparisonSamplingInterval', COMPARISON_SAMPLING_INTERVAL)
 
@@ -2410,6 +2629,8 @@ class Collector(object):
         players_sample = self._remember_roster_vehicles(avatar_entities)
         health_due = _get(self, '_healthSamplingDue', True) is True
         comparison_due = _get(self, '_comparisonSamplingDue', True) is True
+        calibration_snapshot_due = _get(
+            self, '_mapCalibrationSnapshotDue', False) is True
         plan_builder = _get(self, '_submarine_sampling_plan', None)
         if callable(plan_builder):
             submarine_plan = plan_builder(diagnostic_due, comparison_due)
@@ -2446,15 +2667,30 @@ class Collector(object):
         if profiler is not None:
             profiler.finish(avatar_phase)
 
+        # Build self first so we can share the same getPosition() result with
+        # the far-ship distance classifier. Calling getPosition twice on the
+        # same frame would double the read budget for self.
+        if health_due:
+            self_state = self._build_self(ui_hp, self_info, self_ship)
+        else:
+            self_state = self._build_self(ui_hp, self_info, self_ship,
+                                          health_due=False)
+        self_position = (self_state.get('position')
+                         if isinstance(self_state, dict) else None)
+
         if profiler is not None:
             def build_ships_and_avatar_observations():
                 if health_due:
                     built_ships, built_diag = self._build_ships(
-                        now, ui_hp, avatar_entities, players_sample)
+                        now, ui_hp, avatar_entities, players_sample,
+                        calibration_snapshot_due=calibration_snapshot_due,
+                        self_position=self_position)
                 else:
                     built_ships, built_diag = self._build_ships(
                         now, ui_hp, avatar_entities, players_sample,
-                        health_due=False)
+                        health_due=False,
+                        calibration_snapshot_due=calibration_snapshot_due,
+                        self_position=self_position)
                 observations = self._build_avatar_observations(
                     avatar_snapshot, now, built_ships)
                 return built_ships, built_diag, observations
@@ -2464,11 +2700,15 @@ class Collector(object):
         else:
             if health_due:
                 ships, diag = self._build_ships(
-                    now, ui_hp, avatar_entities, players_sample)
+                    now, ui_hp, avatar_entities, players_sample,
+                    calibration_snapshot_due=calibration_snapshot_due,
+                    self_position=self_position)
             else:
                 ships, diag = self._build_ships(
                     now, ui_hp, avatar_entities, players_sample,
-                    health_due=False)
+                    health_due=False,
+                    calibration_snapshot_due=calibration_snapshot_due,
+                    self_position=self_position)
             avatar_observations = self._build_avatar_observations(
                 avatar_snapshot, now, ships)
         if isinstance(avatar_observations, dict):
@@ -2481,11 +2721,6 @@ class Collector(object):
         diag['healthSamplingStatus'] = health_sampling['status']
         if not health_due:
             diag.pop('uiHealth', None)
-        if health_due:
-            self_state = self._build_self(ui_hp, self_info, self_ship)
-        else:
-            self_state = self._build_self(ui_hp, self_info, self_ship,
-                                          health_due=False)
         torpedoes_phase = profiler.begin('torpedoes') if profiler is not None else None
         sampling = getattr(self, '_torpedoSamplingGroups', None)
         context = (self._torpedo_sampling_context(self_state, diag)
@@ -2718,7 +2953,7 @@ class Collector(object):
             gun_reload['sampleTs'] = now
             gun_reload['sampling'] = {
                 'status': 'sampled', 'sampleTs': now,
-                'intervalSeconds': _get(self, '_stateInterval', STATE_INTERVAL),
+                'intervalSeconds': _get(self, '_stateInterval', 0.2),
                 'source': 'core'}
         if profiler is not None and diagnostic_due:
             profiler.finish(diagnostics_phase)
@@ -2748,18 +2983,53 @@ class Collector(object):
                             identity_candidates_state):
                 if isinstance(_sample, dict):
                     _sample['sampleTs'] = now
+        self_systems_due = _get(self, '_selfSystemsSamplingDue', True) is True
+        self_systems_enabled = _get(
+            self, '_selfSystemsSamplingEnabled', True) is True
+        torpedo_armament_due = _get(
+            self, '_torpedoArmamentSamplingDue', True) is True
+        torpedo_armament_enabled = _get(
+            self, '_torpedoArmamentSamplingEnabled', True) is True
+        core_interval = _get(self, '_stateInterval', 0.2)
+
+        def build_armament():
+            if not torpedo_armament_due:
+                return {'status': 'notSampled', 'available': False}
+            result = _try(lambda: self._torpedoes.armament(self_ship),
+                          {'status': 'unknown', 'available': False})
+            if 'status' not in result:
+                # Preserve existing shape while making the attempt explicit.
+                result['status'] = 'available' if result.get('available') else 'unknown'
+            return result
+
+        def build_systems():
+            if not self_systems_due:
+                return {'status': 'notSampled'}
+            result = _try(lambda: self._torpedoes.systems(self_ship),
+                          {'status': 'unknown'})
+            if 'status' not in result:
+                result['status'] = 'available'
+            return result
+
         if profiler is not None:
             def build_armament_systems():
-                return (_try(lambda: self._torpedoes.armament(self_ship),
-                             {'available': False}),
-                        _try(lambda: self._torpedoes.systems(self_ship),
-                             {'status': 'unknown'}))
+                return build_armament(), build_systems()
             armament_systems = profiler.measure(
                 'armament_systems', build_armament_systems)
         else:
-            armament_systems = (
-                _try(lambda: self._torpedoes.armament(self_ship), {'available': False}),
-                _try(lambda: self._torpedoes.systems(self_ship), {'status': 'unknown'}))
+            armament_systems = build_armament(), build_systems()
+        # OFF reverts to core cadence, so the reported interval must reflect the
+        # actual current cadence (stateInterval), not the dormant 1.0 s setting.
+        armament_systems[0]['sampling'] = {
+            'status': 'sampled' if torpedo_armament_due else 'notSampled',
+            'sampleTs': now if torpedo_armament_due else None,
+            'intervalSeconds': (_get(self, '_torpedoArmamentSamplingInterval', 1.0)
+                                if torpedo_armament_enabled else core_interval)}
+        armament_systems[1]['sampling'] = {
+            'status': 'sampled' if self_systems_due else 'notSampled',
+            'sampleTs': now if self_systems_due else None,
+            'intervalSeconds': (_get(self, '_selfSystemsSamplingInterval', 1.0)
+                                if self_systems_enabled else core_interval)}
         damage_collection_enabled = _get(self, '_collectionEnabled', True) is True
         damage_sampling = {
             'status': ('disabled' if not damage_collection_enabled else
@@ -3628,8 +3898,50 @@ class Collector(object):
     def _map_to_world(self, mx, my):
         return self._mapCalibration.map_to_world(mx, my)
 
+    def _ship_world_position_threshold(self):
+        """World-distance threshold for far-ship world position sampling.
+
+        Derived from the live map calibration using the same convention as the
+        torpedo classification radius (short map side / divisor). When the live
+        model is unavailable or not finite every ship is treated as near/high
+        and read on the core tick path.
+        """
+        calib = (_get(self, '_mapCalibration').live_model_status()
+                 if hasattr(self, '_mapCalibration') else None)
+        if not isinstance(calib, dict):
+            return None
+        if calib.get('status') != 'available':
+            return None
+        coeffs = calib.get('coefficients')
+        if not isinstance(coeffs, dict):
+            return None
+        x = coeffs.get('worldX', {})
+        z = coeffs.get('worldZ', {})
+        try:
+            width = abs(float(x.get('scale')))
+            height = abs(float(z.get('scale')))
+        except Exception:
+            return None
+        if not (width > 0.0 and height > 0.0):
+            return None
+        if not (width == width and height == height):  # reject NaN
+            return None
+        if width == float('inf') or height == float('inf'):
+            return None
+        divisor = _get(self, '_shipWorldPositionFarDivisor', 5.0)
+        try:
+            divisor = float(divisor)
+            if not (divisor > 0.0 and divisor == divisor and
+                    divisor != float('inf')):
+                divisor = 5.0
+        except Exception:
+            divisor = 5.0
+        return min(width, height) / divisor
+
     def _build_ships(self, now, ui_hp=None, avatar_entities=None,
-                     players_sample=_UNSET, health_due=True):
+                     players_sample=_UNSET, health_due=True,
+                     calibration_snapshot_due=False,
+                     self_position=None):
         self._positionDiagnostics = {}
         player_reads = {
             'source': 'sampleLocalPlayersIndex',
@@ -3643,6 +3955,22 @@ class Collector(object):
                         _get(self, '_diagnosticsSampleDue', False) is True)
 
         # -- pass 1: resolve ids + world positions; calibrate map->world ---------
+        # Per-sample constants: the threshold and due flag do not change inside
+        # the hot loop. Ships without a usable map position or calibration are
+        # treated as near/high (read every core tick) for safety.
+        world_position_due = _get(
+            self, '_shipWorldPositionSamplingDue', True) is True
+        far_threshold = self._ship_world_position_threshold()
+        self_position_valid = (
+            isinstance(self_position, (list, tuple)) and len(self_position) >= 3)
+        seen_ids = _get(self, '_shipWorldPositionSeenIds')
+        seen_order = _get(self, '_shipWorldPositionSeenOrder')
+        if not isinstance(seen_ids, dict) or not isinstance(seen_order, list):
+            seen_ids = {}
+            seen_order = []
+            self._shipWorldPositionSeenIds = seen_ids
+            self._shipWorldPositionSeenOrder = seen_order
+
         infos = []
         calib = []
         for ship in ships:
@@ -3678,23 +4006,62 @@ class Collector(object):
             if vehId is not None and pid is not None:
                 self._damage.remember(
                     vehId, pid, ship_team if player_team is None else player_team)
-            worldPos, position_read = self._get_ship_position(
-                ship, pid, vehId, player=player, allow_fallback=fallback_due)
+            mp = mapIndex.get(pid) if pid is not None else None
+
+            # First observation must be sampled at least once. Unknown/no-model
+            # ships (vehId None or no map position) stay on the core path.
+            seen_key = _strict_player_lookup_key(vehId)
+            identity_valid = seen_key is not None and vehId != 0
+            is_new_ship = identity_valid and seen_key not in seen_ids
+            if is_new_ship:
+                limit = _get(self, '_shipWorldPositionSeenIdsLimit', 512)
+                if len(seen_order) >= limit:
+                    oldest = seen_order.pop(0)
+                    seen_ids.pop(oldest, None)
+                seen_ids[seen_key] = True
+                seen_order.append(seen_key)
+
+            read_world_position = True
+            world_position_skipped = False
+            if (identity_valid and not is_new_ship and not world_position_due and
+                    mp is not None and far_threshold is not None and
+                    self_position_valid):
+                estimated = self._map_to_world(mp[0], mp[1])
+                if estimated is not None:
+                    dx = estimated[0] - self_position[0]
+                    dz = estimated[2] - self_position[2]
+                    distance = (dx * dx + dz * dz) ** 0.5
+                    # Boundary is inclusive for near ships (<= threshold).
+                    if distance > far_threshold:
+                        read_world_position = False
+                        world_position_skipped = True
+            if read_world_position:
+                worldPos, position_read = self._get_ship_position(
+                    ship, pid, vehId, player=player,
+                    allow_fallback=fallback_due)
+            else:
+                position_read = {
+                    'status': 'notSampled', 'source': 'ship.getPosition',
+                    'attempted': False,
+                    'reason': 'farShipWorldPositionSampling',
+                    'policy': 'farShip1Hz',
+                    'fallbackStatus': 'notSampled', 'fallbackSource': None}
+                worldPos = None
             fallback_attempted = position_read['fallbackStatus'] != 'notSampled'
             count_key = ('fallbackSampledShips' if fallback_attempted else
                          'fallbackNotSampledShips')
             self._positionDiagnostics[count_key] = self._positionDiagnostics.get(count_key, 0) + 1
             infos.append((ship, vehId, player, sample_row, pid, player_team,
-                          ship_team, worldPos, position_read))
+                          ship_team, worldPos, position_read,
+                          world_position_skipped))
             if worldPos and pid is not None:
-                mp = mapIndex.get(pid)
                 if mp is not None and self._mapVisibility.get(pid, {}).get('mapVisible') != False:
                     calib.append((mp[0], mp[1], worldPos[0], worldPos[2]))
         # Accumulate spatially distinct samples across frames, including self.
-        # The adapter validates geometry/holdout errors before accepting a fit.
-        # observe() already returns the diagnostics snapshot for this batch; do
-        # not rebuild the same plain-data snapshot a second time.
-        calibration = self._mapCalibration.observe(calib, now)
+        # update() refreshes the live model on the core tick path; the heavy
+        # diagnostics snapshot is only requested on its own 1 Hz gate.
+        self._mapCalibration.update(calib, now)
+        calibration = self._mapCalibration.live_model_status()
 
         # -- pass 2: build per-ship entries --------------------------------------
         out = []
@@ -3702,7 +4069,8 @@ class Collector(object):
         nAllyVis = 0
         nEnemy = 0
         nEnemyVis = 0
-        for ship, vehId, player, sample_row, pid, player_team, ship_team, worldPos, position_read in infos:
+        for (ship, vehId, player, sample_row, pid, player_team, ship_team,
+             worldPos, position_read, world_position_skipped) in infos:
             entry = {}
             entry['uiId'] = _get(ship, 'uiId')
             if vehId is not None:
@@ -3798,17 +4166,20 @@ class Collector(object):
                 entry['ny'] = norm[1]
                 entry['mapPositionSource'] = 'dataHub.mapPosition'
                 entry['mapPositionFreshness'] = 'unverified'
-            if not pos and mp is not None:
+            if (not pos and mp is not None and
+                    position_read.get('policy') != 'farShip1Hz'):
                 # spotted-but-not-rendered ship (e.g. enemy lit only by a teammate):
                 # getPosition() is None, but mapPosition is populated -- convert it
-                # to world coordinates using the calibrated transform.
+                # to world coordinates using the calibrated transform. This fallback
+                # is skipped for non-due far ships so no estimated world value is
+                # filled on the slow path.
                 pos = self._map_to_world(mp[0], mp[1])
                 if pos is not None:
                     entry['positionSource'] = 'calibratedMapPosition'
             if pos:
                 entry['position'] = pos
             entry['positionAvailable'] = bool(pos or norm is not None)
-            for k in ('yaw', 'health', 'maxHealth', 'name'):
+            for k in ('health', 'maxHealth', 'name'):
                 if not health_due and k in ('health', 'maxHealth'):
                     continue
                 v = _get(ship, k)
@@ -3819,9 +4190,27 @@ class Collector(object):
             if health_due:
                 apply_ui_health(entry, ui_hp,
                                 for_unspotted=entry.get('visible') is False)
-            # spotted-only enemies have no ship.yaw; fall back to mapPosition yaw
-            if entry.get('yaw') is None and mp is not None and mp[2] is not None:
-                entry['yaw'] = mp[2]
+
+            # Yaw shares the far-ship world-position cadence. When the world
+            # position is skipped, do not read ship.yaw and do not backfill it
+            # from mapPosition (mapPosition itself stays core as nx/ny).
+            yaw_value = None
+            yaw_source = 'ship.yaw'
+            if not world_position_skipped:
+                yaw_value = _get(ship, 'yaw')
+                if yaw_value is not None:
+                    entry['yaw'] = yaw_value
+                # spotted-only enemies have no ship.yaw; fall back to mapPosition yaw
+                if yaw_value is None and mp is not None and mp[2] is not None:
+                    yaw_value = mp[2]
+                    yaw_source = 'dataHub.mapPosition.yaw'
+                    entry['yaw'] = yaw_value
+            entry['yawSampling'] = {
+                'status': ('notSampled' if world_position_skipped else 'sampled'),
+                'sampleTs': (None if world_position_skipped else now),
+                'source': ('farShipWorldPositionSampling'
+                           if world_position_skipped else yaw_source),
+            }
             # ship class lives on `subtype` on this build (`shipType` is None)
             shipType = _get(ship, 'shipType')
             if shipType is None:
@@ -3856,7 +4245,7 @@ class Collector(object):
             'sampleDue': bool(_get(self, '_diagnosticsEnabled', False) is True and
                               _get(self, '_diagnosticsSampleDue', False) is True),
         })
-        return out, {
+        diag = {
             'totalShips': len(ships),
             'playerReads': player_reads,
             'allies': nAlly,
@@ -3875,6 +4264,15 @@ class Collector(object):
             'healthSamplingStatus': 'sampled' if health_due else 'notSampled',
             'uiHealth': nHp,
         }
+        if calibration_snapshot_due:
+            snapshot = self._mapCalibration.snapshot()
+            snapshot['sampling'] = {
+                'status': 'sampled',
+                'sampleTs': now,
+                'intervalSeconds': _get(
+                    self, '_mapCalibrationSnapshotInterval', 1.0)}
+            diag['mapCalibrationSnapshot'] = snapshot
+        return out, diag
 
 
 def _is_mapping(o):

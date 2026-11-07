@@ -62,7 +62,7 @@ def main():
     collector = ns['Collector'].__new__(ns['Collector'])
     collector._remember_roster_vehicles = lambda entities: None
     collector._collect_avatar_health = lambda entities: {}
-    collector._build_ships = lambda now, hp, entities, players: ([{'uiId': 5}], {})
+    collector._build_ships = lambda *args, **kwargs: ([{'uiId': 5}], {})
     collector._build_self = lambda hp, info=None, ship=None: {
         'teamId': 0, 'identityCandidates': []}
     collector._self_team = lambda info=None: 0
@@ -134,7 +134,7 @@ def main():
     collector._build_self = lambda *args: {
         'teamId': 0, 'position': [0., 0., 0.], 'isObserver': False,
         'identityCandidates': []}
-    collector._build_ships = lambda *args: ([{'uiId': 5}], {'mapCalibration': fitted.snapshot()})
+    collector._build_ships = lambda *args, **kwargs: ([{'uiId': 5}], {'mapCalibration': fitted.snapshot()})
     collector._mapCalibration = fitted
     far = Obj(uiId=1, ownerId=3, ownerTeamId=1, ownerType='Ship', shotId=2,
               type='future_type', position=[0., 0., 1200.])

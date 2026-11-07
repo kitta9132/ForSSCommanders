@@ -218,6 +218,10 @@ def test_ship_api_visibility_is_a_separate_diagnostic_source():
     class Calibration(object):
         def observe(self, *args):
             return {'status': 'unknown'}
+        def update(self, *args):
+            pass
+        def live_model_status(self):
+            return {'status': 'unknown', 'coefficients': None}
         def snapshot(self):
             raise AssertionError('observe() must return the batch snapshot')
     def collect_map_positions(collector):
@@ -240,7 +244,11 @@ def test_ship_api_visibility_is_a_separate_diagnostic_source():
                             'reason': 'missing', 'policy': 'coreDirectOnly',
                             'fallbackStatus': 'notSampled', 'fallbackSource': None}),
                         _collect_map_positions=lambda avatar_entities=None: collect_map_positions(collector),
-                    _map_to_world=lambda *args: None)
+                    _map_to_world=lambda *args: None,
+                    _ship_world_position_threshold=lambda: None,
+                    _shipWorldPositionSamplingEnabled=True,
+                    _shipWorldPositionSamplingDue=True,
+                    _shipWorldPositionFarDivisor=5.0)
     rows, _diag = build(collector, 0.1, {})
     visibility = rows[0]['visibility']
     assert visibility['shipApi'] == {'isVisible': False, 'isShipVisible': 0}

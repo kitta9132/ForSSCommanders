@@ -75,6 +75,7 @@ def test_producer_keeps_membership_and_does_not_join_ui_to_an_unverified_subset(
 
     ns = {'_UNSET': object(), '_try': attempt,
           '_get': lambda obj, name, default=None: getattr(obj, name, default),
+          '_vec': lambda value: list(value) if value is not None else None,
           'SCHEMA_VERSION': 1, 'WIRE_API_VERSION': '1.0',
           'battle': SimpleNamespace(getSelfPlayerInfo=lambda: None,
                                    getSelfPlayerShip=lambda: object()),
@@ -93,7 +94,7 @@ def test_producer_keeps_membership_and_does_not_join_ui_to_an_unverified_subset(
                                           'count': 0, 'limit': 256, 'reason': None},
         _remember_roster_vehicles=lambda entities: None,
         _collect_avatar_health=lambda entities: {},
-        _build_ships=lambda *args: ([], {}),
+        _build_ships=lambda *args, **kwargs: ([], {}),
         _build_avatar_observations=lambda *args: {'rows': []},
         _build_self=lambda *args: {'position': [0, 0, 0], 'isObserver': False},
         _torpedo_sampling_context=lambda *args: {'fixture': True},
@@ -101,9 +102,18 @@ def test_producer_keeps_membership_and_does_not_join_ui_to_an_unverified_subset(
                                   systems=lambda ship: {}),
         _torpedoMotion=SimpleNamespace(update=lambda *args, **kwargs:
                                       calls.append(('motion', kwargs))),
-        _mapCalibration=SimpleNamespace(world_to_map=lambda *args: None),
+        _mapCalibration=SimpleNamespace(
+            world_to_map=lambda *args: None,
+            update=lambda *args: None,
+            live_model_status=lambda: {'status': 'unknown',
+                                        'coefficients': None}),
         _damage=SimpleNamespace(snapshot=lambda: {}), _battleId='fixture', _active=True,
-        _torpedoDepthSamplingEnabled=True, _torpedoDepthSamplingDue=True)
+        _torpedoDepthSamplingEnabled=True, _torpedoDepthSamplingDue=True,
+        _selfSystemsSamplingEnabled=True, _selfSystemsSamplingDue=True,
+        _torpedoArmamentSamplingEnabled=True, _torpedoArmamentSamplingDue=True,
+        _mapCalibrationSnapshotInterval=1.0, _mapCalibrationSnapshotDue=False,
+        _shipWorldPositionSamplingEnabled=True, _shipWorldPositionSamplingDue=True,
+        _shipWorldPositionFarDivisor=5.0, _ship_world_position_threshold=lambda: None)
     state = ns['_build_state'](c, 8.0)
     assert calls[0][0] == 'collect'
     assert calls[0][2] is c._torpedoSamplingGroups

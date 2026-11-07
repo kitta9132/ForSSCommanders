@@ -3,12 +3,13 @@
 現在の情報群ごとの周期は[収集頻度表](docs/COLLECTION_CADENCE.ja.md)を参照。
 
 作成日：2026-11-07（日本時間）
-modバージョン：`0.3.44-self-owner-id` / ModsAPI：`API_v1.0`（offline全回帰 pass＋11 module checker成功。私有replayは`WOWS_SAMPLING_REPLAY`等で実施）
+modバージョン：`0.3.45-slow-information-groups` / ModsAPI：`API_v1.0`（親検証：Python 3.11・私有replay込み773 passed、skipなし。11 module checker成功）
 
 B46は限定条件（heavy OFF・独立4群ON）で、ユーザー報告 minFPS 約50以上・カクつきなし（録画なし）。1,335 records（active 1,333）、HP平均約2 Hz、比較／damage平均約1 Hz・非due省略、独立 profiler phase を確認。depth／WaveHit／gun は全1,333 available、Battery 272 available／1,061 notSampled。遠距離2 Hz・多数魚雷・全項目の意味保証は未確認。以下の未実機記述は版公開時の履歴。
 
 ## 最近の版別到達点（履歴）
 
+- 0.3.45 `slow-information-groups`：0.3.44 の自艦判定を維持しつつ、③遠距離艦 world position/yaw、④⑤自艦システム群（radar/hydro/locator/consumables）、⑥魚雷 module 群、⑩較正診断 snapshot を独立した 1 Hz 群に分離。minimap の `nx`/`ny`/visibility/IDs、HP 群、avatar 比較群、魚雷分類の動作は変更しない。各群は独立した `enabled`/`interval` 設定を持ち、OFF は core cadence（毎tick）に戻す。`ship_world_position_far_divisor`（既定5）で較正 world 半径を計算し、自艦 world position と各艦 map 座標の `map_to_world` 推定から far/near を判定。較正未成立・自位置不明・model 未確定艦は core で読む。非 due far 艦は `ship.getPosition()` を呼ばず、推定 world 値で補完もしない。`MapCalibration.observe()` は後方互換のため `update()` + `snapshot()` に委譲。core path では `update()` + `live_model_status()` を使い、重い診断 snapshot は独立 1 Hz ゲート `map_calibration_snapshot_interval` で出力する。offline 検証のみで未導入・未実機、実機 FPS 改善・周期の実戦確認は未達。
 - 0.3.44 `self-owner-id`：自艦判定を `owner.isPlayer` から同一 snapshot の `battle.getSelfPlayerInfo().shipId == torpedo.ownerId` へ変更。`owner.isPlayer` は `owner` 行に生の観測値として残すが分類には使わない。`isOwn`・`isOwnSource`・`isOwnReason` を sample 済み行へ公開。自艦は全距離HIGH（敵予算外）、確認済み味方（同一チームかつ `isOwn is False`）は全距離LOW（初観測含む）、敵は半径内の最近 `enemy_high_budget` 本（既定20）だけHIGH。型不一致・self shipId 欠測は `isOwn: null`（unknown）とし味方と誤分類しない。`self.shipId` は毎 sample 新鮮に取得。B50 の観測（`shipId` と `ownerId` が全行厳密一致）を根拠とする。offlineのみ・未実機。
 - 0.3.43 `self-id-observation`：自艦 ID と `torpedo.ownerId` の対応を調査するため、`self.identityCandidates` を同一 snapshot に追加。`battle.getSelfPlayerInfo()` から `id`（playerId）と `shipId`、`battle.getSelfPlayerShip()` から公開 `uiId`、および Ship 非公開属性候補 `_Ship__id` / `id` / `vehicleId` を別々の candidate として記録。推測 join・distance heuristic・`isOwn` 上書きは行わず、observer fallback 由来を self と誤記しない。専用 offline 解析ツールとテストを追加。新規設定・probe フラグは不要。実機試験は未実施。
 - 0.3.42 `launch-restricted-builtins`：0.3.41 で導入した TTaro Mod Config 連携・魚雷サンプリング設定の正規化ヘルパーへのアクセスに `globals().get(...)` を使用していたため、WoWS Python 2 ランタイムの restricted builtin 名前空間で `NameError` が発生し mod が起動しない障害を修正。`globals()` を直接のモジュールグローバル参照（存在しない場合は `NameError` を捕まえる）に置き換え、restricted builtin（`globals` 欠如）下での `import -> instantiate -> load-complete -> battle -> tick` 実起動経路を回帰テスト追加。TTaro 有無どちらでも core が停止しないことを検証。B49 は 0 byte で無効試験（[記録](docs/VALIDATION_B49_0.3.41_INVALID.ja.md)）。offlineのみ・未実機。
@@ -30,7 +31,7 @@ B46は限定条件（heavy OFF・独立4群ON）で、ユーザー報告 minFPS 
 
 0.3.14導入後「自艦が沈むまでminFPS 25、撃沈後110まで回復」と報告されています。因果は未確定です。B46（0.3.38・heavy OFF・独立4群ON）ではユーザー報告 minFPS 約50以上・カクつきなしを確認しましたが、今回は魚雷同時最大6本・low群0であり、遠距離2 Hz や多数魚雷時の FPS は未検証です。因果的な改善率・開始直後 FPS 低下も未解明です。
 
-現行ソースは **`0.3.44-self-owner-id`**（offline検証済み・未導入／未実機）。0.3.41 の `team-torpedo-budget` 距離・予算 cadence を維持しつつ、自艦判定を `owner.isPlayer` から同一 snapshot の `battle.getSelfPlayerInfo().shipId == torpedo.ownerId` へ変更。0.3.42 の restricted builtin 修正も維持します。collection/diagnostics/profiler/depth/state/gun reload 独立群はすべて既定OFFです。state は core tick 0.2 秒（約5 Hz、0.1 秒明示で10 Hz互換）を基準とし、各情報群の期限・sample metadata に応じて取得を省略・出力します（同一 `state.json` ファイルに出力されるだけで、すべての項目が毎tick揃うわけではありません）。HP 2 Hz・avatar 比較1 Hz・damage 1 Hz・自艦 depth／Battery／WaveHit／gun reload の独立取得は、明示ON・collection必須で利用可能です。意味・単位・実機 FPS 効果には制約が残ります。通常プレイでは引き続き mod 退避を推奨します。
+現行ソースは **`0.3.45-slow-information-groups`**（offline検証済み・未導入／未実機）。0.3.44 の自艦 shipId 判定を維持しつつ、③遠距離艦 world position/yaw、④⑤自艦システム群、⑥魚雷 module 群、⑩較正診断 snapshot を独立 1 Hz 群に分離します。OFF は core cadence（毎tick）に戻します。minimap の `nx`/`ny`/visibility/IDs、HP 群、avatar 比較群、魚雷分類の動作は変更しません。0.3.42 の restricted builtin 修正も維持します。collection/diagnostics/profiler/depth/state/gun reload 独立群はすべて既定OFFです。state は core tick 0.2 秒（約5 Hz、0.1 秒明示で10 Hz互換）を基準とし、各情報群の期限・sample metadata に応じて取得を省略・出力します（同一 `state.json` ファイルに出力されるだけで、すべての項目が毎tick揃うわけではありません）。HP 2 Hz・avatar 比較1 Hz・damage 1 Hz・自艦 depth／Battery／WaveHit／gun reload の独立取得は、明示ON・collection必須で利用可能です。意味・単位・実機 FPS 効果には制約が残ります。通常プレイでは引き続き mod 退避を推奨します。
 
 `config.ini` がない場合・読み込みに失敗した場合も収集停止です。明示的に `collection_enabled = true` のときだけ通常収集を開始します。heavy UI/dataHub probeはさらに `diagnostics_enabled = true`、profilerは独立して `profiler_enabled = true` が必要です。魚雷depth/state samplerはそれぞれ専用opt-inでdiagnostics非依存にできますが、collection opt-inが必須です（全option既定OFF）。intervalは既定・最小1秒、invalid値は1秒へ戻します。同時sampleではheavy/depth/stateのtorpedo collection getter／列挙を共有します。state samplerは`isHoming`/`isSpotted`以外の任意data keyを探索しません。収集停止中はprobe/API poll・定期tickを行わず、戦闘開始時のdisabled stateと終了stateだけを書きます。core収集（既定0.2秒）およびarmament/public_dataの負荷は未評価です。
 
@@ -42,7 +43,7 @@ B46は限定条件（heavy OFF・独立4群ON）で、ユーザー報告 minFPS 
 
 0.3.14-identity-depth-candidatesまでの以下の機能は開発履歴です。0.3.15の既定では収集停止となり、出力されません。`uiTorpedoProbe.rows[].depth`と`torpedoes[].uiState.depth`に、有限数値だけのread-only depth候補を追加（0保持、`position.y`代用・前frame持越しなし）。さらに`identityCandidates`として、同じsnapshotの`ships[].vehicleId`と魚雷`ownerId`／WaveHit`targetID`の厳密scalar値一致候補を別出力します。候補はAPI契約ではなく、`matchStatus`と`completeness=unknown`を分離し、0件一致は`indeterminate`、複数は`ambiguousMultiple`（最大8候補）、単一`targetShipId`は出しません。legacy`isOwn`／`owner`／`targetID`は上書きしません。B10/B12/B14はself-only、B27は敵1 targetのoffline根拠に限定し、現在のships列挙完全性は不明のままです。0.3.13の`interpretations` raw/metadataは変更しません。[ID名前空間調査](docs/RESEARCH_ID_NAMESPACE_CANDIDATES.ja.md)を参照。専用の実機試験は追加せず、次回の通常魚雷発射時にdepth候補を相乗り確認します。
 
-オフライン全回帰：`python -m pytest -q`。ゲーム上の潜水艦probe取得可否・意味は実機未検証です。導入・manifest/ZIPは親セッションが管理します。
+オフライン全回帰：Python 3.11で私有replay用環境変数3種を有効にして773 passed、skipなし。11モジュールのPython 2構文・収集経路チェックも成功。新しい周期とFPS効果は未実機確認です。導入・manifest/ZIPは親セッションが管理します。
 
 全体目標は、潜水艦向け外部2Dマップ用modを完成させ、魚雷戦に必要なすべての情報を出力することです。AIが試験を指示・解析し、ユーザーがMeatProxyとして実機操作・記録を担当します。[目標・残課題](../TASKS.md)を参照してください。
 

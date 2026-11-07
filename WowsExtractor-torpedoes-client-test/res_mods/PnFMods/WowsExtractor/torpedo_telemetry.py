@@ -3095,11 +3095,14 @@ class LegacyTorpedoSamplingGroups(object):
         return result
 
     def needs_position(self, key, now, classification_due, identity_status,
-                       context_available=True):
+                       context_available=True, is_own=False):
         """Cheap pre-read gate: low non-due rows read only their identifiers.
 
         An unavailable context is a safety exception: every current identity is
         read and promoted high immediately rather than waiting up to five seconds.
+        A cached LOW row whose owner is the current self ship is also promoted
+        to HIGH, so it needs a current position and owner sample even when its
+        low deadline has not arrived.
         """
         if classification_due or not context_available:
             return True
@@ -3107,6 +3110,8 @@ class LegacyTorpedoSamplingGroups(object):
             return True
         entry = self._entries.get(key)
         if entry is None:
+            return True
+        if is_own and entry.get('group') != _SAMPLING_HIGH:
             return True
         return now + _SAMPLING_EPSILON >= entry['nextDue']
 
@@ -4284,40 +4289,38 @@ class TorpedoTelemetry(object):
             divisor = getattr(sampling, 'radius_divisor', 5.0)
             context_info = _sampling_context(context, divisor)
             context_available = context_info.get('status') == 'available'
+            # Current identity facts for every record, every tick. ownerId is
+            # already read during enumeration; this performs no extra owner
+            # lookups and no position reads, so non-due LOW rows still get
+            # current self_ship_id/self_team ownership classification.
             for record in records:
+                record['ownerTeamId'] = _get(record['item'], 'ownerTeamId')
+                record['teamRelation'] = _sampling_relation(
+                    record['ownerTeamId'], self_team)
+                own_info = _self_id_own(
+                    record['identity']['ownerId'], self_ship_id)
+                record['isOwn'] = own_info['isOwn']
+                record['isOwnSource'] = own_info['source']
+                record['isOwnReason'] = own_info['reason']
+                record['teamClass'] = _sampling_team_class(
+                    record['isOwn'], record['teamRelation'])
+            for record in records:
+                is_own = record.get('isOwn') is True
                 if (record['identityStatus'] != 'available' or
                         sampling.needs_position(
                             record['key'], now, classification_due,
-                            record['identityStatus'], context_available)):
+                            record['identityStatus'], context_available,
+                            is_own)):
                     record['position'] = vector(
                         _get(record['item'], 'position'))
                     counters['positionReads'] += 1
                     record['positionStatus'] = (
                         'available' if record['position'] is not None
                         else 'unknown')
-                    # The public ownerTeamId is read once here for every row
-                    # that is about to be sampled, so the team policy can be
-                    # applied before the row is emitted and the sampled row
-                    # reuses the same value.
-                    record['ownerTeamId'] = _get(record['item'], 'ownerTeamId')
-                    record['teamRelation'] = _sampling_relation(
-                        record['ownerTeamId'], self_team)
-                    # isOwn is decided by a strict same-snapshot identity
-                    # comparison, not by owner.isPlayer. Owner lookup is still
-                    # performed below because the sampled row publishes the raw
+                    # The owner lookup is only performed for rows that are about
+                    # to be sampled, because the sampled row publishes the raw
                     # owner fields (including isPlayer) as an observation.
-                    own_info = _self_id_own(
-                        record['identity']['ownerId'], self_ship_id)
-                    record['isOwn'] = own_info['isOwn']
-                    record['isOwnSource'] = own_info['source']
-                    record['isOwnReason'] = own_info['reason']
-                    # All identities are due on a classification tick, so this
-                    # lookup replaces (rather than adds to) the owner lookup the
-                    # sampled row would perform. On cadence ticks it runs only
-                    # for rows that will be sampled now.
                     owner = self._owner_for_record(record, owners, counters)
-                    record['teamClass'] = _sampling_team_class(
-                        record['isOwn'], record['teamRelation'])
             decisions = sampling.observe(
                 records, now, context, classification_due,
                 membership_complete, context_available, context_info)
