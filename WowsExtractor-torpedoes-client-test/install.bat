@@ -2,8 +2,11 @@
 setlocal EnableExtensions
 set "SCRIPT_DIR=%~dp0"
 set "PS1=%SCRIPT_DIR%install-wowsmod.ps1"
-set "BUILD=13357625"
+set "RESOLVER=%SCRIPT_DIR%tools\resolve-wows-build.ps1"
 set "GAMEROOT=C:\Program Files (x86)\Steam\steamapps\common\World of Warships"
+if defined WOWS_GAME_ROOT set "GAMEROOT=%WOWS_GAME_ROOT%"
+set "REQUESTED_BUILD=%WOWS_BUILD%"
+set "BUILD="
 set "DRYRUN="
 set "WITHATM="
 
@@ -16,12 +19,25 @@ if /I "%~1"=="--with-atm" set "WITHATM=-WithAtm"
 if /I "%~2"=="--with-atm" set "WITHATM=-WithAtm"
 
 if /I "%~1"=="--restore-atm" (
-  if not exist "%SCRIPT_DIR%restore-atm-13357625.bat" (
-    echo [ERROR] restore-atm-13357625.bat was not found next to this .bat.
+  if not exist "%SCRIPT_DIR%restore-atm.bat" (
+    echo [ERROR] restore-atm.bat was not found next to this .bat.
     goto :failed
   )
-  call "%SCRIPT_DIR%restore-atm-13357625.bat" %2
+  call "%SCRIPT_DIR%restore-atm.bat" %2
   exit /b %ERRORLEVEL%
+)
+
+if not exist "%RESOLVER%" (
+  echo [ERROR] tools\resolve-wows-build.ps1 was not found next to this .bat.
+  echo [ERROR] Keep the tools folder next to the .bat files.
+  goto :failed
+)
+
+for /f "usebackq delims=" %%B in (`powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%RESOLVER%" -GameRoot "%GAMEROOT%" -Build "%REQUESTED_BUILD%"`) do set "BUILD=%%B"
+if not defined BUILD (
+  echo [ERROR] Could not resolve the WoWS build.
+  echo [ERROR] Read the messages above. Set WOWS_BUILD only if you know the installed build.
+  goto :failed
 )
 
 echo WowsExtractor installer for WoWS build %BUILD%

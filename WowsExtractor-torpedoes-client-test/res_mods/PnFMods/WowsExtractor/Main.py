@@ -6,7 +6,7 @@
 
 API_VERSION = 'API_v1.0'
 MOD_NAME = 'WowsExtractor'
-MOD_VERSION = '0.3.40-radius-l5'
+MOD_VERSION = '0.3.44-self-owner-id'
 
 # ---------------------------------------------------------------------------
 # WowsExtractor -- observations for an external submarine-combat map.
@@ -68,24 +68,47 @@ except:
 
 try:
     from .torpedo_telemetry import (TorpedoTelemetry, attach_ui_state,
-        TorpedoMotion, TorpedoSamplingGroups, sampling_wire_payload, safe_weapon_hub_probe,
+        TorpedoMotion, TorpedoSamplingGroups, TorpedoSamplingSettings,
+        normalize_torpedo_sampling_settings, torpedo_sampling_ui_contract,
+        sampling_wire_payload, safe_weapon_hub_probe,
         safe_weapon_context_probe, safe_game_clock_probe,
         safe_gun_reload_probe, safe_selected_torpedo_params_probe,
-        safe_identity_candidates,
+        safe_identity_candidates, _identity_reject,
         shared_diagnostic_snapshot, ui_torpedo_probe_without_state,
         ui_torpedo_depth_probe,
         ui_torpedo_state_probe, attach_ui_depth_state,
         attach_ui_torpedo_state)
 except:
     from torpedo_telemetry import (TorpedoTelemetry, attach_ui_state,
-        TorpedoMotion, TorpedoSamplingGroups, sampling_wire_payload, safe_weapon_hub_probe,
+        TorpedoMotion, TorpedoSamplingGroups, TorpedoSamplingSettings,
+        normalize_torpedo_sampling_settings, torpedo_sampling_ui_contract,
+        sampling_wire_payload, safe_weapon_hub_probe,
         safe_weapon_context_probe, safe_game_clock_probe,
         safe_gun_reload_probe, safe_selected_torpedo_params_probe,
-        safe_identity_candidates,
+        safe_identity_candidates, _identity_reject,
         shared_diagnostic_snapshot, ui_torpedo_probe_without_state,
         ui_torpedo_depth_probe,
         ui_torpedo_state_probe, attach_ui_depth_state,
         attach_ui_torpedo_state)
+
+# Optional TTaro Mod Config settings surface (0.3.41). The adapter and its
+# binding bridge are optional: if either module is absent the guarded import
+# leaves the name as None and the collector keeps the config.ini path only.
+try:
+    from .ttaro_prefs_adapter import PrefsAdapter
+except:
+    try:
+        from ttaro_prefs_adapter import PrefsAdapter
+    except:
+        PrefsAdapter = None
+
+try:
+    from .ttaro_prefs_binding import build_binding as build_ttaro_prefs_binding
+except:
+    try:
+        from ttaro_prefs_binding import build_binding as build_ttaro_prefs_binding
+    except:
+        build_ttaro_prefs_binding = None
 
 try:
     from .submarine_telemetry import safe_submarine_probe
@@ -837,12 +860,26 @@ class Collector(object):
         self._metaReady = False
         self._metaProbeDue = None     # next arena-id probe time (game clock)
         self._metaProbeLastNow = None # last clock value, for rollback detection
+        # 0.3.41 team-budget policy: one validated snapshot, applied at a tick
+        # gate. Config parsing lives in _load_config; UI corrections queue here.
+        self._torpedoSamplingSettings = None
+        self._torpedoSamplingSettingsPending = False
+        self._torpedoSamplingRevision = 0
         self._load_config()
         self._damage = DamageTracker(resolve=self._live_vehicle_player)
         self._torpedoes = TorpedoTelemetry(battle, constants)
         self._initialTorpedoParameters = None
         self._torpedoMotion = TorpedoMotion()
-        self._torpedoSamplingGroups = TorpedoSamplingGroups()
+        self._torpedoSamplingGroups = TorpedoSamplingGroups(
+            getattr(self, '_torpedoSamplingSettings', None))
+        # Optional TTaro Mod Config bridge (0.3.41). The adapter is created once
+        # and subscribed lazily at load-complete/battle-start; when the adapter
+        # or the framework is absent these stay inert and config.ini still wins.
+        self._torpedoPrefsAdapter = None
+        self._torpedoPrefsBinding = None
+        self._torpedoPrefsRevision = 0
+        self._ensure_torpedo_prefs_adapter()
+        self._subscribe_torpedo_prefs_load_complete()
         self._mapCalibration = MapCalibration()
         # cached map->world affine (per battle/map); derived at runtime from ships
         # that expose BOTH getPosition() (world) and the mapPosition component.
@@ -948,6 +985,28 @@ class Collector(object):
             self._torpedoStateProvider = 'advanced_torpedo_marker'
         else:
             self._torpedoStateProvider = 'unknown'
+        # 0.3.41 team-torpedo-budget knobs. The normalizer is imported at module
+        # load; harnesses that exec this method without it keep the defaults.
+        # NOTE: do not use globals() here -- the WoWS Python 2 runtime exposes a
+        # restricted builtin namespace that does not include globals().
+        try:
+            normalize = normalize_torpedo_sampling_settings
+        except NameError:
+            normalize = None
+        if normalize is not None:
+            try:
+                settings = normalize({
+                    'radius_divisor':
+                        cfg.get('torpedo_sampling_radius_divisor'),
+                    'enemy_high_budget':
+                        cfg.get('torpedo_sampling_enemy_high_budget')},
+                    source='config',
+                    revision=getattr(self, '_torpedoSamplingRevision', 0) + 1)
+                self._torpedoSamplingSettings = settings
+                self._torpedoSamplingRevision = settings.revision
+                self._torpedoSamplingSettingsPending = True
+            except Exception:
+                pass
         self._diagnosticsNextDue = None
         self._diagnosticsLastSampleTs = None
         self._diagnosticsLastNow = None
@@ -964,6 +1023,246 @@ class Collector(object):
             self._performanceProfiler.reset_battle()
         # clamp the interval so a typo (0 / negative) can't hammer the disk
         self._stateInterval = max(_cfg_float(cfg, 'state_interval', STATE_INTERVAL), 0.02)
+
+    # -- team torpedo sampling policy (0.3.41) ------------------------------
+    def _apply_pending_torpedo_sampling_settings(self, now):
+        """Apply a queued policy snapshot at a tick gate, never mid-frame.
+
+        Changing a period or budget re-anchors existing deadlines in the sampler
+        but keeps every group, so a settings change cannot clear motion or
+        calibration state and cannot emit an all-high burst.
+        """
+        if not getattr(self, '_torpedoSamplingSettingsPending', False):
+            return
+        sampler = getattr(self, '_torpedoSamplingGroups', None)
+        settings = getattr(self, '_torpedoSamplingSettings', None)
+        self._torpedoSamplingSettingsPending = False
+        if sampler is None or settings is None:
+            return
+        apply = getattr(sampler, 'apply_settings', None)
+        if apply is None:
+            return
+        try:
+            apply(settings, now)
+        except Exception:
+            pass
+
+    def queue_torpedo_sampling_settings(self, values):
+        """Queue UI-corrected policy knobs; applied at the next tick gate.
+
+        Only the two published knobs (classification radius divisor and nearest
+        enemy high budget) are accepted. The snapshot is validated immediately
+        and applied later, so no schedule is cleared and no all-high burst can
+        follow an edit.
+        """
+        if not isinstance(values, dict):
+            return False
+        # NOTE: globals() is unavailable in the restricted WoWS Python 2 runtime.
+        try:
+            normalize = normalize_torpedo_sampling_settings
+        except NameError:
+            normalize = None
+        if normalize is None:
+            return False
+        merged = {}
+        current = getattr(self, '_torpedoSamplingSettings', None)
+        if current is not None:
+            merged['radius_divisor'] = current.radius_divisor
+            merged['enemy_high_budget'] = current.enemy_high_budget
+        for key in ('radius_divisor', 'enemy_high_budget'):
+            if key in values:
+                merged[key] = values[key]
+        revision = getattr(self, '_torpedoSamplingRevision', 0) + 1
+        try:
+            settings = normalize(merged, source='ui', revision=revision)
+        except Exception:
+            return False
+        self._torpedoSamplingSettings = settings
+        self._torpedoSamplingRevision = revision
+        self._torpedoSamplingSettingsPending = True
+        return True
+
+    def torpedo_sampling_ui_contract(self):
+        """Optional UI-adapter contract; safe when the policy helper is absent."""
+        # NOTE: globals() is unavailable in the restricted WoWS Python 2 runtime.
+        try:
+            contract = torpedo_sampling_ui_contract
+        except NameError:
+            contract = None
+        if contract is None:
+            return None
+        settings = getattr(self, '_torpedoSamplingSettings', None)
+        try:
+            return contract(settings)
+        except Exception:
+            try:
+                return contract(None)
+            except Exception:
+                return None
+
+    # -- TTaro Mod Config bridge (0.3.41, optional) ------------------------
+    def _torpedo_prefs_fallback(self):
+        """Config.ini values for the two optional panel knobs (or None)."""
+        settings = getattr(self, '_torpedoSamplingSettings', None)
+        if settings is None:
+            return None
+        return {
+            'enemy_high_budget': settings.enemy_high_budget,
+            'radius_divisor': settings.radius_divisor,
+        }
+
+    def _ensure_torpedo_prefs_adapter(self):
+        """Create the optional prefs adapter once; None when it is not shipped.
+
+        Instantiation only: subscribing happens at the load-complete / battle
+        start bind gate, so a framework that registers late is still picked up.
+        """
+        adapter = getattr(self, '_torpedoPrefsAdapter', None)
+        if adapter is not None:
+            return adapter
+        # NOTE: globals() is unavailable in the restricted WoWS Python 2 runtime.
+        # The adapter module is optional; treat an undefined name as absent.
+        try:
+            factory = PrefsAdapter
+        except NameError:
+            factory = None
+        if factory is None:
+            return None
+        fallback = None
+        try:
+            fallback = self._torpedo_prefs_fallback()
+        except Exception:
+            fallback = None
+        try:
+            adapter = factory(binding=None, fallback=fallback)
+        except Exception:
+            adapter = None
+        self._torpedoPrefsAdapter = adapter
+        return adapter
+
+    def _discover_torpedo_prefs_binding(self):
+        """Resolve the adapter binding lazily; None keeps the ini fallback.
+
+        The concrete dataHub access is supplied through the binding module's
+        provider seam, so this never imports or depends on third-party code.
+        """
+        # NOTE: globals() is unavailable in the restricted WoWS Python 2 runtime.
+        # The binding module is optional; treat an undefined name as absent.
+        try:
+            build = build_ttaro_prefs_binding
+        except NameError:
+            build = None
+        if build is None:
+            return None
+        try:
+            return build()
+        except Exception:
+            return None
+
+    def _bind_torpedo_prefs_adapter(self, reason=None):
+        """Bind (or rebind) and start the optional adapter.
+
+        Returns True only when a live framework binding was attached; False when
+        the adapter is absent or the framework is not installed (absence
+        fallback: config.ini values remain in effect).
+        """
+        ensure = getattr(self, '_ensure_torpedo_prefs_adapter', None)
+        adapter = ensure() if ensure is not None else None
+        if adapter is None:
+            return False
+        binding = getattr(self, '_torpedoPrefsBinding', None)
+        if binding is None:
+            discover = getattr(self, '_discover_torpedo_prefs_binding', None)
+            if discover is not None:
+                binding = discover()
+            self._torpedoPrefsBinding = binding
+        if binding is not None:
+            rebind = getattr(adapter, 'rebind', None)
+            if rebind is not None:
+                try:
+                    rebind(binding)
+                except Exception:
+                    pass
+        start = getattr(adapter, 'start', None)
+        if start is not None:
+            try:
+                start()
+            except Exception:
+                return False
+        return binding is not None
+
+    def _on_load_mods_completed(self, *args):
+        """Load-complete hook: subscribe handles once the framework is ready."""
+        bind = getattr(self, '_bind_torpedo_prefs_adapter', None)
+        if bind is not None:
+            bind('loadComplete')
+
+    def _subscribe_torpedo_prefs_load_complete(self):
+        """Register the load-complete bind hook when the event exists."""
+        # NOTE: globals() is unavailable in the restricted WoWS Python 2 runtime.
+        # The top-level ``import events`` is best-effort and may have failed, so
+        # ``events`` is not guaranteed to exist as a module global.
+        try:
+            events_mod = events
+        except NameError:
+            events_mod = None
+        if events_mod is None:
+            return
+        subscribe = getattr(events_mod, 'onLoadModsCompleted', None)
+        if not callable(subscribe):
+            return
+        try:
+            subscribe(self._on_load_mods_completed)
+        except Exception:
+            pass
+
+    def _consume_torpedo_prefs(self, now):
+        """Tick the adapter and forward any change into the policy queue.
+
+        Runs at the top of the collector tick: consumed values are queued and
+        applied by the tick gate before the frame is built, so a panel edit
+        never lands mid-frame.
+        """
+        adapter = getattr(self, '_torpedoPrefsAdapter', None)
+        if adapter is None:
+            return
+        tick = getattr(adapter, 'tick', None)
+        if tick is None:
+            return
+        try:
+            tick()
+        except Exception:
+            return
+        revision = 0
+        try:
+            revision = adapter.revision()
+        except Exception:
+            revision = 0
+        if revision == getattr(self, '_torpedoPrefsRevision', 0):
+            return
+        self._torpedoPrefsRevision = revision
+        try:
+            values = adapter.values()
+        except Exception:
+            return
+        queue = getattr(self, 'queue_torpedo_sampling_settings', None)
+        if queue is not None and isinstance(values, dict):
+            try:
+                queue(values)
+            except Exception:
+                pass
+
+    def dispose_torpedo_prefs_adapter(self, reason=None):
+        """Release adapter subscriptions (battle end or mod unload)."""
+        adapter = getattr(self, '_torpedoPrefsAdapter', None)
+        if adapter is None:
+            return
+        stop = getattr(adapter, 'stop', None)
+        if stop is not None:
+            try:
+                stop(reason)
+            except Exception:
+                pass
 
     # -- paths --------------------------------------------------------------
     def _resolve_paths(self):
@@ -989,6 +1288,11 @@ class Collector(object):
         sampling = getattr(self, '_torpedoSamplingGroups', None)
         if sampling is not None:
             sampling.clear()
+        # Rebind the optional prefs adapter for this battle (handles may have
+        # gone stale if the framework reloaded); absent framework stays inert.
+        bind_prefs = getattr(self, '_bind_torpedo_prefs_adapter', None)
+        if bind_prefs is not None:
+            bind_prefs('battleStart')
         self._damage.clear()
         self._mapTransform = None
         self._diagnosticsNextDue = None
@@ -1096,6 +1400,11 @@ class Collector(object):
         sampling = getattr(self, '_torpedoSamplingGroups', None)
         if sampling is not None:
             sampling.clear()
+        # Release optional prefs subscriptions on battle end. The adapter is
+        # resubscribed at the next load-complete/battle start.
+        dispose_prefs = getattr(self, 'dispose_torpedo_prefs_adapter', None)
+        if dispose_prefs is not None:
+            dispose_prefs('battleEnd')
         self._stop_tick()
         self._mapTransform = None
         # write one final snapshot marking the battle inactive (through the same
@@ -1412,6 +1721,16 @@ class Collector(object):
             self._comparisonSamplingDue = False
             if previous_now is not None and clock_ok:
                 self._lastWrite = 0.0
+        # Consume optional TTaro Mod Config edits, then apply any queued policy
+        # snapshot before building the frame. Both run at the tick gate so a
+        # panel change never lands mid-frame.
+        consume_prefs = getattr(self, '_consume_torpedo_prefs', None)
+        if consume_prefs is not None:
+            consume_prefs(now)
+        apply_pending = getattr(
+            self, '_apply_pending_torpedo_sampling_settings', None)
+        if apply_pending is not None:
+            apply_pending(now)
         self._refresh_meta(now)
         if (now - self._lastWrite) < self._stateInterval:
             return
@@ -2171,15 +2490,19 @@ class Collector(object):
         sampling = getattr(self, '_torpedoSamplingGroups', None)
         context = (self._torpedo_sampling_context(self_state, diag)
                    if sampling is not None and self_ship is not None else None)
+        self_ship_id = (self_state.get('shipId')
+                        if isinstance(self_state, dict) else None)
         if sampling is None:
             torpedoes, torpedo_status = _try(
-                lambda: self._torpedoes.torpedoes(self_team),
+                lambda: self._torpedoes.torpedoes(
+                    self_team, self_ship_id=self_ship_id),
                 ([], {'available': False, 'status': 'unknown',
                        'source': 'battle.getAllTorpedoes'}))
         else:
             torpedoes, torpedo_status = _try(
                 lambda: self._torpedoes.torpedoes(
-                    self_team, sampling=sampling, now=now, context=context),
+                    self_team, sampling=sampling, now=now, context=context,
+                    self_ship_id=self_ship_id),
                 ([], {'available': False, 'status': 'unknown',
                        'source': 'battle.getAllTorpedoes',
                        'membershipComplete': False}))
@@ -2843,10 +3166,71 @@ class Collector(object):
                     health_due=True):
         info = (_try(lambda: battle.getSelfPlayerInfo())
                 if self_info is _UNSET else self_info)
+        ship = (_try(lambda: battle.getSelfPlayerShip())
+                if self_ship is _UNSET else self_ship)
+        original_ship = ship
+        if ship is None:
+            ship = _try(lambda: battle.getObserverShip())
         data = {}
+        candidates = []
+        _MISSING = object()
+
+        def _read_field(obj, key):
+            if obj is None:
+                return 'none', None
+            try:
+                if isinstance(obj, dict):
+                    if key not in obj:
+                        return 'missing', None
+                    value = obj[key]
+                else:
+                    value = getattr(obj, key, _MISSING)
+                    if value is _MISSING:
+                        return 'missing', None
+            except Exception:
+                return 'readError', None
+            return ('none', None) if value is None else ('available', value)
+
+        def _candidate(source, namespace, status, value, attribute_scope):
+            entry = {
+                'source': source,
+                'namespace': namespace,
+                'semantics': 'unverified',
+                'attributeScope': attribute_scope,
+                'status': status,
+                'rawType': None,
+                'raw': None,
+                'usedForIsOwn': False,
+                'isOwnOverride': False,
+            }
+            if status == 'available':
+                reason = _identity_reject(value)
+                if reason is None:
+                    entry['status'] = 'available'
+                    entry['rawType'] = type(value).__name__
+                    entry['raw'] = value
+                else:
+                    entry['status'] = reason
+            return entry
+
         if info is not None:
-            data['playerId'] = _try(lambda: info.id)
-            data['teamId'] = _try(lambda: info.teamId)
+            status, value = _read_field(info, 'id')
+            if status == 'available':
+                data['playerId'] = value
+            candidates.append(_candidate(
+                'battle.getSelfPlayerInfo().id', 'playerId', status, value,
+                'public'))
+            status, value = _read_field(info, 'teamId')
+            if status == 'available':
+                data['teamId'] = value
+            status, value = _read_field(info, 'shipId')
+            if status == 'available':
+                data['shipId'] = value
+            ship_id_candidate = _candidate(
+                'battle.getSelfPlayerInfo().shipId', 'shipId', status, value,
+                'playerInfoCandidate')
+            ship_id_candidate['usedForIsOwn'] = (status == 'available')
+            candidates.append(ship_id_candidate)
             gd = _try(lambda: info.shipGameData)
             if gd is not None:
                 for k in ('health', 'maxHealth', 'yaw', 'speed', 'isVisible', 'isShipVisible'):
@@ -2855,10 +3239,32 @@ class Collector(object):
                     v = _try(lambda: gd[k]) if _is_mapping(gd) else _try(lambda: getattr(gd, k))
                     if v is not None:
                         data[k] = v
-        ship = (_try(lambda: battle.getSelfPlayerShip())
-                if self_ship is _UNSET else self_ship)
-        if ship is None:
-            ship = _try(lambda: battle.getObserverShip())
+        else:
+            candidates.append(_candidate(
+                'battle.getSelfPlayerInfo().id', 'playerId', 'none', None,
+                'public'))
+            candidates.append(_candidate(
+                'battle.getSelfPlayerInfo().shipId', 'shipId', 'none', None,
+                'playerInfoCandidate'))
+        if original_ship is not None:
+            for key, namespace, scope in (
+                    ('uiId', 'uiId', 'public'),
+                    ('_Ship__id', '_Ship__id', 'nonPublicShipAttribute'),
+                    ('id', 'id', 'nonPublicShipAttribute'),
+                    ('vehicleId', 'vehicleId', 'nonPublicShipAttribute')):
+                status, value = _read_field(original_ship, key)
+                candidates.append(_candidate(
+                    'battle.getSelfPlayerShip().' + key, namespace, status,
+                    value, scope))
+        else:
+            for key, namespace, scope in (
+                    ('uiId', 'uiId', 'public'),
+                    ('_Ship__id', '_Ship__id', 'nonPublicShipAttribute'),
+                    ('id', 'id', 'nonPublicShipAttribute'),
+                    ('vehicleId', 'vehicleId', 'nonPublicShipAttribute')):
+                candidates.append(_candidate(
+                    'battle.getSelfPlayerShip().' + key, namespace, 'none',
+                    None, scope))
         if ship is not None:
             pos = _vec(_try(lambda: ship.getPosition()))
             if pos:
@@ -2871,6 +3277,7 @@ class Collector(object):
                     if v is not None:
                         data[k] = v
         data['isObserver'] = _try(lambda: battle.isObserverMode(), False)
+        data['identityCandidates'] = candidates
         if health_due:
             apply_ui_health(data, ui_hp)
         return data if data else None

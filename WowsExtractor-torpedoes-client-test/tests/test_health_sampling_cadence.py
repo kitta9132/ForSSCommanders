@@ -25,6 +25,7 @@ from ui_health import (  # noqa: E402
     AvatarRows, apply_ui_health, index_avatar_health,
     index_avatar_health_sample, normalize_ui_health)
 from damage_tracker import roster_ids_from_avatar  # noqa: E402
+from torpedo_telemetry import _identity_reject  # noqa: E402
 
 
 def top_function(name, namespace):
@@ -79,6 +80,7 @@ def main_namespace(cc):
         'index_avatar_health_sample': index_avatar_health_sample,
         'apply_ui_health': apply_ui_health,
         'roster_ids_from_avatar': roster_ids_from_avatar,
+        '_identity_reject': _identity_reject,
     }
     _main_top_functions(ns)
     ns['_is_mapping'] = lambda value: isinstance(value, dict)
@@ -232,7 +234,7 @@ class MapCalibration(object):
 
 
 class Torpedoes(object):
-    def torpedoes(self, team):
+    def torpedoes(self, team, self_ship_id=None):
         return [], {'available': True, 'status': 'available'}
 
     def armament(self, ship=None):

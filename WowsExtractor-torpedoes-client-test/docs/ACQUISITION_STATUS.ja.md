@@ -121,5 +121,5 @@ isHoming/isSpottedのmods_DataComponent経路は、外部modが供給する候�
 - `isSpotted`：ATM側の推定・第三者判定。ゲーム／サーバーの確定した被発見boolではない。
 - `isHoming`：第三者由来の判定。誘導先ID・停止距離・停止理由ではない。
 - `torpedo_state_sampling_enabled`：既定false。OFF時は追加probe/API呼出しなし。既定5Hz core、state sampler最小1Hz、heavy OFF、depth OFFを試験条件の基本とする。
-- ATMは実行時の導出state情報源としてのみ必要。自動ダウンロード・同梱はせず、installer既定はATM退避のまま。ATMを残す場合は明示`-WithAtm`（wrapper `--with-atm`）を使い、復元は`restore-atm-13357625.bat`のallowlist strict no-overwrite（conflict時fail closed）に従う。
+- ATMは実行時の導出state情報源としてのみ必要。自動ダウンロード・同梱はせず、installer既定はATM退避のまま。ATMを残す場合は明示`-WithAtm`（wrapper `--with-atm`）を使い、復元は`restore-atm.bat`のallowlist strict no-overwrite（conflict時fail closed）に従う。
 - 同じB41操作の再試験は、ATM producerありという新しい条件のため可能だが、現時点でユーザーへ実機依頼しない。実機取得・FPS・実時間・API内部時間は未確認。

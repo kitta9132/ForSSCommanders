@@ -1,7 +1,7 @@
 # ワンクリック記録・自動連番
 
-build 13357625 では、配布ルートの `record-13357625.bat` をダブルクリックしてください。
-ATMあり試験では `record-with-atm-13357625.bat` を使用すると
+配布ルートの `record.bat` をダブルクリックしてください。起動buildは自動検出されます。
+ATMあり試験では `record-with-atm.bat` を使用すると
 `with-atm-bNN.jsonl` に自動採番します（ATMの起動確認や有効化は行いません）。
 Python 3.10以上が必要です。modの再導入や管理者権限は不要です。
 

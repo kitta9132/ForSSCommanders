@@ -28,7 +28,7 @@
 
 ## 3. mod本体をコピーする
 
-配布物の `res_mods/PnFMods/WowsExtractor/` を丸ごとコピーします。0.3.30の必要Python sourceは9個と、任意の設定ファイルです。
+配布物の `res_mods/PnFMods/WowsExtractor/` を丸ごとコピーします。0.3.41の必要Python sourceは11個と、任意の設定ファイルです。あわせて `res_mods/ModSchemas/` に任意のTTaro Mod Config schemaを配置します。
 
 ```text
 Main.py                  エントリーポイント、イベント、スナップショット、書き込み
@@ -36,12 +36,22 @@ battle_identity.py       戦闘IDの管理
 damage_tracker.py        既存のダメージ収集
 emit_guard.py            退場後に古い活動中フレームを出さないための判定
 ui_health.py             既存のUI由来HPの補助
-torpedo_telemetry.py     今回追加した魚雷・発射元・自艦兵装の収集
+torpedo_telemetry.py     魚雷・発射元・自艦兵装の収集（0.3.41チーム予算samplerを含む）
 submarine_telemetry.py   潜水艦・WaveHitの限定診断
 map_calibration.py      移動履歴からの地図座標較正
 performance_profiler.py opt-in game-thread phase集計
+ttaro_prefs_adapter.py   任意：TTaro Mod Config設定adapter（自作・ゲーム未導入でも可）
+ttaro_prefs_binding.py   任意：adapterをdataHub標準読み取り面へ接続する自作bridge
 config.example.ini      設定テンプレート
 ```
+
+TTaro Mod Config連携を使う場合のみ、次も配置します（`res_mods/ModSchemas/` に置きます）。
+
+```text
+res_mods/ModSchemas/kitta-wows-extractor.schema.json  自作schema（パネル名登録＋設定2件）
+```
+
+インストーラーはこのschemaだけを `res_mods\ModSchemas` へ配置し、**他のmodやframeworkのschemaファイルには触れません**。同名ファイルが既にあり内容が異なる場合は、退避（`res_mods\_wowsmod_backups\ModSchemas_<日時>`）してから差し替え、失敗時は元へ戻します。**TTaroModUtils本体の自動導入は行いません**。frameworkが無い環境ではadapterは無効のまま（config.ini値を使用）で、他への影響はありません。
 
 初期状態では `.pyc` は配布していません。以前の異なる版のファイルを混在させないよう、既存フォルダーを退避してから入れる方法が確実です。
 
@@ -76,6 +86,8 @@ state_interval = 0.2
 | `battery_sampling_enabled` | `false` | collection有効時にBatteryを比較共通1Hzで独立採取 |
 | `wave_hit_sampling_enabled` | `false` | collection有効時にWaveHitをcore周期で独立採取 |
 | `gun_reload_sampling_enabled` | `false` | collection有効時にgun raw／progressをcore周期で採取。modifier参照探索なし |
+| `torpedo_sampling_radius_divisor` | `5` | 魚雷の敵HIGH判定半径。`min(mapWidth,mapHeight)/N`。1.0–100.0、不正値は既定 |
+| `torpedo_sampling_enemy_high_budget` | `20` | 半径内でHIGHを維持する最近敵の本数。1–512、不正値は既定 |
 
 `state_interval` は0.02秒未満を0.02に丸めます。これは50Hzの保証ではありません。ゲームのtick、処理時間、非同期書き込みの状況によってフレームが省略されます。既定は0.2（約5Hz）のcore周期です。HP平均2Hz、比較・damage約1Hz、距離別魚雷等の群別期限は別に維持し、実sample時刻を参照します。0.1（約10Hz）ではcoreの取得・構築・書込み回数が増え、FPS改善は未確認です。
 `diagnostics_interval` は0.1秒未満を0.1に丸めます。FPS改善を保証する設定ではありません。
@@ -83,12 +95,25 @@ state_interval = 0.2
 
 0.3.30の`torpedo_state_provider`は、魚雷state候補の供給元を実行時に明示する設定です。未指定または`unknown`の既定では従来どおりproducer unknownとして扱い、ATM等の存在を推測しません。`advanced_torpedo_marker`を明示した場合だけ、ATM由来の導出値であることをdeclared producerとして区別します。これはATMの導入・実行・値の実在を証明せず、`isSpotted`は推定・第三者判定、`isHoming`も第三者判定で、ゲーム／サーバーの生boolではありません。provider出力の厳密なfield schemaは実装側で確認中であり、この文書では固定しません。`torpedo_state_sampling_enabled`は既定falseのままで、OFF時は追加probe/API呼出しを行いません。
 
+### TTaro Mod Config連携（任意・0.3.41）
+
+TTaroModUtilsのMod Configパネルに、自作schema（`kitta-wows-extractor.schema.json`）で次の2設定を表示できます。
+
+| パネル名 | 表示範囲 | 意味 |
+| --- | --- | --- |
+| `enemyHighBudget` | 1–64 | 半径内でHIGHを維持する最近敵の本数（既定20） |
+| `radiusDivisor` | 2.0–10.0 | 魚雷の敵HIGH判定半径 `min(mapWidth,mapHeight)/N`（既定5） |
+
+- パネルの表示・編集は**この狭いUI安全範囲**を使い、範囲外入力はclampします。一方、`config.ini`の`torpedo_sampling_*`キーは上の広い範囲をそのまま使い、パネルが無い場合はini値が優先されます（広いini値を狭いUI範囲へ勝手に丸めません）。
+- 反映はbattleのtick gateで行い、設定変更でsamplerの群・motion・較正は消えません。定期全列挙はせず、起動完了時に一度だけ購読します。
+- この連携は自作コードで、TTaroModUtils／ModForge本体をコピー・改変しません。パネル表示・保存の実機確認は未実施です（**ソース登録対応済み／実機表示未確認**）。TTaroModUtilsが無い環境では無効のままです。
+
 ## 6. 初回確認
 
 1. 起動して訓練戦に入る。
 2. modフォルダー内に `meta.json` と `state.json` ができるか確認。
 3. `state.json` の更新日時が進むことを確認。
-4. `meta.json` の `mod.version` が `0.3.40-radius-l5` であることを確認。
+4. `meta.json` の `mod.version` が `0.3.43-self-id-observation` であることを確認。
 5. 魚雷発射後に `torpedoes` を確認。[実機テスト手順](TEST_PLAN.ja.md)に進む。
 
 ## ATMとの併用
@@ -97,7 +122,7 @@ state_interval = 0.2
 0.3.30では、ATMを魚雷state候補の**実行時の導出供給元**として明示指定できます。ATMが必要になるのはこの導出state連携のためであり、公開Torpedo APIの基本情報やコア収集のためではありません。ATMの自動ダウンロード・同梱・改変は行いません。
 ATMのファイルや署名は編集しません。本パッケージはATMを読み込ませたり改変したりしません。
 
-同梱の `install-13357625.bat` の既定は、従来どおりATMなし条件です。ATM専用のロード対象ファイルを `res_mods\_wowsmod_backups\ATM_disabled_<日時>` へ自動で移動します。
+同梱の `install.bat` の既定は、従来どおりATMなし条件です。ATM専用のロード対象ファイルを `res_mods\_wowsmod_backups\ATM_disabled_<日時>` へ自動で移動します。
 
 ```text
 res_mods\PnFMods\AdvancedTorpedoMarkerPy\
@@ -105,7 +130,7 @@ res_mods\gui\unbound2\PnFMods\AdvancedTorpedoMarker.unbound
 res_mods\gui\unbound2\PnFMods\AdvancedTorpedoMarkerMinimapFix.unbound
 ```
 
-共有依存の `res_mods\PnFMods\TTaroModUtils` と `res_mods\PnFModsLoader.py` は移動しません。ATM専用schemaと画像も移動しません。ATMありのテストへ進むときは `restore-atm-13357625.bat` で戻します。復元はmanifestに記録されたATM専用パスだけを対象にし、復元先に同名ファイル／フォルダーがある場合は上書きせず停止します（fail closed）。詳細は [バージョン固定インストーラー](INSTALL_BAT.ja.md) を参照してください。
+共有依存の `res_mods\PnFMods\TTaroModUtils` と `res_mods\PnFModsLoader.py` は移動しません。ATM専用schemaと画像も移動しません。ATMありのテストへ進むときは `restore-atm.bat` で戻します。復元はmanifestに記録されたATM専用パスだけを対象にし、復元先に同名ファイル／フォルダーがある場合は上書きせず停止します（fail closed）。詳細は [自動検出インストーラー](INSTALL_BAT.ja.md) を参照してください。
 
 ATMを退避せずcollectorだけを入れる場合は、明示的にoptionを付けます。
 
@@ -123,7 +148,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\install-wowsmod.ps1 `
 
 ゲームを終了し、今回コピーした `PnFMods/WowsExtractor/` を削除または `PnFMods` 外へ移動します。元の版を使っていた場合はバックアップを戻します。
 `PnFModsLoader.py` は他のmodも使用します。他のModsAPI modがある場合は残します。
-ATMをインストーラーで退避した場合は、必要に応じて `restore-atm-13357625.bat` を実行します。
+ATMをインストーラーで退避した場合は、必要に応じて `restore-atm.bat` を実行します。
 `state.json` / `meta.json` は生成物です。必要なテスト記録を保管した後に削除できます。
 
 ## ゲーム更新後

@@ -4,7 +4,7 @@
   "battleId": "synthetic-example-only",
   "mod": {
     "name": "WowsExtractor",
-    "version": "0.3.40-radius-l5"
+    "version": "0.3.43-self-id-observation"
   },
   "ts": 120.0,
   "battleType": null,

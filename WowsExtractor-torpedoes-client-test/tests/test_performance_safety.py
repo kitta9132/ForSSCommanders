@@ -11,7 +11,8 @@ from torpedo_telemetry import (shared_diagnostic_snapshot,
                                ui_torpedo_depth_probe,
                                attach_ui_depth_state,
                                ui_torpedo_state_probe,
-                               attach_ui_torpedo_state)
+                               attach_ui_torpedo_state,
+                               _identity_reject)
 
 
 SOURCE = (Path(__file__).resolve().parents[1] /
@@ -131,13 +132,13 @@ def test_depth_sampler_can_run_without_heavy_diagnostics_and_joins_current_rows(
     c._build_ships = lambda now, hp, entities, players: ([], {})
     c._self_team = lambda self_info=None: 1
     c._torpedoes = type('Torpedoes', (), {
-        'torpedoes': lambda self, team: ([{'uiId': 7,
+        'torpedoes': lambda self, team, self_ship_id=None: ([{'uiId': 7,
             'position': [1., 999., 2.]}], {'available': True, 'status': 'available'}),
         'armament': lambda self, ship=None: {},
         'systems': lambda self, ship=None: {}})()
     c._torpedoMotion = type('Motion', (), {'update': lambda *args: None})()
     c._mapCalibration = type('Map', (), {'world_to_map': lambda *args: None})()
-    c._build_self = lambda hp, info=None, ship=None: {}
+    c._build_self = lambda hp, info=None, ship=None: {'shipId': 7}
     c._damage = type('Damage', (), {'snapshot': lambda self: {}})()
 
     snapshot = build(c, 2.0)
@@ -384,11 +385,11 @@ def test_diagnostics_off_builds_fresh_disabled_shapes_without_probe_calls():
     c._collect_avatar_health = lambda entities: {}
     c._build_ships = lambda now, hp, entities, players: ([], {})
     c._self_team = lambda self_info=None: 1
-    c._torpedoes = type('T', (), {'torpedoes': lambda self, team: ([], {'available': True}),
+    c._torpedoes = type('T', (), {'torpedoes': lambda self, team, self_ship_id=None: ([], {'available': True}),
         'armament': lambda self, ship=None: {}, 'systems': lambda self, ship=None: {}})()
     c._torpedoMotion = type('T', (), {'update': lambda *args: None})()
     c._mapCalibration = type('M', (), {'world_to_map': lambda *args: None})()
-    c._build_self = lambda hp, info=None, ship=None: {}
+    c._build_self = lambda hp, info=None, ship=None: {'shipId': 1}
     c._damage = type('D', (), {'snapshot': lambda self: {}})()
     snapshot = build(c, 1.)
     assert not calls
@@ -568,11 +569,11 @@ def test_build_state_shares_fresh_core_snapshot_even_when_diagnostics_off():
     c._build_ships = lambda now, hp, entities, players: (
         calls.append(('ships', entities, players)) or ([], {}))
     c._self_team = lambda self_info=None: 1
-    c._torpedoes = type('T', (), {'torpedoes': lambda self, team: ([], {'available': True}),
+    c._torpedoes = type('T', (), {'torpedoes': lambda self, team, self_ship_id=None: ([], {'available': True}),
         'armament': lambda self, ship=None: {}, 'systems': lambda self, ship=None: {}})()
     c._torpedoMotion = type('T', (), {'update': lambda *args: None})()
     c._mapCalibration = type('M', (), {'world_to_map': lambda *args: None})()
-    c._build_self = lambda hp, info=None, ship=None: {}
+    c._build_self = lambda hp, info=None, ship=None: {'shipId': 1}
     c._damage = type('D', (), {'snapshot': lambda self: {}})()
     complete = build(c, 1.)
     assert 'performance' not in complete
@@ -640,6 +641,7 @@ def test_main_state_reuses_actual_self_producers_once_and_never_across_frames():
             if isinstance(obj, dict) else getattr(obj, key, default)),
         '_is_mapping': lambda obj: isinstance(obj, dict),
         '_vec': lambda value: list(value) if value is not None else None,
+        '_identity_reject': _identity_reject,
         'apply_ui_health': lambda data, hp: None,
         'SCHEMA_VERSION': 1, 'WIRE_API_VERSION': '1.0',
         'battle': Battle(), 'dataHub': object(), 'CC': object(),
@@ -667,9 +669,18 @@ def test_main_state_reuses_actual_self_producers_once_and_never_across_frames():
 
     first = build(c, 1.0)
     assert (calls['info'], calls['ship'], calls['team']) == (1, 1, 0)
-    assert first['self'] == {'playerId': 42, 'teamId': 1, 'health': 800,
-        'maxHealth': 1000, 'speed': 10, 'position': [1, 2, 3],
-        'yaw': 0.5, 'isObserver': False}
+    assert first['self']['playerId'] == 42
+    assert first['self']['teamId'] == 1
+    assert first['self']['health'] == 800
+    assert first['self']['maxHealth'] == 1000
+    assert first['self']['speed'] == 10
+    assert first['self']['position'] == [1, 2, 3]
+    assert first['self']['yaw'] == 0.5
+    assert first['self']['isObserver'] is False
+    assert len(first['self']['identityCandidates']) == 6
+    assert first['self']['identityCandidates'][0]['namespace'] == 'playerId'
+    assert first['self']['identityCandidates'][0]['status'] == 'available'
+    assert first['self']['identityCandidates'][0]['raw'] == 42
     assert calls['armament'] == [ship] and calls['systems'] == [ship]
     assert first['torpedoArmament']['available'] is True
 
@@ -678,8 +689,11 @@ def test_main_state_reuses_actual_self_producers_once_and_never_across_frames():
     assert calls['observer'] == 1  # only _build_self fallback; never weapon input
     assert calls['armament'] == [ship, None]
     assert calls['systems'] == [ship, None]
-    assert second['self'] == {'position': [9, 9, 9], 'isObserver': True}
+    assert second['self']['position'] == [9, 9, 9]
+    assert second['self']['isObserver'] is True
     assert 'teamId' not in second['self']
+    assert len(second['self']['identityCandidates']) == 6
+    assert all(c['status'] == 'none' for c in second['self']['identityCandidates'])
     assert second['torpedoArmament']['available'] is False
     assert second['selfSystems']['status'] == 'unknown'
 
@@ -689,6 +703,8 @@ def test_main_state_reuses_actual_self_producers_once_and_never_across_frames():
     assert calls['systems'] == [ship, None, None]
     assert calls['observer'] == 2
     assert 'teamId' not in third['self']
+    assert len(third['self']['identityCandidates']) == 6
+    assert all(c['status'] == 'none' for c in third['self']['identityCandidates'])
     assert third['torpedoArmament']['available'] is False
 
 class _ReadCounter(object):

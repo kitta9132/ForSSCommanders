@@ -1,5 +1,7 @@
 # 0.2.3 読み取り専用UI魚雷プローブ
 
+> 注記：この文書は0.2.3時点の記録です。当時の `.bat` 名（`install-13357625.bat` / `record-13357625.bat`）は、現行の `install.bat` / `record.bat` に改名されています。
+
 0.2.3ではisSpottedも抽出する。各行にisSpotted/spottedStatus/spottedSource/
 spottedRaw/spottedRawTypeを追加。boolのみavailable、欠損・非boolはnull/unknown。
 意味はATM被発見表示用の判定であり、敵がサーバー上で確実に検出したとは断定しない。

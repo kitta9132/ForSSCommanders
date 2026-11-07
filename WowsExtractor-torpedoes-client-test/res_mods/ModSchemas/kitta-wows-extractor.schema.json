@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 5,
+  "id": "kwxconfigkitta20260001",
+  "author": "kitta",
+  "modName": "WowsExtractor",
+  "slug": "wows-extractor",
+  "order": 100,
+  "tree": [
+    {
+      "kind": "group",
+      "key": "wexSamplingGroup",
+      "display": "section",
+      "label": "WowsExtractor: Torpedo sampling",
+      "collapse": "expanded",
+      "children": [
+        {
+          "kind": "setting",
+          "control": "slider",
+          "key": "enemyHighBudget",
+          "label": "Enemy high budget",
+          "hint": {
+            "text": "Max enemy torpedoes sampled at the high rate per sample (default 20)"
+          },
+          "default": 20,
+          "min": 1,
+          "max": 64,
+          "step": 1,
+          "decimals": 0
+        },
+        {
+          "kind": "setting",
+          "control": "slider",
+          "key": "radiusDivisor",
+          "label": "Radius divisor",
+          "hint": {
+            "text": "Near/high radius = min(mapWidth,mapHeight) / divisor (default 5)"
+          },
+          "default": 5,
+          "min": 2,
+          "max": 10,
+          "step": 0.5,
+          "decimals": 1
+        }
+      ]
+    }
+  ]
+}

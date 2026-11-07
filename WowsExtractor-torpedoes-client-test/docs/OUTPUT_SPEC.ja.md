@@ -2,6 +2,41 @@
 
 現在の群別周期は[収集頻度表](COLLECTION_CADENCE.ja.md)を参照。以下の版別節は変更時点の契約履歴であり、同じ項目に差分があれば最新の適用版を優先する。
 
+## 0.3.44-self-owner-id：自艦 shipId による `isOwn` 分類
+
+0.3.43 で観測した `battle.getSelfPlayerInfo().shipId` を、同一 snapshot の `torpedo.ownerId` と厳密に比較し、`isOwn` を導出する。
+
+- `self.shipId` は毎 sample `battle.getSelfPlayerInfo().shipId` から新鮮に取得する。cache や前 frame 値、observer fallback 由来の値は使わない。
+- `isOwn` は `torpedo.ownerId == self.shipId` の**厳密な型と値の一致**だけで決まる。`owner.isPlayer` は `owner` 行に生の観測値として残すが、分類には使わない。
+- 型不一致（例：整数と文字列）の場合は「比較不能」として `isOwn: null`（unknown）とし、味方と誤分類しない。`self_ship_id` 取得不能・無効 ID・非 scalar 等も `null`。
+- sample 済み魚雷行には `isOwn`・`isOwnSource`・`isOwnReason` を追加する。`isOwnSource` は `"battle.getSelfPlayerInfo().shipId == torpedo.ownerId"` で、`isOwnReason` は `exactSelfShipIdMatch` / `selfShipIdDiffers` / `selfShipIdUnavailable` / `typeMismatch` / `invalidId` 等。
+- 自艦（`isOwn is True`）は全距離 HIGH（0.2 秒期限）で敵予算に数えない。同一チームかつ `isOwn is False` の確認済み味方は全距離 LOW（初観測含む）。敵は半径 `R=min(mapWidth,mapHeight)/radius_divisor` 内の最近 `enemy_high_budget` 本が HIGH、残り・半径外は LOW。チーム不明・距離不明・同一チームで `isOwn` 不明は安全側 HIGH。
+- `self.identityCandidates` は継続して出力する。`battle.getSelfPlayerInfo().shipId` 由来 candidate の `usedForIsOwn` を `true` とし、observer fallback 由来を self と誤記しない。
+- 新規設定・probe・global・directory は追加しない。周期・予算・UI adapter 契約は 0.3.41 と同じく `radius_divisor` / `enemy_high_budget` のみ。
+
+## 0.3.43：自艦 ID candidate 観測
+
+- `self.identityCandidates` を同一 snapshot に追加する。`battle.getSelfPlayerInfo()` から `id`（playerId）と `shipId`、`battle.getSelfPlayerShip()` から公開 `uiId`、および既存 `_build_ships` と同じ bounded 3 属性（`_Ship__id` / `id` / `vehicleId`）を、**別々の candidate** として記録する。
+- 各 candidate は `source` / `namespace` / `attributeScope` / `status` / `rawType` / `raw` / `semantics` / `usedForIsOwn` / `isOwnOverride` を含む。`attributeScope` は `public`（playerId・uiId）、`playerInfoCandidate`（PlayerInfo.shipId）、`nonPublicShipAttribute`（Ship の非公開属性）のいずれか。
+- `status` は `available` / `missing` / `none` / `readError` / `strictTypeRejected` / `nonFinite` / `noneValue` 等の既存契約に従う。bool・非 finite・非 scalar・空文字は ID として拒否する。整数 0 は有効。生の `ownerId` / `vehicleId` 等の推測 join や `isOwn` への昇格・上書きは行わない。
+- 観測は毎 sample 実行する。`health_due` に関係なく identity 候補を現在読み取り、frame 間 cache しない。新規 ON/OFF 設定は不要。
+- `battle.getSelfPlayerShip()` が None で `battle.getObserverShip()` へ fallback した場合、observer 由来の `uiId` / 非公開属性を self candidate として誤記しない。
+- `id` / `vehicleId` / `_Ship__id` は公式 ModsAPI 文書未記載の非公開属性であり、namespace 契約として昇格しない。
+
+## 0.3.41：チーム別魚雷サンプリングと敵near予算
+
+分類へチーム関係と自艦判定を加える。距離だけの近HIGH／遠LOW（0.2秒／0.5秒、5秒再分類）は0.3.40のまま維持する。
+
+- **自艦**：`owner.isPlayer is True`（厳密bool）は全距離HIGH。敵予算に数えない。整数`1`・文字列・欠測は自艦扱いせず、ownerId／vehicleIdの推測joinも行わない。
+- **確認済み味方**：厳密な同一チーム関係かつ`owner.isPlayer is False`は全距離LOW。**初観測もLOW**（旧版の「新規は暫定HIGH」より優先）。
+- **敵**：厳密な敵チーム関係かつ有効ID・既知距離。半径`R=min(mapWidth,mapHeight)/radius_divisor`内の敵を水平距離の昇順（同距離は列挙順を保持し厳密ID値は比較しない）に並べ、先頭`enemyHighBudget`本をHIGH、残りと半径外をLOWとする。再配分は5秒再分類のときだけ。既存LOW敵の途中昇格はしない。
+- **新規の敵**は初観測でただちに予算へ参加する。空きがあればnear HIGH、満杯・半径外はLOW。初観測は必ず出力し、一斉HIGH burstを出さない。
+- **安全側HIGH（敵予算に数えない）**：チーム不明、敵の距離不明、および**同一チームだが`isPlayer`が厳密Falseでない**行。後者は自艦と区別できないため、誤ってLOWへ落とさずHIGHに残す。
+- **分類context喪失時**：自艦はHIGH、確認済み味方はLOW、それ以外（敵・不明）は安全側HIGHを維持する。contextが戻っても次回再分類まで維持する。
+- `sampling.teamPolicy`を加算的に出す：`policy`＝`'0.3.41-team-torpedo-budget'`、`radiusDivisor`、`enemyHighLimit`、件数`ownHigh`／`allyLow`／`enemyHigh`／`enemyLow`／`safetyHigh`／`unknownTeamHigh`／`unknownDistanceHigh`。summaryがdictでないlegacy wireは変更しない。
+- 設定は`radius_divisor`（既定5、1–100）と`enemy_high_budget`（既定20、1–512）。UI adapter契約`torpedo_sampling_ui_contract()`はこの2つだけを公開し、残りは内部扱い。変更はtick冒頭gateで適用し、motion・較正・群を消さず一斉HIGH burstも出さない。
+- offline検証のみで**未導入・未実機**。`high_budget_25`（予算25）は研究のまま維持し、productionは既定20を使う。詳細は[チーム別魚雷サンプリング](TEAM_TORPEDO_BUDGET.ja.md)。
+
 ## 0.3.40：魚雷分類半径をL/5へ変更
 
 - 分類半径を`R=L/5`へ正式変更する。`L=min(mapWidth,mapHeight)`は同じsnapshotのavailable較正係数から得るworld長で、長方形では短辺を使う。L/3からの変更点は半径だけで、境界上（`distanceSquared <= R^2`）をHIGHに含める判定、5秒再分類、近HIGH 0.2秒／遠LOW平均0.5秒、新規・距離不明・分類context喪失のHIGHは維持する。
@@ -675,4 +710,4 @@ B37ではdepth専用sampleがOFFでした。後続B40で0.3.28 depth samplerか�
 - component/dataがNoneなら従来のnone/raw=nullを保ったまま`dataReason`またはfieldの`reason=missingProviderData`を付けます。投影先`uiState`は既存flat fieldを維持し、homingSource/homingDeclaredProducer/homingProducerVerification/homingValueKind（spottedも同様）を追加。既存depth辞書と先着したuiState.sourceを上書きしません。
 - `torpedo_state_sampling_enabled=false`の既定では追加sampleを行いません。有効化する場合もcollection opt-inと固定2 flagの範囲を維持します。
 - ATMは実行時の導出state情報源としてのみ必要です。自動ダウンロード・同梱・他modの復元は行いません。installerは既定でATM専用ロードファイルを退避し、明示`-WithAtm`のときだけ残します。
-- 実機試験はcore 5Hz（`state_interval=0.2`）、state sampler 1Hz、heavy diagnostics OFF、depth sampler OFFを基本とし、負荷再発時は直ちに中止します。ATM復元が必要な場合は`restore-atm-13357625.bat`を使い、復元先conflictでは上書きせず停止します。
+- 実機試験はcore 5Hz（`state_interval=0.2`）、state sampler 1Hz、heavy diagnostics OFF、depth sampler OFFを基本とし、負荷再発時は直ちに中止します。ATM復元が必要な場合は`restore-atm.bat`を使い、復元先conflictでは上書きせず停止します。

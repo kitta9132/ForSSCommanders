@@ -1,4 +1,4 @@
-"""Offline checks for install-wowsmod.ps1 and the fixed-build wrapper.
+"""Offline checks for install-wowsmod.ps1 and the auto-detecting wrapper.
 
 The tests never touch the real game folder. Each PowerShell run uses a
 synthetic package and a fake game root under pytest's temporary directory.
@@ -18,7 +18,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 INSTALLER = ROOT / 'install-wowsmod.ps1'
-WRAPPER = ROOT / 'install-13357625.bat'
+WRAPPER = ROOT / 'install.bat'
 BUILD = '13357625'
 
 # Keep this in sync with $script:PythonFiles in install-wowsmod.ps1.
@@ -32,11 +32,17 @@ MODULE_NAMES = (
     'submarine_telemetry.py',
     'map_calibration.py',
     'performance_profiler.py',
+    'ttaro_prefs_adapter.py',
+    'ttaro_prefs_binding.py',
 )
 COPY_FILES = MODULE_NAMES + ('config.example.ini',)
+# Keep this in sync with $script:SchemaFiles in install-wowsmod.ps1.
+SCHEMA_NAMES = ('kitta-wows-extractor.schema.json',)
+SCHEMA_RELATIVE = tuple(
+    'res_mods/ModSchemas/' + name for name in SCHEMA_NAMES)
 RELATIVE_FILES = tuple(
     'res_mods/PnFMods/WowsExtractor/' + name for name in COPY_FILES
-) + ('res_mods/PnFModsLoader.py',)
+) + SCHEMA_RELATIVE + ('res_mods/PnFModsLoader.py',)
 ATM_RELATIVE = (
     r'PnFMods\AdvancedTorpedoMarkerPy',
     r'gui\unbound2\PnFMods\AdvancedTorpedoMarker.unbound',
@@ -79,6 +85,11 @@ def _make_package(tmp_path):
     for name in MODULE_NAMES:
         (mod / name).write_bytes(('# fixture ' + name + '\n').encode('utf-8'))
     (mod / 'config.example.ini').write_bytes(b'collection_enabled = false\n')
+    schemas = package / 'res_mods' / 'ModSchemas'
+    schemas.mkdir(parents=True)
+    for name in SCHEMA_NAMES:
+        (schemas / name).write_bytes(
+            ('# fixture schema ' + name + '\n').encode('utf-8'))
     (package / 'res_mods' / 'PnFModsLoader.py').write_bytes(b'')
     shutil.copy2(INSTALLER, package / 'install-wowsmod.ps1')
 
@@ -177,7 +188,7 @@ def test_default_atm_disable_is_preserved_and_withatm_is_explicit():
     assert '} elseif ($atmDetected) {' in text
     # There is exactly one actual Disable-Atm call, in the default branch.
     assert text.count('Disable-Atm -Items') == 1
-    assert 'restore-atm-13357625.bat (after the no-ATM test)' in text
+    assert 'restore-atm.bat (after the no-ATM test)' in text
 
 
 def test_elevation_reexec_passes_build_gameroot_and_withatm():
@@ -251,7 +262,7 @@ def test_dryrun_default_with_atm_plans_the_existing_move(tmp_path):
     assert 'ATM disable    : yes' in output
     for relative in ATM_RELATIVE:
         assert relative in output
-    assert 'restore-atm-13357625.bat (after the no-ATM test)' in output
+    assert 'restore-atm.bat (after the no-ATM test)' in output
     assert _atm_snapshot(game) == before
     assert not _backup_root(game).exists()
 
@@ -401,3 +412,74 @@ def test_default_failure_rollback_still_restores_the_atm_it_moved(tmp_path):
         (backups[0] / 'atm-disable-manifest.json').read_text(
             encoding='utf-8-sig'))
     assert manifest_data['status'] == 'restored'
+
+
+def _package_schema_bytes(package):
+    return (package / 'res_mods' / 'ModSchemas' /
+            SCHEMA_NAMES[0]).read_bytes()
+
+
+def _target_schema(game):
+    return _res_mods(game) / 'ModSchemas' / SCHEMA_NAMES[0]
+
+
+def test_installer_allow_lists_the_adapter_binding_and_schema():
+    text = _source_text()
+    assert 'ttaro_prefs_adapter.py' in text
+    assert 'ttaro_prefs_binding.py' in text
+    assert "$script:SchemaFiles = @('kitta-wows-extractor.schema.json')" in text
+    assert "res_mods\\ModSchemas" in text
+
+
+def test_dryrun_reports_schema_placement_and_keeps_other_schemas(tmp_path):
+    package = _make_package(tmp_path)
+    game = _make_game(tmp_path)
+    schemas = _res_mods(game) / 'ModSchemas'
+    schemas.mkdir(parents=True)
+    (schemas / 'framework-owned.schema.json').write_bytes(b'framework')
+
+    code, output = _run_powershell(package, game, '-DryRun')
+    assert code == 0, output
+    assert 'ModSchemas     : not present' in output
+    assert 'other schemas stay untouched' in output
+    assert (schemas / 'framework-owned.schema.json').read_bytes() == b'framework'
+    assert not _backup_root(game).exists()
+
+
+def test_actual_install_places_schema_and_keeps_other_schemas(tmp_path):
+    package = _make_package(tmp_path)
+    game = _make_game(tmp_path)
+    schemas = _res_mods(game) / 'ModSchemas'
+    schemas.mkdir(parents=True)
+    (schemas / 'framework-owned.schema.json').write_bytes(b'framework')
+    other_before = (schemas / 'framework-owned.schema.json').read_bytes()
+
+    code, output = _run_powershell(package, game)
+    assert code == 0, output
+    assert 'Installation completed successfully.' in output
+    assert 'ModSchemas    : kitta-wows-extractor.schema.json installed' in output
+    assert _target_schema(game).read_bytes() == _package_schema_bytes(package)
+    # Framework-owned and other schemas are never touched.
+    assert (schemas / 'framework-owned.schema.json').read_bytes() == other_before
+    assert not list(_backup_root(game).glob('ModSchemas_*'))
+    installed = _res_mods(game) / 'PnFMods' / 'WowsExtractor'
+    for name in ('ttaro_prefs_adapter.py', 'ttaro_prefs_binding.py'):
+        assert (installed / name).is_file()
+
+
+def test_actual_install_backs_up_and_replaces_our_existing_schema(tmp_path):
+    package = _make_package(tmp_path)
+    game = _make_game(tmp_path)
+    schemas = _res_mods(game) / 'ModSchemas'
+    schemas.mkdir(parents=True)
+    (schemas / SCHEMA_NAMES[0]).write_bytes(b'previous-own-schema')
+    (schemas / 'another-mod.schema.json').write_bytes(b'another')
+
+    code, output = _run_powershell(package, game)
+    assert code == 0, output
+    assert 'Installation completed successfully.' in output
+    assert _target_schema(game).read_bytes() == _package_schema_bytes(package)
+    assert (schemas / 'another-mod.schema.json').read_bytes() == b'another'
+    backups = list(_backup_root(game).glob('ModSchemas_*'))
+    assert len(backups) == 1
+    assert (backups[0] / SCHEMA_NAMES[0]).read_bytes() == b'previous-own-schema'

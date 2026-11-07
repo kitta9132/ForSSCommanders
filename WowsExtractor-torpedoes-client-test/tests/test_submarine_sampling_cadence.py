@@ -405,7 +405,7 @@ def test_build_state_only_offers_current_wavehit_to_heavy_identity_candidates():
     identity_inputs = []
     ns['safe_identity_candidates'] = lambda *args: (
         identity_inputs.append(args[-1]) or {'status': 'candidate'})
-    for name in ('_submarine_sampling_plan', '_collect_submarine_probes'):
+    for name in ('_build_state', '_submarine_sampling_plan', '_collect_submarine_probes'):
         setattr(collector, name, MethodType(_method(name, ns), collector))
 
     all_off = collector._build_state(19.8)

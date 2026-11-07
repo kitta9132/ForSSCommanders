@@ -1,15 +1,15 @@
 # FPS改善専用タスク：潜水艦戦闘補助に必要な負荷へ絞る
 
 <a id="fps-latest-summary"></a>
-## 最新状況サマリー（0.3.40・実機根拠は0.3.38／L/3時点）
+## 最新状況サマリー（0.3.41・実機根拠は0.3.38／L/3時点）
 
 追加実機結果：[ATM B09・新build13533378](PERFORMANCE_WITH_ATM_B09_0.3.38.ja.md)。ユーザーはmin40程度で目立つカクつきなし、負荷増でmin30程度では体感ありと報告。記録上最大92／95魚雷で、near約85%・全detail省略約8～9%。1/3条件は機能し、farの連続存在区間平均sampleは約1.95Hz。**これらは0.3.38・半径L/3の履歴であり、現行L/5や自艦全距離HIGHの実機根拠ではない。** 大量時の実用FPSは未達として残す。nearの本数budgetは未採用で、情報維持型のavatar固定費／同期出力削減を先に調査する。145ファイル退避済み。
 
-- 最新ソースは **`0.3.40-radius-l5`**。全566 testsで**557 passed, 9 skipped**（私有replay含む。skipはWoWS起動中のためinstaller 9件が安全上skip）＋9 module checker成功。分類半径をL/3から`R=L/5`（L=マップ短辺の較正world長）へ正式変更し、L/5～L/3帯はLOWになる。自艦魚雷は全距離HIGH、その他は近5Hz／遠平均2Hz・5秒再分類を維持する。[収集頻度表](COLLECTION_CADENCE.ja.md)を更新。未導入・未実機で、実機数値は0.3.38・L/3の根拠。
+- 最新ソースは **`0.3.41-team-torpedo-budget`**。全671 testsで**671 passed, 0 skipped**（`WOWS_SAMPLING_REPLAY=1`／`WOWS_FAR_1HZ_REPLAY=1`／`WOWS_HIGH_BUDGET_25_REPLAY=1`の私有replay含む）＋11 module checker成功。0.3.40の半径L/5・近0.2秒／遠0.5秒・5秒再分類を土台に、strict `isPlayer is True`の自艦を全距離HIGH（敵予算外）、strict同一チームかつ`isPlayer is False`の確認済み味方を全距離LOW（初観測含む）、半径内の敵は最近`enemy_high_budget`本（既定20）だけHIGHとする。チーム不明・距離不明・同一チームで`isPlayer`不明は安全側HIGH。研究用`high_budget_25`は研究のまま。[収集頻度表](COLLECTION_CADENCE.ja.md)・[チーム別魚雷サンプリング](TEAM_TORPEDO_BUDGET.ja.md)を更新。**未導入・未実機**で、実機数値は0.3.38・L/3の根拠。
 - B46実機限定試験（heavy OFF・独立4群ON）：1,335 records（active 1,333）。ユーザー報告 minFPS 約50以上・カクつきなし（録画なし）。HP平均約2 Hz、比較／damage平均約1 Hz・非due省略を実機記録で確認。独立 profiler phase（gun／submarine含む）を計上。通常参考48窓の cycle 平均3.763 ms／最大7.359 ms。
 - 独立4群（depth／WaveHit／Battery／gun）の新経路は今回の条件で実機可用性確認済み。depth／WaveHit／gun は全1,333 active state で available、Battery は272 available／1,061 notSampled。
 - B46は同時最大6本・low0だったが、後のATM B09で最大95本・near／far両枠を観測。遠距離枠の約2Hz動作と省略を実機確認した。200本規模と因果的FPS改善率は未検証、負荷増加時の体感カクつきは未解決。
-- A（魚雷距離5秒再分類＋5 Hz／2 Hz分岐）はoffline実装・216魚雷／22owner fixture・B43／B44 replayを完了。ATM B09でL/3時点のnear／far両枠の実周期・省略も確認したが、L/5と自艦全距離HIGHは今回未実機で、最終的な実用FPS判定は未達。
+- A（魚雷距離5秒再分類＋5 Hz／2 Hz分岐）はoffline実装・216魚雷／22owner fixture・B43／B44 replayを完了。0.3.41で自艦・確認済み味方・敵near予算からなるチーム別分類を追加（offline検証のみ）。ATM B09でL/3時点のnear／far両枠の実周期・省略も確認したが、L/5・自艦全距離HIGH・チーム別予算は今回未実機で、最終的な実用FPS判定は未達。
 - B（砲弾道計算）は完全撤去済み。
 - C（damage snapshot 1 Hz化・自艦 depth／Battery／WaveHit 独立化・gun reload raw 独立化）は実装・offline検証完了。独立4群はB46で実機可用性確認済み、C個別の因果的FPS効果は未確認。
 - E（情報群の低頻度化）：①HP 2 Hz、②avatar比較1 Hz、⑦Battery 1 Hz、⑨damage 1 Hz、⑧初回TTXのみを完了。③遠距離艦、④⑤消耗品／search、⑥module故障修理、⑩較正診断／coverage 1 Hz は未実装／設計事項で保留。
@@ -79,7 +79,7 @@ byte数は元行の観測値をsample対象だけ残し、新sampling metadata�
 
 0.3.32更新（履歴）：Bの砲弾道撤去を実装。tracker・専用イベント・計算・出力を削除。魚雷距離別cadence（A）はこの時点で未実装（0.3.33で実装）。
 
-更新：2026-11-06。現行ソース **`0.3.40-radius-l5`**（offline検証済み）。Aの距離枠は0.3.33で実装し、B09ではL/3時点の両枠動作を確認した。0.3.40で半径はL/5へ変更済みだが、L/5・自艦全距離HIGHの実機確認と最終実用FPS判定は未完。B砲弾道撤去・C独立化は完了。汎用WoWSテレメトリ収集器ではなく、潜水艦の攻撃・回避・潜航判断を優先する。
+更新：2026-11-07。現行ソース **`0.3.41-team-torpedo-budget`**（offline検証済み）。Aの距離枠は0.3.33で実装し、B09ではL/3時点の両枠動作を確認した。0.3.40で半径はL/5、0.3.41で自艦・確認済み味方・敵near予算のチーム別分類を追加したが、L/5・自艦全距離HIGH・チーム別予算の実機確認と最終実用FPS判定は未完。B砲弾道撤去・C独立化は完了。汎用WoWSテレメトリ収集器ではなく、潜水艦の攻撃・回避・潜航判断を優先する。
 
 関連：[既知の問題](KNOWN_ISSUES.ja.md)、[用途の絞り込み](../../TASKS.md#task-scope)、[性能実績](../../TASKS.md#task-performance)、[B44計測](PERFORMANCE_B44_TORPEDO_PROFILE.ja.md)。FPS改善作業の詳細・チェック欄は本書へ集約する。
 

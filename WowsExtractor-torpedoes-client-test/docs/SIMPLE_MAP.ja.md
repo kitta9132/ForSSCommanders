@@ -4,13 +4,15 @@
 modは最終目撃キャッシュを生成しないため、本ビューアも失探履歴を生成しない。
 以下の旧最終目撃表示の説明より [OBSERVATIONS.ja.md](OBSERVATIONS.ja.md) を優先する。
 
-modの変更やゲームファイルへの書き込みは不要です。Python 3.10以上とブラウザのみ使用し、追加依存・外部CDNはありません。`launch-map-13357625.bat` をダブルクリックし、終了はコンソールで Ctrl+C。既定では build 13357625 の `res_mods\PnFMods\WowsExtractor` を読みます。戦闘データがない間は待機します。
+modの変更やゲームファイルへの書き込みは不要です。Python 3.10以上とブラウザのみ使用し、追加依存・外部CDNはありません。`launch-map.bat` をダブルクリックし、終了はコンソールで Ctrl+C。起動時に `preferences.xml` と `profile\python.log` から実際に起動したbuildを自動検出し、その `res_mods\PnFMods\WowsExtractor` を読みます。2026-11-07時点の15.10クライアントでは build 13533378 が選ばれます。検出できない場合や `bin\<build>` がない場合は、サーバーを起動せずエラーで停止します。戦闘データがない間は待機します。
 
 別の場所やポートを使う例（任意のカレントディレクトリから実行可能）:
 
 ```bat
-launch-map-13357625.bat --mod-dir "C:\path with spaces\WowsExtractor" --port 8766 --no-browser
+launch-map.bat --mod-dir "C:\path with spaces\WowsExtractor" --port 8766 --no-browser
 ```
+
+`--mod-dir` を明示した場合は自動検出より優先されます。標準以外のゲームフォルダーは `WOWS_GAME_ROOT`、buildを明示する場合は `WOWS_BUILD` を設定してから実行します（cmdでは `set "WOWS_GAME_ROOT=..."`、PowerShellでは `$env:WOWS_GAME_ROOT='...'`）。`.bat` は内部で `powershell.exe -NoProfile -ExecutionPolicy Bypass` を使うため、ExecutionPolicyがRestrictedでも検出ヘルパーを実行できます。
 
 `--no-browser` 時は表示された `http://127.0.0.1:8766/` を開きます。ポート競合時は別ポートを指定してください。サーバーは127.0.0.1限定、GET/HEADのみ、指定のJSONと同梱HTML以外は公開しません。ローカルの他プロセスからはアクセスできるため、個人情報を含む戦闘データの取り扱いに注意してください。個人名は画面に表示しません。
 

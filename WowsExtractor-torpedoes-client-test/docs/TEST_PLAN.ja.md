@@ -21,7 +21,7 @@
 | ゲームを起動 | ログの `[WowsExtractor] loaded` | mod読み込みの確認 |
 | 訓練戦に入場 | `meta.json`、`state.json` | 正しい導入先に生成される |
 | 戦闘中数秒待つ | `state.json` の `ts` と更新日時 | 更新が進む |
-| メタ情報を見る | `mod.version` | 試験対象版（現在のソースは `0.3.3-visibility-diagnostics`）である |
+| メタ情報を見る | `mod.version` | 試験対象版（現在のソースは `0.3.43-self-id-observation`）である |
 | 魚雷未発射 | `torpedoStatus` | `available`と正常な空配列を区別できる |
 
 `torpedoStatus.status=unsupported/unknown` の場合は、0本と判定せず [問題の切り分け](TROUBLESHOOTING.ja.md)へ進みます。
@@ -55,7 +55,7 @@
 
 ## 段階D：ATMありで同じテストを繰り返す
 
-1. ゲームを終了し、`restore-atm-13357625.bat` で退避したATMを戻す。必要なら現行版ATMと作者指定の依存modを導入する。
+1. ゲームを終了し、`restore-atm.bat` で退避したATMを戻す。必要なら現行版ATMと作者指定の依存modを導入する。
 2. ゲームを再起動し、新しいファイル名で履歴記録を開始する。
 3. 段階B・Cを同じ艦と魚雷種類で繰り返す。
 4. ATMの波線／M表示と、同じ魚雷のAPI側 `type` を時刻付きで比較する。
@@ -75,6 +75,42 @@ ATMがUIのtypeを書き換える影響をAPI側も受ける可能性があり�
 - カメラを外してもAPIの一覧に残るか、画面マーカーの有無で取れる範囲が変わるか。
 
 空母系のチーム識別などは実際の返り値を優先し、整理情報の判定が必ず正しいとは前提にしません。
+
+## 段階G：自艦 ID candidate 観測（0.3.43）
+
+この段階は `self.identityCandidates` の実機取得と、`torpedoes[].ownerId` とのcandidate照合用です。距離heuristicや`ownerId==vehicleId`の推測joinを行わず、観測値を記録します。
+
+### 最小試験：Minotaur 1対1 自己発射
+
+- **build／mod**: 現行 source `0.3.43-self-id-observation`（導入は親担当）。
+- **艦**: Minotaur（自艦）、味方／敵は同型1隻ずつが望ましいが、負担最小なら訓練戦1対1。
+- **ATM**: 現在のATM・他modを保持する。`restore-atm.bat` は復元用であり、退避には使わない。
+- **設定**: 前回の collection／profiler／独立群設定を保持する。state_interval は 0.2 s（5 Hz）。この試験のために設定を変更しない。
+- **記録**: 全fieldレコーダーを戦闘前に開始。ファイル名ではなく実際の導入状態を条件として記録する。
+
+### 操作順
+
+1. 訓練戦に入場し、自艦が動けるようになってから魚雷を**1斉射**発射する。
+2. 発射後、**20 秒間待つ**（5 Hzで約100 sample、魚雷が充分に離れる）。
+3. 戦闘を終了／退場する。
+4. 記録を停止する。
+
+### 確認項目
+
+- `state.json` / JSONL の `self.identityCandidates` が毎 sample 存在すること。
+- `battle.getSelfPlayerInfo().id`（playerId）、`battle.getSelfPlayerInfo().shipId`（shipId）、`battle.getSelfPlayerShip().uiId` の status が `available` で、生値が取得できていること。
+- Ship 非公開属性 `_Ship__id` / `id` / `vehicleId` は `nonPublicShipAttribute` として取得できていれば記録し、取得不能でも欠測として残ること。
+- `torpedoes[]` の自艦発射行の `ownerId` と、上記 candidate のいずれかが同一値であっても、`isOwn` は `owner.isPlayer` の厳密 bool のみで決まり、推測で上書きしないこと。
+- 味方・敵の魚雷が混在する場合、`self.identityCandidates` の値と `torpedoes[].ownerId` が一致するのは自艦発射行だけ（1戦でown/ally比較できる条件なら確認）。
+- `analyze_self_id_candidates.py <記録.jsonl>` を実行し、各 candidate の `matchConsistency` / `crossCandidateConsistency` を確認する。
+
+### 解析
+
+```powershell
+python tools/analyze_self_id_candidates.py recordings/without-atm-self-id-xxx.jsonl
+```
+
+出力は匿名集計のみ。生のID値は含みません。`consistentMatch` が出た candidate は `torpedo.ownerId` と同一 namespace の可能性を示すcandidateに留まり、確定joinではありません。
 
 ## 段階F：終了・再入場
 

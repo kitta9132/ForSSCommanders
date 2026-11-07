@@ -2,13 +2,17 @@
 
 現在の情報群ごとの周期は[収集頻度表](docs/COLLECTION_CADENCE.ja.md)を参照。
 
-作成日：2026-11-04（日本時間）
-modバージョン：`0.3.40-radius-l5` / ModsAPI：`API_v1.0`（557 passed, 9 skipped＋9 module checker成功・未導入／未実機。skipはWoWS起動中のためinstaller 9件が安全上skip、私有replayは実施）
+作成日：2026-11-07（日本時間）
+modバージョン：`0.3.44-self-owner-id` / ModsAPI：`API_v1.0`（offline全回帰 pass＋11 module checker成功。私有replayは`WOWS_SAMPLING_REPLAY`等で実施）
 
 B46は限定条件（heavy OFF・独立4群ON）で、ユーザー報告 minFPS 約50以上・カクつきなし（録画なし）。1,335 records（active 1,333）、HP平均約2 Hz、比較／damage平均約1 Hz・非due省略、独立 profiler phase を確認。depth／WaveHit／gun は全1,333 available、Battery 272 available／1,061 notSampled。遠距離2 Hz・多数魚雷・全項目の意味保証は未確認。以下の未実機記述は版公開時の履歴。
 
 ## 最近の版別到達点（履歴）
 
+- 0.3.44 `self-owner-id`：自艦判定を `owner.isPlayer` から同一 snapshot の `battle.getSelfPlayerInfo().shipId == torpedo.ownerId` へ変更。`owner.isPlayer` は `owner` 行に生の観測値として残すが分類には使わない。`isOwn`・`isOwnSource`・`isOwnReason` を sample 済み行へ公開。自艦は全距離HIGH（敵予算外）、確認済み味方（同一チームかつ `isOwn is False`）は全距離LOW（初観測含む）、敵は半径内の最近 `enemy_high_budget` 本（既定20）だけHIGH。型不一致・self shipId 欠測は `isOwn: null`（unknown）とし味方と誤分類しない。`self.shipId` は毎 sample 新鮮に取得。B50 の観測（`shipId` と `ownerId` が全行厳密一致）を根拠とする。offlineのみ・未実機。
+- 0.3.43 `self-id-observation`：自艦 ID と `torpedo.ownerId` の対応を調査するため、`self.identityCandidates` を同一 snapshot に追加。`battle.getSelfPlayerInfo()` から `id`（playerId）と `shipId`、`battle.getSelfPlayerShip()` から公開 `uiId`、および Ship 非公開属性候補 `_Ship__id` / `id` / `vehicleId` を別々の candidate として記録。推測 join・distance heuristic・`isOwn` 上書きは行わず、observer fallback 由来を self と誤記しない。専用 offline 解析ツールとテストを追加。新規設定・probe フラグは不要。実機試験は未実施。
+- 0.3.42 `launch-restricted-builtins`：0.3.41 で導入した TTaro Mod Config 連携・魚雷サンプリング設定の正規化ヘルパーへのアクセスに `globals().get(...)` を使用していたため、WoWS Python 2 ランタイムの restricted builtin 名前空間で `NameError` が発生し mod が起動しない障害を修正。`globals()` を直接のモジュールグローバル参照（存在しない場合は `NameError` を捕まえる）に置き換え、restricted builtin（`globals` 欠如）下での `import -> instantiate -> load-complete -> battle -> tick` 実起動経路を回帰テスト追加。TTaro 有無どちらでも core が停止しないことを検証。B49 は 0 byte で無効試験（[記録](docs/VALIDATION_B49_0.3.41_INVALID.ja.md)）。offlineのみ・未実機。
+- 0.3.41 `team-torpedo-budget`：魚雷分類へチーム関係と自艦判定を追加。当時は strict `isPlayer is True`の自艦を全距離HIGH（敵予算外）とし、strict同一チームかつ`isPlayer is False`の確認済み味方を全距離LOW（初観測含む）、半径内の敵を最近`enemy_high_budget`本（既定20）だけHIGHとした。0.3.44 では自艦判定を `owner.isPlayer` から `self.shipId == ownerId` へ変更。チーム不明・距離不明・同一チームで自艦不明は安全側HIGH。自作のTTaro Mod Config連携（`ttaro_prefs_adapter.py`＋`ttaro_prefs_binding.py`、schema同梱）をソース登録対応済み（実機パネル表示は未確認）。offlineのみ・未実機。
 - 0.3.40 `radius-l5`：魚雷分類半径を`R=L/5`（L=マップ短辺の較正world長）へ正式変更。L/5～L/3帯はLOW、境界上はHIGH、自艦の厳密bool Trueは全距離HIGH、他は近5Hz／遠平均2Hz・5秒再分類を維持。1Hz遠方化ではない。offlineのみ・未実機。
 - 0.3.39 `own-torpedo-cadence`：自艦と厳密boolで確認できた魚雷を全距離HIGHに変更。当時の分類半径はL/3。
 - 0.3.38 `independent-gun-reload`：gun reload raw を heavy 診断なしで core 周期から採取（既定OFF・collection必須）。装填数・物理管ID・修理timer の意味確定ではない。B46で独立4群の実機可用性確認。
@@ -26,7 +30,7 @@ B46は限定条件（heavy OFF・独立4群ON）で、ユーザー報告 minFPS 
 
 0.3.14導入後「自艦が沈むまでminFPS 25、撃沈後110まで回復」と報告されています。因果は未確定です。B46（0.3.38・heavy OFF・独立4群ON）ではユーザー報告 minFPS 約50以上・カクつきなしを確認しましたが、今回は魚雷同時最大6本・low群0であり、遠距離2 Hz や多数魚雷時の FPS は未検証です。因果的な改善率・開始直後 FPS 低下も未解明です。
 
-現行ソースは **`0.3.40-radius-l5`**（offline検証済み・未導入／未実機）。魚雷は5秒再分類で、自艦の厳密bool Trueは全距離HIGH、他は`L=min(map width,height)`のL/5内・境界上HIGH／外LOW平均2Hzです。collection/diagnostics/profiler/depth/state/gun reload 独立群はすべて既定OFFです。state は core tick 0.2 秒（約5 Hz、0.1 秒明示で10 Hz互換）を基準とし、各情報群の期限・sample metadata に応じて取得を省略・出力します（同一 `state.json` ファイルに出力されるだけで、すべての項目が毎tick揃うわけではありません）。HP 2 Hz・avatar 比較1 Hz・damage 1 Hz・自艦 depth／Battery／WaveHit／gun reload の独立取得は、明示ON・collection必須で利用可能です。意味・単位・実機 FPS 効果には制約が残ります。通常プレイでは引き続き mod 退避を推奨します。
+現行ソースは **`0.3.44-self-owner-id`**（offline検証済み・未導入／未実機）。0.3.41 の `team-torpedo-budget` 距離・予算 cadence を維持しつつ、自艦判定を `owner.isPlayer` から同一 snapshot の `battle.getSelfPlayerInfo().shipId == torpedo.ownerId` へ変更。0.3.42 の restricted builtin 修正も維持します。collection/diagnostics/profiler/depth/state/gun reload 独立群はすべて既定OFFです。state は core tick 0.2 秒（約5 Hz、0.1 秒明示で10 Hz互換）を基準とし、各情報群の期限・sample metadata に応じて取得を省略・出力します（同一 `state.json` ファイルに出力されるだけで、すべての項目が毎tick揃うわけではありません）。HP 2 Hz・avatar 比較1 Hz・damage 1 Hz・自艦 depth／Battery／WaveHit／gun reload の独立取得は、明示ON・collection必須で利用可能です。意味・単位・実機 FPS 効果には制約が残ります。通常プレイでは引き続き mod 退避を推奨します。
 
 `config.ini` がない場合・読み込みに失敗した場合も収集停止です。明示的に `collection_enabled = true` のときだけ通常収集を開始します。heavy UI/dataHub probeはさらに `diagnostics_enabled = true`、profilerは独立して `profiler_enabled = true` が必要です。魚雷depth/state samplerはそれぞれ専用opt-inでdiagnostics非依存にできますが、collection opt-inが必須です（全option既定OFF）。intervalは既定・最小1秒、invalid値は1秒へ戻します。同時sampleではheavy/depth/stateのtorpedo collection getter／列挙を共有します。state samplerは`isHoming`/`isSpotted`以外の任意data keyを探索しません。収集停止中はprobe/API poll・定期tickを行わず、戦闘開始時のdisabled stateと終了stateだけを書きます。core収集（既定0.2秒）およびarmament/public_dataの負荷は未評価です。
 
@@ -44,7 +48,7 @@ B46は限定条件（heavy OFF・独立4群ON）で、ユーザー報告 minFPS 
 
 元仕様と実機取得状況の最新版：[詳細対応表](docs/SPEC_COVERAGE_0.3.1.ja.md)。
 
-**簡易2Dマップ**：`launch-map-13357625.bat` をダブルクリック。
+**簡易2Dマップ**：`launch-map.bat` をダブルクリック。実際に起動したbuildを自動検出して読みます。
 ゲーム側modの変更・再起動は不要です。[使い方と制約](docs/SIMPLE_MAP.ja.md)。
 
 0.3.1はゲーム環境にAttributeError名がない場合の診断処理停止を修正しました。
@@ -64,13 +68,13 @@ UI/APIのID対応、ATM誘導状態とその変化を試験範囲で実機確認
 
 WoWSの公開ModsAPIで取れた魚雷情報を、ゲーム内modが `state.json` に書き出します。最優先の確認項目は **`torpedoes[].type` の生値と変化**です。
 
-**build 13357625の訓練戦で実機確認を進めています。** ATM状態はdataHubから直接読み取り、
+**15.10クライアント（現行 build 13533378）の訓練戦で実機確認を進めています。** ATM状態はdataHubから直接読み取り、
 isHoming/isSpottedを取得します。UI→Flash→Pythonの橋渡しは使用していません。
 12対12・別地図・失探時の鮮度は未検証です。外部表示のグリッドとゲーム内位置は概ね一致すると目視確認済みですが、定量誤差・全条件の検証ではありません。
 
 ## まずやること
 
-1. ゲームを終了し、既存の `res_mods/PnFMods/WowsExtractor` と `PnFModsLoader.py` をバックアップします。ATMあり環境で `install-13357625.bat` を使う場合、既定ではATM本体とATM専用unboundは自動で退避されます。ATMを残したままcollectorだけを入れる場合は、明示的に `--with-atm`（PowerShellでは `-WithAtm`）を付けます。どちらの場合も `TTaroModUtils` と `PnFModsLoader.py` は動かしません（詳細は [バージョン固定インストーラー](docs/INSTALL_BAT.ja.md)）。
+1. ゲームを終了し、既存の `res_mods/PnFMods/WowsExtractor` と `PnFModsLoader.py` をバックアップします。ATMあり環境で `install.bat` を使う場合（実際の導入先buildは起動buildから自動検出）、既定ではATM本体とATM専用unboundは自動で退避されます。ATMを残したままcollectorだけを入れる場合は、明示的に `--with-atm`（PowerShellでは `-WithAtm`）を付けます。どちらの場合も `TTaroModUtils` と `PnFModsLoader.py` は動かしません（詳細は [自動検出インストーラー](docs/INSTALL_BAT.ja.md)）。
 2. このパッケージの `res_mods/PnFMods/WowsExtractor` を、実際に起動しているbuildの `res_mods/PnFMods/` にコピーします。
 3. `res_mods/PnFModsLoader.py` がなければ、同梱の同名ファイルをコピーします。**既存のものは上書きしません。** 同梱ファイルが0バイトなのは仕様です。
 4. ゲームを起動し、訓練戦で魚雷を発射します。
@@ -98,7 +102,7 @@ World_of_Warships/
 
 `config.example.ini` は必要なら `config.ini` にコピーします。未作成なら収集停止です。`Main.py` 単体では動きません。
 
-導入に必要なPython sourceは9 filesです（0.3.38でも同じ構成）：`Main.py`, `battle_identity.py`, `damage_tracker.py`, `emit_guard.py`, `ui_health.py`, `torpedo_telemetry.py`, `submarine_telemetry.py`, `map_calibration.py`, `performance_profiler.py`。installerの明示allowlistと`tools/check_collector_offline.py`の必須module listを同期しています。offline確認は対応するPython 3.10–3.12で`python tools/check_collector_offline.py`、回帰は`python -m pytest -q`。manifest/checksumは生成物で、今回更新せず親セッション管理です。
+導入に必要なPython sourceは11 filesです：`Main.py`, `battle_identity.py`, `damage_tracker.py`, `emit_guard.py`, `ui_health.py`, `torpedo_telemetry.py`, `submarine_telemetry.py`, `map_calibration.py`, `performance_profiler.py`, `ttaro_prefs_adapter.py`, `ttaro_prefs_binding.py`。任意でTTaro Mod Config schema `res_mods/ModSchemas/kitta-wows-extractor.schema.json` を同梱します。installerの明示allowlistと`tools/check_collector_offline.py`の必須module listを同期しています。offline確認は対応するPython 3.10–3.12で`python tools/check_collector_offline.py`、回帰は`python -m pytest -q`。manifest/checksumは`tools/build_bundle.py`で再生成します。
 
 ## この版でできること
 
@@ -119,7 +123,7 @@ WebSocketやゲーム操作の自動化は含みません。mod本体にゲー�
 | 文書 | 内容 |
 | --- | --- |
 | [導入・削除・設定](docs/INSTALL.ja.md) | コピー先、ローダー、設定、元に戻す手順 |
-| [バージョン固定インストーラー](docs/INSTALL_BAT.ja.md) | build 13357625用。ATM自動退避と復元を含む |
+| [自動検出インストーラー](docs/INSTALL_BAT.ja.md) | 起動buildを自動検出。ATM自動退避と復元を含む |
 | [出力仕様](docs/OUTPUT_SPEC.ja.md) | 全トップレベル項目、魚雷関係全フィールド、欠損値、単位、例 |
 | [B41供給元調査](docs/RESEARCH_B41_MOD_DATA_PRODUCER.ja.md) | mods_DataComponentの供給元限界と0.3.30の明示provider方針 |
 | [opt-in性能計測計画](docs/PLAN_PERFORMANCE_PROFILING.ja.md) | 0.3.20 profiler、時計候補、集計境界と未確認事項 |

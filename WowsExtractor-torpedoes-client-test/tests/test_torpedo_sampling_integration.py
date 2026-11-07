@@ -63,8 +63,8 @@ def test_producer_keeps_membership_and_does_not_join_ui_to_an_unverified_subset(
         except Exception:
             return default
 
-    def collect(team, sampling=None, now=None, context=None):
-        calls.append(('collect', team, sampling, now, context))
+    def collect(team, sampling=None, now=None, context=None, self_ship_id=None):
+        calls.append(('collect', team, sampling, now, context, self_ship_id))
         return ([{'uiId': i, 'position': [i, 0, i]} for i in range(rows_count)], {
             'available': True, 'status': 'available', 'membershipComplete': complete,
             'membership': [{'uiId': i} for i in range(members_count)],
@@ -107,7 +107,8 @@ def test_producer_keeps_membership_and_does_not_join_ui_to_an_unverified_subset(
     state = ns['_build_state'](c, 8.0)
     assert calls[0][0] == 'collect'
     assert calls[0][2] is c._torpedoSamplingGroups
-    assert calls[0][3:] == (8.0, {'fixture': True})
+    assert calls[0][3:5] == (8.0, {'fixture': True})
+    assert calls[0][5] is None
     assert ('join', expected) in calls
     membership = state['torpedoStatus']['membership']
     assert ('motion', {'membership': membership if complete else []}) in calls

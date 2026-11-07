@@ -5,45 +5,66 @@
 No game imports/calls or runtime file writes. Does not validate engine compatibility.
 """
 import json
+import re
 from pathlib import Path
 import sys
 from types import SimpleNamespace as Obj
 import warnings
 
 
+def _fix_except_py2(source):
+    """Convert Python 2 ``except Exception, e:`` for Python 3 exec."""
+    return re.sub(r'except Exception, ([a-zA-Z_][a-zA-Z0-9_]*):',
+                  r'except Exception as \1:', source)
+
+
 def main():
-    if not (3, 10) <= sys.version_info[:2] <= (3, 12):
-        raise SystemExit('Use Python 3.10-3.12 for this optional lib2to3 check.')
-    warnings.filterwarnings('ignore', category=DeprecationWarning)
-    from lib2to3.refactor import RefactoringTool
+    if sys.version_info[:2] < (3, 10):
+        raise SystemExit('Use Python 3.10 or newer.')
+    try:
+        from lib2to3.refactor import RefactoringTool
+    except ImportError:
+        RefactoringTool = None
+        print('Warning: lib2to3 unavailable (Python 3.13+); using regex fallback for Python 2 grammar check.',
+              file=sys.stderr)
     root = Path(__file__).resolve().parents[1] / 'res_mods/PnFMods/WowsExtractor'
     sys.path.insert(0, str(root))
     expected_modules = ('Main.py', 'battle_identity.py', 'damage_tracker.py',
                         'emit_guard.py', 'ui_health.py', 'torpedo_telemetry.py',
                         'submarine_telemetry.py', 'map_calibration.py',
-                        'performance_profiler.py')
+                        'performance_profiler.py', 'ttaro_prefs_adapter.py',
+                        'ttaro_prefs_binding.py')
     missing = [name for name in expected_modules if not (root / name).is_file()]
     if missing:
         raise SystemExit('Missing required collector modules: ' + ', '.join(missing))
-    parser = RefactoringTool(['lib2to3.fixes.fix_except'])
     paths = sorted(root.glob('*.py'))
-    for path in paths:
-        parser.refactor_string(path.read_text(encoding='utf-8'), str(path))
+    if RefactoringTool is not None:
+        warnings.filterwarnings('ignore', category=DeprecationWarning)
+        parser = RefactoringTool(['lib2to3.fixes.fix_except'])
+        for path in paths:
+            parser.refactor_string(path.read_text(encoding='utf-8'), str(path))
+    else:
+        for path in paths:
+            _fix_except_py2(path.read_text(encoding='utf-8'))
     print('Python 2 grammar parsed:', len(paths), 'modules')
     print('Required modules:', ', '.join(expected_modules))
-    source = str(parser.refactor_string((root / 'Main.py').read_text(), 'Main.py'))
+    main_source = (root / 'Main.py').read_text(encoding='utf-8')
+    source = (str(RefactoringTool(['lib2to3.fixes.fix_except']).refactor_string(
+        main_source, 'Main.py')) if RefactoringTool is not None
+        else _fix_except_py2(main_source))
     source = source.replace('gCollector = Collector()', 'gCollector = None')
     ns = {'__name__': 'offline_collector', '__file__': str(root / 'Main.py'), '__package__': None}
     exec(compile(source, str(root / 'Main.py'), 'exec'), ns)
     from torpedo_telemetry import TorpedoTelemetry, TorpedoSamplingGroups, TorpedoMotion
     from submarine_telemetry import safe_submarine_probe
-    api = Obj(getAllTorpedoes=lambda: [Obj(uiId=1, ownerId=3, ownerTeamId=0,
+    api = Obj(getAllTorpedoes=lambda: [Obj(uiId=1, ownerId=3, ownerTeamId=1,
         ownerType='Ship', shotId=2, type='future_type', position=(1, -2, 3))])
     collector = ns['Collector'].__new__(ns['Collector'])
     collector._remember_roster_vehicles = lambda entities: None
     collector._collect_avatar_health = lambda entities: {}
     collector._build_ships = lambda now, hp, entities, players: ([{'uiId': 5}], {})
-    collector._build_self = lambda hp, info=None, ship=None: {'teamId': 0}
+    collector._build_self = lambda hp, info=None, ship=None: {
+        'teamId': 0, 'identityCandidates': []}
     collector._self_team = lambda info=None: 0
     collector._torpedoes = TorpedoTelemetry(api, Obj())
     collector._damage = Obj(snapshot=lambda: {'inflicted': {}, 'received': {}, 'teamTotal': {}})
@@ -110,20 +131,23 @@ def main():
     original_battle = ns['battle']
     ns['battle'] = Obj(getSelfPlayerInfo=lambda: Obj(teamId=0),
                        getSelfPlayerShip=lambda: Obj())
-    collector._build_self = lambda *args: {'teamId': 0, 'position': [0., 0., 0.],
-                                           'isObserver': False}
+    collector._build_self = lambda *args: {
+        'teamId': 0, 'position': [0., 0., 0.], 'isObserver': False,
+        'identityCandidates': []}
     collector._build_ships = lambda *args: ([{'uiId': 5}], {'mapCalibration': fitted.snapshot()})
     collector._mapCalibration = fitted
-    far = Obj(uiId=1, ownerId=3, ownerTeamId=0, ownerType='Ship', shotId=2,
+    far = Obj(uiId=1, ownerId=3, ownerTeamId=1, ownerType='Ship', shotId=2,
               type='future_type', position=[0., 0., 1200.])
-    near = Obj(uiId=2, ownerId=3, ownerTeamId=0, ownerType='Ship', shotId=3,
+    near = Obj(uiId=2, ownerId=3, ownerTeamId=1, ownerType='Ship', shotId=3,
                type='future_type', position=[0., 0., 100.])
     collector._torpedoes = TorpedoTelemetry(Obj(getAllTorpedoes=lambda: [far, near]), Obj())
     collector._torpedoSamplingGroups.clear()
     collector._torpedoMotion.clear()
     first = collector._build_state(10.)
     assert abs(first['torpedoStatus']['sampling']['classification']['radiusWorld'] - 600.) < 1e-8
-    assert all(row['sampling']['group'] == 'high' for row in first['torpedoes'])
+    first_groups = dict((row['uiId'], row['sampling']['group'])
+                        for row in first['torpedoes'])
+    assert first_groups == {1: 'low', 2: 'high'}
     classified = collector._build_state(15.)
     assert classified['torpedoes'][0]['sampling']['group'] == 'low'
     skipped = collector._build_state(15.2)
@@ -158,7 +182,8 @@ def main():
     ns['safe_submarine_probe'] = fail
     snap = collector._build_state(3.)
     assert snap['ships'] == [{'uiId': 5}]
-    assert snap['self'] == {'teamId': 0}
+    assert snap['self'].get('teamId') == 0
+    assert isinstance(snap['self'].get('identityCandidates'), list)
     assert snap['selfSubmarineProbe']['status'] == 'unknown'
     assert snap['waveHitProbe']['status'] == 'unknown'
     json.dumps(snap, allow_nan=False)

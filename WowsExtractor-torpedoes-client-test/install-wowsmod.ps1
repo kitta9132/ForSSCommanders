@@ -30,9 +30,17 @@ $script:PythonFiles = @(
     'torpedo_telemetry.py',
     'submarine_telemetry.py',
     'map_calibration.py',
-    'performance_profiler.py'
+    'performance_profiler.py',
+    'ttaro_prefs_adapter.py',
+    'ttaro_prefs_binding.py'
 )
 $script:CopyFiles = @($script:PythonFiles + 'config.example.ini')
+
+# Our own TTaro Mod Config schema. It is placed under res_mods/ModSchemas and
+# is writer-independent: the installer only ever touches this exact file name,
+# so framework-owned and other mods' schemas are never enumerated or moved.
+$script:SchemaFiles = @('kitta-wows-extractor.schema.json')
+$script:SchemaRelativeDir = 'res_mods\ModSchemas'
 $script:Manifest = @{}
 
 # ATM means AndrewTaro/AdvancedTorpedoMarker. These are the only files that
@@ -403,9 +411,13 @@ function Assert-SourceIntegrity {
     }
     Assert-SourceFile -FullPath (Join-Path $sourceMod 'config.example.ini') `
         -RelativePath 'res_mods/PnFMods/WowsExtractor/config.example.ini'
+    foreach ($name in $script:SchemaFiles) {
+        Assert-SourceFile -FullPath (Join-Path (Join-Path $SourceResMods 'ModSchemas') $name) `
+            -RelativePath ('res_mods/ModSchemas/' + $name)
+    }
     Assert-SourceFile -FullPath (Join-Path $SourceResMods 'PnFModsLoader.py') `
         -RelativePath 'res_mods/PnFModsLoader.py' -AllowEmpty
-    Write-Ok "Source integrity verified: $($script:PythonFiles.Count) Python files, config.example.ini, PnFModsLoader.py"
+    Write-Ok "Source integrity verified: $($script:PythonFiles.Count) Python files, config.example.ini, $($script:SchemaFiles.Count) schema file(s), PnFModsLoader.py"
 }
 
 function Assert-TargetBuild {
@@ -474,6 +486,8 @@ $targetLoader = Join-Path $resMods 'PnFModsLoader.py'
 $sourceResMods = Join-Path $scriptDir 'res_mods'
 $sourceMod = Join-Path $sourceResMods 'PnFMods\WowsExtractor'
 $sourceLoader = Join-Path $sourceResMods 'PnFModsLoader.py'
+$sourceSchemas = Join-Path $sourceResMods 'ModSchemas'
+$targetSchemas = Join-Path $resMods 'ModSchemas'
 $manifestPath = Join-Path $scriptDir 'SHA256SUMS.txt'
 $backupRoot = Join-Path $resMods '_wowsmod_backups'
 
@@ -488,6 +502,19 @@ try {
     $loaderItem = Get-Item -LiteralPath $targetLoader -Force -ErrorAction SilentlyContinue
     if ($null -ne $loaderItem -and $loaderItem.PSIsContainer) {
         throw "This path exists but is not a file: $targetLoader"
+    }
+    $schemaExisting = @()
+    if (Test-Path -LiteralPath $targetSchemas -PathType Container) {
+        foreach ($name in $script:SchemaFiles) {
+            $targetSchema = Join-Path $targetSchemas $name
+            $schemaItem = Get-Item -LiteralPath $targetSchema -Force -ErrorAction SilentlyContinue
+            if ($null -ne $schemaItem -and $schemaItem.PSIsContainer) {
+                throw "This path exists but is not a file: $targetSchema"
+            }
+            if ($null -ne $schemaItem) {
+                $schemaExisting += $name
+            }
+        }
     }
     $atmItems = @(Get-AtmItems -ResModsPath $resMods)
 } catch {
@@ -528,6 +555,12 @@ if ($DryRun) {
     } else {
         Write-Host "  PnFModsLoader  : no - the bundled file would be copied (0 bytes is normal)"
     }
+    if ($schemaExisting.Count -gt 0) {
+        Write-Host "  ModSchemas     : $($schemaExisting -join ', ') present - only this file is replaced (backed up first)"
+        Write-Host "                   other ModSchemas files stay untouched"
+    } else {
+        Write-Host "  ModSchemas     : not present - our schema would be placed; other schemas stay untouched"
+    }
     if ($WithAtm) {
         Write-Host "  ATM mode       : keep (explicit -WithAtm)"
         if ($atmItems.Count -gt 0) {
@@ -549,7 +582,7 @@ if ($DryRun) {
             Write-Host ("                     -> {0}" -f (Join-Path $plannedAtmBackup $atmItem.RelativePath))
         }
         Write-Host "  ATM keep       : PnFModsLoader.py, TTaroModUtils, ATM schema and images"
-        Write-Host "  ATM restore    : restore-atm-13357625.bat (after the no-ATM test)"
+        Write-Host "  ATM restore    : restore-atm.bat (after the no-ATM test)"
     } else {
         Write-Host "  ATM mode       : disable (default)"
         Write-Host "  ATM disable    : no ATM load files detected - nothing to move"
@@ -574,7 +607,7 @@ if ($DryRun) {
 if ($needsAdmin -and -not $isAdmin) {
     if ($Elevated) {
         Write-Err "Administrator rights are still not available."
-        Write-Err "Right-click install-13357625.bat and choose 'Run as administrator'."
+        Write-Err "Right-click install.bat and choose 'Run as administrator'."
         Exit-Installer 4
     }
     Write-Info "Administrator rights are required for the target folder."
@@ -583,7 +616,7 @@ if ($needsAdmin -and -not $isAdmin) {
         $childExitCode = Invoke-ElevatedSelf
     } catch {
         Write-Err "Elevation was cancelled or failed: $($_.Exception.Message)"
-        Write-Err "Right-click install-13357625.bat and choose 'Run as administrator'."
+        Write-Err "Right-click install.bat and choose 'Run as administrator'."
         Exit-Installer 4
     }
     Exit-Installer $childExitCode
@@ -600,6 +633,8 @@ $atmBackupPath = $null
 $atmManifestPath = $null
 $atmDetected = $false
 $atmKept = $false
+$schemaBackupPath = $null
+$schemaRestore = @()
 
 try {
     Stop-IfGameRunning
@@ -725,6 +760,48 @@ try {
         }
     }
 
+    # Own TTaro Mod Config schema. Only the allow-listed file name is touched;
+    # framework-owned and other mods' schemas are never enumerated or moved.
+    [void][IO.Directory]::CreateDirectory($targetSchemas)
+    foreach ($name in $script:SchemaFiles) {
+        $sourceSchema = Join-Path $sourceSchemas $name
+        $targetSchema = Join-Path $targetSchemas $name
+        $schemaItemNow = Get-Item -LiteralPath $targetSchema -Force -ErrorAction SilentlyContinue
+        if ($null -ne $schemaItemNow -and $schemaItemNow.PSIsContainer) {
+            throw "This path exists but is not a file: $targetSchema"
+        }
+        if ($null -ne $schemaItemNow) {
+            $schemaBeforeHash = (Get-FileHash -LiteralPath $targetSchema -Algorithm SHA256).Hash.ToLowerInvariant()
+            $schemaSourceHash = (Get-FileHash -LiteralPath $sourceSchema -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($schemaBeforeHash -eq $schemaSourceHash) {
+                Write-Ok ("Schema already up to date: ModSchemas\{0}" -f $name)
+                continue
+            }
+            if ($null -eq $schemaBackupPath) {
+                $schemaBackupPath = Get-UniquePath (Join-Path $backupRoot ("ModSchemas_{0}" -f $timestamp))
+                [void][IO.Directory]::CreateDirectory($schemaBackupPath)
+            }
+            $schemaBackup = Join-Path $schemaBackupPath $name
+            Copy-Item -LiteralPath $targetSchema -Destination $schemaBackup -Force -ErrorAction Stop
+            $schemaRestore += [pscustomobject]@{
+                Name = $name
+                Backup = $schemaBackup
+                Target = $targetSchema
+            }
+            Write-Ok ("Existing schema backed up: ModSchemas\{0}" -f $name)
+        }
+        Copy-And-Verify -Source $sourceSchema -Destination $targetSchema `
+            -Label ('ModSchemas\' + $name)
+    }
+    foreach ($name in $script:SchemaFiles) {
+        $relative = 'res_mods/ModSchemas/' + $name
+        $expected = Get-ExpectedHash $relative
+        $actual = (Get-FileHash -LiteralPath (Join-Path $targetSchemas $name) -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actual -ne $expected) {
+            throw "Installed schema verification failed: $relative"
+        }
+    }
+
     Write-Host ""
     Write-Ok "Installation completed successfully."
     Write-Host "  Mod folder    : $targetMod"
@@ -743,10 +820,14 @@ try {
     } else {
         Write-Host "  PnFModsLoader : existing file left untouched"
     }
+    Write-Host "  ModSchemas    : $($script:SchemaFiles -join ', ') installed (other schemas untouched)"
+    if ($schemaBackupPath) {
+        Write-Host "  Schema backup : $schemaBackupPath"
+    }
     if ($atmBackupPath) {
         Write-Host "  ATM           : disabled - ATM-only load files were moved out"
         Write-Host "  ATM backup    : $atmBackupPath"
-        Write-Host "  ATM restore   : restore-atm-13357625.bat (run after the no-ATM test)"
+        Write-Host "  ATM restore   : restore-atm.bat (run after the no-ATM test)"
         Write-Host "  ATM shared    : PnFModsLoader.py and TTaroModUtils were left untouched"
     } elseif ($atmKept) {
         Write-Host "  ATM           : kept - explicit -WithAtm (ATM load files were not moved)"
@@ -778,6 +859,16 @@ try {
         } catch {
             $rollbackMessages.Add("Could not restore ATM automatically: $($_.Exception.Message)")
             $rollbackMessages.Add("ATM backup is safe at: $script:AtmBackupPath")
+        }
+    }
+
+    foreach ($schemaEntry in $schemaRestore) {
+        try {
+            Copy-Item -LiteralPath $schemaEntry.Backup -Destination $schemaEntry.Target -Force -ErrorAction Stop
+            $rollbackMessages.Add("Restored previous schema: ModSchemas\$($schemaEntry.Name)")
+        } catch {
+            $rollbackMessages.Add("Could not restore schema ModSchemas\$($schemaEntry.Name): $($_.Exception.Message)")
+            $rollbackMessages.Add("Schema backup is safe at: $($schemaEntry.Backup)")
         }
     }
 
@@ -823,6 +914,6 @@ try {
     foreach ($message in $rollbackMessages) {
         Write-Info $message
     }
-    Write-Err "If access was denied, right-click install-13357625.bat and choose 'Run as administrator'."
+    Write-Err "If access was denied, right-click install.bat and choose 'Run as administrator'."
     Exit-Installer 5
 }

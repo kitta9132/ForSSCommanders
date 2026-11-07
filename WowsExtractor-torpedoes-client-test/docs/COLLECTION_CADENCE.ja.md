@@ -1,6 +1,6 @@
 # 現行の収集頻度表
 
-対象：0.3.40-radius-l5。標準設定`state_interval=0.2`のcore tickを基準にする。以下はゲームからの採取・計算の目安で、厳密なHzや全遷移捕捉を保証しない。設定によってcoreが遅ければ、各群もそれより速く採取できない。
+対象：0.3.41-team-torpedo-budget。標準設定`state_interval=0.2`のcore tickを基準にする。以下はゲームからの採取・計算の目安で、厳密なHzや全遷移捕捉を保証しない。設定によってcoreが遅ければ、各群もそれより速く採取できない。
 
 collectionは既定OFF。専用opt-in／heavy diagnostics／profilerも既定OFFであり、表の周期を記載しただけで有効になるわけではない。[出力契約](OUTPUT_SPEC.ja.md)／[設定](INSTALL.ja.md)を参照。過去の[B31頻度調査](RESEARCH_COLLECTION_CADENCE_B31.ja.md)は現況表ではない。
 
@@ -9,16 +9,18 @@ collectionは既定OFF。専用opt-in／heavy diagnostics／profilerも既定OFF
 | 対象・処理 | 標準周期 | 条件・注意 |
 | --- | --- | --- |
 | 全魚雷の列挙・最小ID・membership | core、約5Hz | 遠距離非dueでも一覧の識別を観測。完全性／不明IDを別に示す |
-| 自艦発射と確認できた魚雷の詳細 | HIGH、目標5Hz | 距離に関係なくhigh。ownerの`isPlayer`が厳密bool Trueである観測を使い、ownerIdのnamespace推測で補わない |
-| その他の魚雷・半径L/5以内／境界上 | HIGH、目標5Hz | Lはマップ短辺の較正由来world長。物理kmの保証ではない |
-| その他の魚雷・半径L/5より外 | LOW、平均約2Hz | 0.5秒期限をcore tickへ量子化するため約0.4／0.6秒等に変動 |
-| 新規・距離判定不能・分類context喪失 | 暫定／安全側HIGH | 所有者不明を自艦と断定する意味ではない |
-| 距離による枠再分類 | 約5秒ごと | 自艦例外以外のfar→near昇格は次回分類まで待つ場合がある |
+| 自艦発射と確認できた魚雷の詳細 | HIGH、目標5Hz | 距離に関係なくhigh。ownerの`isPlayer`が厳密bool Trueである観測を使い、ownerIdのnamespace推測で補わない。敵予算に数えない |
+| 確認済み味方の魚雷 | LOW、平均約2Hz | 厳密な同一チーム関係かつ`isPlayer`が厳密False。距離に関係なくlow、初観測もlow |
+| 敵魚雷・半径内かつ予算内 | HIGH、目標5Hz | `R=min(mapWidth,mapHeight)/radius_divisor`（既定L/5、較正world長）。予算は最近の敵`enemy_high_budget`本（既定20） |
+| 敵魚雷・半径外または予算超過 | LOW、平均約2Hz | 0.5秒期限をcore tickへ量子化するため約0.4／0.6秒等に変動。再配分は5秒再分類のときだけ |
+| チーム不明・距離不明・同一チームで`isPlayer`不明 | 安全側HIGH | 敵予算に数えない。不明を自艦と断定する意味ではない |
+| 新規・分類context喪失 | 暫定／安全側HIGH | 新規の敵は初観測で予算へ参加、初観測は必ず出力。一斉HIGH burstは出さない |
+| チーム・距離による枠再分類 | 約5秒ごと | 既存LOW敵のfar→near・予算内昇格は次回分類まで待つ場合がある |
 | owner詳細・motion・地図変換 | 各魚雷の今回sampleと同周期 | low非dueでは省略し、前回の位置／owner／派生値を現在値としてコピーしない |
 | 魚雷UI深度の専用probe | 既定1Hz・最小間隔1秒 | `torpedo_depth_sampling_enabled`必須。固定候補のraw、意味・単位は未確定 |
 | ATM等の誘導／被発見候補probe | 既定1Hz・最小間隔1秒 | `torpedo_state_sampling_enabled`必須。第三者由来値と供給元unknownを区別、最大64候補 |
 
-**0.3.40で半径をL/3からL/5へ正式変更した。** L=min(map width,height)の較正world基準、境界上をHIGHに含める判定、5秒再分類、近5Hz／遠平均2Hzは変更しない。L/5とL/3の間にある魚雷はLOWになる。自艦HIGH例外は情報量削減ではなく、自艦魚雷の遠方詳細取得を増やす変更であり、FPS改善策と呼ばない。所有者不明はunknownを維持し、距離ルールに従う。ownerIdの推測joinやnear本数budgetは行わない。low非dueでは所有者を再取得せず、後のdue sampleでTrueと確認できた時点でhighへ昇格する。coreを0.1秒にしてもHIGH期限は0.2秒のまま。
+**0.3.41でチーム関係と自艦判定を分類へ加えた。** 半径`R=min(map width,height)/radius_divisor`の較正world基準、境界上をHIGHに含める判定、5秒再分類、HIGH 0.2秒／LOW 0.5秒は変更しない。strict `isPlayer is True`の自艦は全距離HIGHで敵予算外、strict同一チームかつ`isPlayer is False`の確認済み味方は全距離LOW（初観測含む）。半径内の敵は最近`enemy_high_budget`本（既定20）だけHIGH、残り・半径外はLOW。チーム不明・距離不明・同一チームで`isPlayer`不明は安全側HIGHで敵予算外。新規敵は初観測で予算へ参加し、一斉HIGH burstは出さない。ownerIdの推測joinは行わない。low非dueでは詳細を再取得せず、前回値を現在値としてコピーしない。coreを0.1秒にしてもHIGH期限は0.2秒のまま。自艦HIGHは情報量削減ではなく、自艦魚雷の遠方詳細を増やす例外でありFPS改善策と呼ばない。詳細は[チーム別魚雷サンプリング](TEAM_TORPEDO_BUDGET.ja.md)。
 
 ## 艦・自艦・診断など
 

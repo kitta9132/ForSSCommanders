@@ -562,11 +562,14 @@ def test_every_documented_field_owner_and_zero_ids_survive():
         return owner
 
     rows, status = adapter(getAllTorpedoes=lambda: [torpedo(), torpedo(uiId=1)],
-                           getTorpedoOwnerById=get_owner).torpedoes(self_team=0)
+                           getTorpedoOwnerById=get_owner).torpedoes(
+                               self_team=0, self_ship_id=77)
     assert status['available'] is True
     assert rows[0] == dict(uiId=0, ownerId=77, ownerTeamId=0, ownerType='Ship',
                           shotId=4, type='Torpedo', position=[12., -3., 25.],
-                          relation=1, owner=vars(owner), isOwn=True)
+                          relation=1, owner=vars(owner), isOwn=True,
+                          isOwnSource='battle.getSelfPlayerInfo().shipId == torpedo.ownerId',
+                          isOwnReason='exactSelfShipIdMatch')
     assert calls == [77]  # one owner lookup per snapshot, not per torpedo
     json.dumps(rows, allow_nan=False)
 

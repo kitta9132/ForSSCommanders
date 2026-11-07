@@ -2683,6 +2683,228 @@ _SAMPLING_EPSILON = 1e-9
 _SAMPLING_HIGH = 'high'
 _SAMPLING_LOW = 'low'
 
+# --- production policy settings (0.3.41-team-torpedo-budget) ----------------
+# Single source of truth for the current policy. The UI adapter contract below
+# publishes only the two user-facing knobs (classification radius divisor and
+# the nearest-enemy high budget) so a future TTaro Mod Config layer can render
+# them without coupling to the sampler or exposing unrelated settings.
+TORPEDO_SAMPLING_POLICY = '0.3.41-team-torpedo-budget'
+SAMPLING_RADIUS_DIVISOR = 5.0
+SAMPLING_ENEMY_HIGH_BUDGET = 20
+SAMPLING_ALLY_LOW = True
+
+SAMPLING_SETTING_RANGES = {
+    'radius_divisor': (1.0, 100.0),
+    'enemy_high_budget': (1, 512),
+    'high_interval': (0.02, 600.0),
+    'low_interval': (0.02, 3600.0),
+    'classification_interval': (0.05, 3600.0),
+}
+SAMPLING_UI_SETTING_KEYS = ('radius_divisor', 'enemy_high_budget')
+
+
+def _sampling_setting_float(value, default, low, high):
+    if isinstance(value, bool):
+        return default, 'nonNumeric'
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default, 'nonNumeric'
+    if not _finite(number):
+        return default, 'nonFinite'
+    if number < low:
+        return low, 'clampedLow'
+    if number > high:
+        return high, 'clampedHigh'
+    return number, None
+
+
+def _sampling_setting_int(value, default, low, high):
+    if isinstance(value, bool):
+        return default, 'nonNumeric'
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return default, 'nonNumeric'
+    if number < low:
+        return low, 'clampedLow'
+    if number > high:
+        return high, 'clampedHigh'
+    return number, None
+
+
+def _sampling_setting_bool(value, default):
+    if type(value) is bool:
+        return value, None
+    if isinstance(value, STRING_TYPES):
+        text = value.strip().lower()
+        if text == 'true':
+            return True, None
+        if text == 'false':
+            return False, None
+    return default, 'nonBoolean'
+
+
+class TorpedoSamplingSettings(object):
+    """Validated snapshot of the team torpedo sampling policy.
+
+    Values are the only durable policy input; the sampler holds no other policy
+    globals. A ``source`` label and a monotonic ``revision`` are kept minimal so
+    the wire stays small and future config migrations can detect a change.
+    """
+
+    KEYS = ('radius_divisor', 'enemy_high_budget', 'high_interval',
+            'low_interval', 'classification_interval', 'ally_low')
+
+    def __init__(self, radius_divisor=SAMPLING_RADIUS_DIVISOR,
+                 enemy_high_budget=SAMPLING_ENEMY_HIGH_BUDGET,
+                 high_interval=SAMPLING_HIGH_INTERVAL,
+                 low_interval=SAMPLING_LOW_INTERVAL,
+                 classification_interval=SAMPLING_CLASSIFICATION_INTERVAL,
+                 ally_low=SAMPLING_ALLY_LOW, source='default',
+                 revision=0, issues=None):
+        self.radius_divisor = radius_divisor
+        self.enemy_high_budget = enemy_high_budget
+        self.high_interval = high_interval
+        self.low_interval = low_interval
+        self.classification_interval = classification_interval
+        self.ally_low = ally_low
+        self.source = source if isinstance(source, STRING_TYPES) else 'unknown'
+        self.revision = revision
+        self.issues = list(issues or [])
+
+    def signature(self):
+        return (self.radius_divisor, self.enemy_high_budget,
+                self.high_interval, self.low_interval,
+                self.classification_interval, self.ally_low)
+
+    def values(self):
+        return {'policy': TORPEDO_SAMPLING_POLICY,
+                'radiusDivisor': self.radius_divisor,
+                'enemyHighBudget': self.enemy_high_budget,
+                'highInterval': self.high_interval,
+                'lowInterval': self.low_interval,
+                'classificationInterval': self.classification_interval,
+                'allyLow': self.ally_low,
+                'source': self.source,
+                'revision': self.revision}
+
+
+def normalize_torpedo_sampling_settings(raw, source='config', revision=0):
+    """Build validated settings from a mapping; never raises on bad input."""
+    settings = TorpedoSamplingSettings(source=source, revision=revision)
+    if not isinstance(raw, dict):
+        return settings
+    issues = []
+    present = (
+        ('radius_divisor', raw.get('radius_divisor', raw.get('radiusDivisor'))),
+        ('enemy_high_budget', raw.get('enemy_high_budget',
+                                      raw.get('enemyHighBudget'))),
+        ('high_interval', raw.get('high_interval', raw.get('highInterval'))),
+        ('low_interval', raw.get('low_interval', raw.get('lowInterval'))),
+        ('classification_interval', raw.get('classification_interval',
+                                            raw.get('classificationInterval'))),
+    )
+    for key, value in present:
+        if value is None:
+            continue
+        low, high = SAMPLING_SETTING_RANGES[key]
+        if key == 'enemy_high_budget':
+            resolved, issue = _sampling_setting_int(
+                value, getattr(settings, key), low, high)
+        else:
+            resolved, issue = _sampling_setting_float(
+                value, getattr(settings, key), low, high)
+        setattr(settings, key, resolved)
+        if issue:
+            issues.append((key, issue))
+    if 'ally_low' in raw or 'allyLow' in raw:
+        value = raw.get('ally_low', raw.get('allyLow'))
+        if value is not None:
+            resolved, issue = _sampling_setting_bool(value, settings.ally_low)
+            settings.ally_low = resolved
+            if issue:
+                issues.append(('ally_low', issue))
+    settings.issues = issues
+    return settings
+
+
+def torpedo_sampling_ui_contract(settings=None):
+    """Stable UI-adapter contract for the two published policy knobs.
+
+    Only the classification radius divisor and the nearest-enemy high budget
+    are published. The remaining values stay internal so a config layer cannot
+    accidentally expose unrelated collector settings or force a wire migration.
+    """
+    current = (settings if isinstance(settings, TorpedoSamplingSettings)
+               else TorpedoSamplingSettings())
+    fields = []
+    for key, label, kind in (
+            ('radius_divisor',
+             'Classification radius divisor (short map side / N)', 'float'),
+            ('enemy_high_budget',
+             'Nearest enemy high-rate slots inside the radius', 'int')):
+        low, high = SAMPLING_SETTING_RANGES[key]
+        fields.append({'key': key, 'label': label, 'type': kind,
+                       'min': low, 'max': high,
+                       'step': 1.0 if kind == 'float' else 1,
+                       'value': getattr(current, key)})
+    return {
+        'policy': TORPEDO_SAMPLING_POLICY,
+        'source': current.source,
+        'revision': current.revision,
+        'publishedFields': list(SAMPLING_UI_SETTING_KEYS),
+        'fields': fields,
+        'internalFields': [key for key in TorpedoSamplingSettings.KEYS
+                           if key not in SAMPLING_UI_SETTING_KEYS],
+    }
+
+
+def _sampling_relation(owner_team, self_team):
+    """Type-strict same/enemy relation; None when either team is unusable."""
+    if owner_team is None or self_team is None:
+        return None
+    if isinstance(owner_team, bool) or isinstance(self_team, bool):
+        return None
+    if not isinstance(owner_team, NUMBER_TYPES + STRING_TYPES):
+        return None
+    if not isinstance(self_team, NUMBER_TYPES + STRING_TYPES):
+        return None
+    if (isinstance(owner_team, NUMBER_TYPES) and not _finite(owner_team)) or (
+            isinstance(self_team, NUMBER_TYPES) and not _finite(self_team)):
+        return None
+    if type(owner_team) is type(self_team) and owner_team == self_team:
+        return 'same'
+    return 'enemy'
+
+
+def _sampling_relation_code(owner_team, self_team):
+    """Public 1/2/None relation code backed by the strict comparison."""
+    relation = _sampling_relation(owner_team, self_team)
+    if relation == 'same':
+        return 1
+    if relation == 'enemy':
+        return 2
+    return None
+
+
+def _sampling_team_class(is_own, relation):
+    """Resolve the policy class from strict ownership and team relation.
+
+    A same-team row whose ``isPlayer`` is not the literal ``False`` cannot be
+    told apart from the own ship, so it is kept on the safety-side high rather
+    than silently downgraded to a confirmed ally.
+    """
+    if is_own is True:
+        return 'own'
+    if relation == 'same':
+        if is_own is False:
+            return 'ally'
+        return 'allyUnknown'
+    if relation == 'enemy':
+        return 'enemy'
+    return 'unknown'
+
 
 def _sampling_key(ui_id, owner_id, shot_id):
     """Strict, type-exact identity key plus the owner key already computed."""
@@ -2695,17 +2917,72 @@ def _sampling_key(ui_id, owner_id, shot_id):
 
 
 def _owner_is_own(owner):
-    """Strict bool from the copied public owner row; never infer from ownerId."""
+    """Strict bool from the copied public owner row; never infer from ownerId.
+
+    This is kept as a raw observation only. Since 0.3.44 the actual isOwn
+    classification compares torpedo.ownerId against battle.getSelfPlayerInfo().
+    shipId in the same snapshot.
+    """
     value = _get(owner, 'isPlayer')
     return value if type(value) is bool else None
 
 
-def _sampling_context(context):
-    """Validate the parent's world-space classification context."""
+def _self_id_own(owner_id, self_ship_id):
+    """Strict type+value comparison of torpedo ownerId and self shipId.
+
+    No inference, no coercion, no fallback to owner.isPlayer. A type mismatch
+    is treated as uncomparable (None) rather than a false ally.
+    """
+    result = {'isOwn': None,
+              'source': 'battle.getSelfPlayerInfo().shipId == torpedo.ownerId',
+              'reason': None}
+    if _identity_reject(self_ship_id) is not None:
+        result['reason'] = 'selfShipIdUnavailable'
+        return result
+    reject = _identity_reject(owner_id)
+    if reject is not None:
+        result['reason'] = reject
+        return result
+    if type(owner_id) is not type(self_ship_id):
+        result['reason'] = 'typeMismatch'
+        return result
+    if owner_id == self_ship_id:
+        result['isOwn'] = True
+        result['reason'] = 'exactSelfShipIdMatch'
+    else:
+        result['isOwn'] = False
+        result['reason'] = 'selfShipIdDiffers'
+    return result
+
+
+def _sampling_radius_divisor_label(divisor):
+    """Human-readable radius source. 5.0 keeps the historical L/5 label."""
+    try:
+        if float(divisor) == int(divisor):
+            return 'min(mapWidth,mapHeight)/{}'.format(int(divisor))
+    except (TypeError, ValueError):
+        pass
+    return 'min(mapWidth,mapHeight)/{}'.format(divisor)
+
+
+def _sampling_context(context, radius_divisor=5.0):
+    """Validate the parent's world-space classification context.
+
+    ``radius_divisor`` is the only geometry knob: the classified near radius is
+    ``min(mapWidth, mapHeight) / radius_divisor``. It defaults to the historical
+    5.0 so research and legacy replays keep their captured geometry.
+    """
     info = {'status': 'unknown', 'reason': 'contextMissing',
             'x': None, 'z': None, 'width': None, 'height': None,
             'radius': None, 'radiusSquared': None, 'source': None,
-            'inferred': False, 'normalized': False}
+            'inferred': False, 'normalized': False,
+            'radiusDivisor': None, 'radiusSource': None}
+    try:
+        divisor = float(radius_divisor)
+    except (TypeError, ValueError):
+        divisor = 5.0
+    if not _finite(divisor) or divisor <= 0:
+        divisor = 5.0
     if not isinstance(context, dict):
         return info
     source = context.get('source')
@@ -2722,15 +2999,16 @@ def _sampling_context(context):
             width <= 0 or height <= 0):
         info['reason'] = 'mapDimensionsUnavailable'
         return info
-    # Calibrated world-space radius: one fifth of the map's short side.
-    radius = min(width, height) / 5.0
+    radius = min(width, height) / divisor
     if not _finite(radius) or radius <= 0:
         info['reason'] = 'radiusUnavailable'
         return info
     info.update({'status': 'available', 'reason': None,
                  'x': self_position[0], 'z': self_position[2],
                  'width': width, 'height': height, 'radius': radius,
-                 'radiusSquared': radius * radius})
+                 'radiusSquared': radius * radius,
+                 'radiusDivisor': divisor,
+                 'radiusSource': _sampling_radius_divisor_label(divisor)})
     return info
 
 
@@ -2754,8 +3032,12 @@ def _sampling_distance(info, position):
     return 'far', distance_squared
 
 
-class TorpedoSamplingGroups(object):
+class LegacyTorpedoSamplingGroups(object):
     """Numeric-only 5s classification and 5Hz/2Hz group schedule.
+
+    This is the pre-0.3.41 distance-only policy, kept verbatim so research
+    candidates and pinned historical replays keep their captured numbers. New
+    runtime behavior lives in ``TorpedoSamplingGroups`` below.
 
     State contains identifiers, group, deadlines and numeric distance values.
     Game entities, owner objects and previous positions are never retained.
@@ -2941,7 +3223,7 @@ class TorpedoSamplingGroups(object):
             'nextDue': self._next_classification,
             'intervalSeconds': self.CLASSIFICATION_INTERVAL,
             'radiusWorld': info['radius'],
-            'radiusSource': ('min(mapWidth,mapHeight)/5'
+            'radiusSource': (info.get('radiusSource')
                              if available_context else None),
             'radiusSquared': info['radiusSquared'],
             'mapWidth': info['width'], 'mapHeight': info['height'],
@@ -3170,6 +3452,481 @@ class TorpedoSamplingGroups(object):
                 del self._entries[key]
 
 
+class TorpedoSamplingGroups(LegacyTorpedoSamplingGroups):
+    """0.3.41 team-aware torpedo sampling.
+
+    Rules applied on top of the numeric distance schedule:
+
+    * strict ``owner.isPlayer is True`` is high at every distance and is never
+      counted against the enemy budget;
+    * a confirmed ally (strict same-team relation and ``isPlayer is False``) is
+      low at every distance, including its first observation;
+    * enemies with a valid identity and known distance compete for the nearest
+      ``enemy_high_budget`` high slots inside ``min(mapWidth,mapHeight)/divisor``;
+      farther or over-budget enemies stay low;
+    * an enemy with unknown distance, an unknown team, or a same-team row whose
+      ``isPlayer`` cannot be told apart from the own ship is a safety high that
+      does not consume an enemy slot;
+    * context loss keeps own high, confirmed allies low and every other
+      identity high.
+
+    Only validated numeric settings feed the schedule; the class never reads
+    live game objects or reuses a previous position.
+    """
+
+    def __init__(self, settings=None):
+        self._settings = (settings if isinstance(settings, TorpedoSamplingSettings)
+                          else TorpedoSamplingSettings())
+        self._apply_interval_attributes(self._settings)
+        self.radius_divisor = self._settings.radius_divisor
+        self.enemy_high_budget = self._settings.enemy_high_budget
+        self.ally_low = self._settings.ally_low
+        self._team_policy = {}
+        self.clear()
+
+    def _apply_interval_attributes(self, settings):
+        # Instance-level shadowing keeps the legacy methods' interval reads
+        # working while allowing a validated settings snapshot to override them.
+        self.HIGH_INTERVAL = settings.high_interval
+        self.LOW_INTERVAL = settings.low_interval
+        self.CLASSIFICATION_INTERVAL = settings.classification_interval
+
+    def clear(self):
+        LegacyTorpedoSamplingGroups.clear(self)
+        self._team_policy = {}
+        self._refresh_team_policy()
+
+    def apply_settings(self, settings, now=None):
+        """Apply a validated snapshot at a tick gate without clearing state.
+
+        Changing any period, budget or the radius divisor re-anchors existing
+        deadlines to the new interval but keeps every group. No classification
+        is forced, so a settings change cannot produce an all-high burst.
+        """
+        if settings is None:
+            return False
+        if not isinstance(settings, TorpedoSamplingSettings):
+            normalized = normalize_torpedo_sampling_settings(settings)
+            normalized.revision = self._settings.revision
+            settings = normalized
+        if settings.signature() == self._settings.signature():
+            self._settings = settings
+            return False
+        self._settings = settings
+        self._apply_interval_attributes(settings)
+        self.radius_divisor = settings.radius_divisor
+        self.enemy_high_budget = settings.enemy_high_budget
+        self.ally_low = settings.ally_low
+        for entry in self._entries.values():
+            group = entry.get('group')
+            interval = (self.HIGH_INTERVAL if group == _SAMPLING_HIGH
+                        else self.LOW_INTERVAL)
+            anchor = now if _finite(now) else entry.get('lastSampled')
+            if anchor is not None and _finite(anchor):
+                entry['nextDue'] = anchor + interval
+        if _finite(now) and self._last_classification is not None:
+            self._next_classification = now + self.CLASSIFICATION_INTERVAL
+        self._refresh_team_policy()
+        return True
+
+    def _team_class(self, observation):
+        return _sampling_team_class(observation.get('isOwn'),
+                                    observation.get('teamRelation'))
+
+    def _classified_group(self, team_class, distance_status, in_budget):
+        """Return (group, safety, category) for a fully classified row."""
+        if team_class == 'own':
+            return _SAMPLING_HIGH, False, 'own'
+        if team_class == 'ally':
+            return _SAMPLING_LOW, False, 'ally'
+        if team_class == 'enemy':
+            if distance_status == 'unknown':
+                return _SAMPLING_HIGH, True, 'unknownDistance'
+            if distance_status == 'near' and in_budget:
+                return _SAMPLING_HIGH, False, 'enemyHigh'
+            return _SAMPLING_LOW, False, 'enemyLow'
+        if team_class == 'allyUnknown':
+            return _SAMPLING_HIGH, True, 'allyUnknown'
+        return _SAMPLING_HIGH, True, 'unknownTeam'
+
+    def _new_cadence_group(self, team_class, distance_status, enemy_high_count):
+        """Group for an identity first seen between classifications."""
+        if team_class == 'own':
+            return _SAMPLING_HIGH, False
+        if team_class == 'ally':
+            return _SAMPLING_LOW, False
+        if team_class == 'enemy':
+            if distance_status == 'unknown':
+                return _SAMPLING_HIGH, True
+            if (distance_status == 'near' and
+                    enemy_high_count < max(0, int(self.enemy_high_budget))):
+                return _SAMPLING_HIGH, False
+            return _SAMPLING_LOW, False
+        return _SAMPLING_HIGH, True
+
+    def _enemy_high_count(self):
+        count = 0
+        for entry in self._entries.values():
+            if (entry.get('teamClass') == 'enemy' and
+                    entry.get('distanceStatus') != 'unknown' and
+                    entry['group'] == _SAMPLING_HIGH):
+                count += 1
+        return count
+
+    def _refresh_team_policy(self):
+        counts = {'ownHigh': 0, 'allyLow': 0, 'enemyHigh': 0,
+                  'safetyHigh': 0, 'unknownTeamHigh': 0,
+                  'unknownDistanceHigh': 0, 'enemyLow': 0}
+        for entry in self._entries.values():
+            team_class = entry.get('teamClass')
+            group = entry.get('group')
+            if team_class == 'own':
+                counts['ownHigh'] += 1
+            elif team_class == 'ally':
+                counts['allyLow'] += 1
+            elif team_class == 'enemy':
+                if entry.get('distanceStatus') == 'unknown':
+                    counts['safetyHigh'] += 1
+                    counts['unknownDistanceHigh'] += 1
+                elif group == _SAMPLING_HIGH:
+                    counts['enemyHigh'] += 1
+                else:
+                    counts['enemyLow'] += 1
+            elif team_class in ('allyUnknown', 'unknown'):
+                counts['safetyHigh'] += 1
+                counts['unknownTeamHigh'] += 1
+        counts['enemyHighLimit'] = max(0, int(self.enemy_high_budget))
+        counts['policy'] = TORPEDO_SAMPLING_POLICY
+        counts['radiusDivisor'] = self.radius_divisor
+        self._team_policy = counts
+
+    def observe(self, observations, now, context, classification_due,
+                membership_complete, context_available=True, context_info=None):
+        if classification_due:
+            return self._observe_classification(
+                observations, now, context, membership_complete, context_info)
+        return self._observe_cadence(
+            observations, now, context_available, context_info)
+
+    def _observe_classification(self, observations, now, context,
+                                membership_complete, context_info=None):
+        info = (context_info if context_info is not None
+                else _sampling_context(context, self.radius_divisor))
+        observed = {}
+        near = far = unknown_distance = 0
+        facts = []
+        for observation in observations:
+            status = observation.get('identityStatus', 'unknown')
+            key = observation.get('key')
+            if status != 'available' or key is None:
+                facts.append(None)
+                continue
+            observed[key] = True
+            distance_status, distance_squared = _sampling_distance(
+                info, observation.get('position'))
+            if distance_status == 'near':
+                near += 1
+            elif distance_status == 'far':
+                far += 1
+            else:
+                unknown_distance += 1
+            facts.append({
+                'key': key,
+                'teamClass': (observation.get('teamClass') or
+                              self._team_class(observation)),
+                'distanceStatus': distance_status,
+                'distanceSquared': distance_squared})
+        candidates = []
+        for index, fact in enumerate(facts):
+            if fact is None:
+                continue
+            if (fact['teamClass'] == 'enemy' and
+                    fact['distanceStatus'] == 'near'):
+                candidates.append((fact['distanceSquared'], index))
+        # Stable sort on distance only: equal distances keep the enumeration
+        # order, so no strict identity value is ever compared.
+        candidates.sort(key=lambda item: item[0])
+        budget = max(0, int(self.enemy_high_budget))
+        high_slots = set(index for _distance, index in candidates[:budget])
+        new_count = changed_count = provisional_count = 0
+        sampled_high = sampled_low = 0
+        decisions = []
+        for index, observation in enumerate(observations):
+            fact = facts[index]
+            status = observation.get('identityStatus', 'unknown')
+            if fact is None:
+                reason = ('duplicateIdentity' if status == 'duplicate'
+                          else 'unknownIdentity')
+                decisions.append(self._decision(
+                    True, _SAMPLING_HIGH, self.HIGH_INTERVAL, reason, True,
+                    'unknown', None, now))
+                sampled_high += 1
+                provisional_count += 1
+                continue
+            key = fact['key']
+            group, safety, _category = self._classified_group(
+                fact['teamClass'], fact['distanceStatus'], index in high_slots)
+            previous = self._entries.get(key)
+            if previous is None:
+                new_count += 1
+            elif previous['group'] != group:
+                changed_count += 1
+            provisional = (previous is None) or safety
+            interval = (self.HIGH_INTERVAL if group == _SAMPLING_HIGH
+                        else self.LOW_INTERVAL)
+            self._entries[key] = {
+                'group': group, 'nextDue': now + interval,
+                'lastSampled': now, 'provisional': provisional,
+                'identity': observation.get('identity') or {},
+                'classifiedTs': now,
+                'distanceStatus': fact['distanceStatus'],
+                'distanceSquared': fact['distanceSquared'],
+                'firstSeen': (previous['firstSeen']
+                              if previous is not None else now),
+                'teamClass': fact['teamClass']}
+            if provisional:
+                provisional_count += 1
+            if group == _SAMPLING_HIGH:
+                sampled_high += 1
+            else:
+                sampled_low += 1
+            decisions.append(self._decision(
+                True, group, interval, 'classification', provisional,
+                fact['distanceStatus'], fact['distanceSquared'], now))
+        pruned = 0
+        if membership_complete:
+            remove = [key for key in list(self._entries.keys())
+                      if key not in observed]
+            for key in remove:
+                del self._entries[key]
+                pruned += 1
+        self._last_classification = now
+        self._next_classification = now + self.CLASSIFICATION_INTERVAL
+        self._classifications += 1
+        available_context = info['status'] == 'available'
+        self._classification = {
+            'status': 'available' if available_context else 'unknown',
+            'reason': info['reason'], 'ts': now,
+            'nextDue': self._next_classification,
+            'intervalSeconds': self.CLASSIFICATION_INTERVAL,
+            'radiusWorld': info['radius'],
+            'radiusSource': (info.get('radiusSource')
+                             if available_context else None),
+            'radiusSquared': info['radiusSquared'],
+            'mapWidth': info['width'], 'mapHeight': info['height'],
+            'mapSource': info['source'], 'mapInferred': info['inferred'],
+            'positionsNormalized': info['normalized'],
+            'selfPositionStatus': ('available' if available_context
+                                   else 'unknown'),
+            'nearCount': near, 'farCount': far,
+            'unknownDistanceCount': unknown_distance,
+            'classifiedCount': near + far + unknown_distance,
+            'newCount': new_count, 'groupChangeCount': changed_count,
+            'provisionalHighCount': provisional_count,
+            'prunedCount': pruned}
+        if sampled_high:
+            self._last_high_sample = now
+        if sampled_low:
+            self._last_low_sample = now
+        self._last_tick = {
+            'ts': now, 'classificationDue': True,
+            'highSampled': sampled_high > 0, 'lowSampled': sampled_low > 0,
+            'highCount': sampled_high, 'lowCount': sampled_low,
+            'newCount': new_count, 'prunedCount': pruned}
+        self._refresh_team_policy()
+        return decisions
+
+    def _observe_cadence(self, observations, now, context_available=True,
+                         context_info=None):
+        if not context_available:
+            return self._observe_safety_high(observations, now)
+        sampled_high = sampled_low = 0
+        new_count = 0
+        decisions = []
+        enemy_high_count = self._enemy_high_count()
+        for observation in observations:
+            status = observation.get('identityStatus', 'unknown')
+            key = observation.get('key')
+            if status != 'available' or key is None:
+                reason = ('duplicateIdentity' if status == 'duplicate'
+                          else 'unknownIdentity')
+                decisions.append(self._decision(
+                    True, _SAMPLING_HIGH, self.HIGH_INTERVAL, reason, True,
+                    'unknown', None, self._last_classification))
+                sampled_high += 1
+                continue
+            entry = self._entries.get(key)
+            if entry is None:
+                # First observation between classifications. Distance is only
+                # known because this row was read this tick; an unread row is
+                # not "new".
+                distance_status, distance_squared = _sampling_distance(
+                    context_info, observation.get('position'))
+                team_class = (observation.get('teamClass') or
+                              self._team_class(observation))
+                group, safety = self._new_cadence_group(
+                    team_class, distance_status, enemy_high_count)
+                if (team_class == 'enemy' and not safety and
+                        group == _SAMPLING_HIGH):
+                    enemy_high_count += 1
+                interval = (self.HIGH_INTERVAL if group == _SAMPLING_HIGH
+                            else self.LOW_INTERVAL)
+                self._entries[key] = {
+                    'group': group, 'nextDue': now + interval,
+                    'lastSampled': now, 'provisional': True,
+                    'identity': observation.get('identity') or {},
+                    'classifiedTs': self._last_classification,
+                    'distanceStatus': distance_status,
+                    'distanceSquared': distance_squared,
+                    'firstSeen': now, 'teamClass': team_class}
+                new_count += 1
+                if group == _SAMPLING_HIGH:
+                    sampled_high += 1
+                else:
+                    sampled_low += 1
+                decisions.append(self._decision(
+                    True, group, interval, 'new', True, distance_status,
+                    distance_squared, self._last_classification))
+                continue
+            group = entry['group']
+            team_class = entry.get('teamClass')
+            if 'teamClass' in observation:
+                team_class = observation['teamClass']
+            target = None
+            if team_class == 'own':
+                target = _SAMPLING_HIGH
+            elif team_class == 'ally':
+                target = _SAMPLING_LOW
+            promoted = target is not None and group != target
+            if promoted:
+                group = target
+                entry['group'] = group
+            if 'teamClass' in observation:
+                entry['teamClass'] = team_class
+            interval = (self.HIGH_INTERVAL if group == _SAMPLING_HIGH
+                        else self.LOW_INTERVAL)
+            if promoted or now + _SAMPLING_EPSILON >= entry['nextDue']:
+                entry['nextDue'] = (now + interval if promoted else
+                                    self._advance_due(
+                                        entry['nextDue'], now, interval))
+                entry['lastSampled'] = now
+                if group == _SAMPLING_HIGH:
+                    sampled_high += 1
+                else:
+                    sampled_low += 1
+                decisions.append(self._decision(
+                    True, group, interval,
+                    ('highDue' if group == _SAMPLING_HIGH else 'lowDue'),
+                    entry['provisional'], entry['distanceStatus'],
+                    entry['distanceSquared'], entry['classifiedTs']))
+            else:
+                decisions.append(self._decision(
+                    False, group, interval, 'notDue', entry['provisional'],
+                    entry['distanceStatus'], entry['distanceSquared'],
+                    entry['classifiedTs']))
+        if sampled_high:
+            self._last_high_sample = now
+        if sampled_low:
+            self._last_low_sample = now
+        self._last_tick = {
+            'ts': now, 'classificationDue': False,
+            'highSampled': sampled_high > 0, 'lowSampled': sampled_low > 0,
+            'highCount': sampled_high, 'lowCount': sampled_low,
+            'newCount': new_count, 'prunedCount': 0}
+        self._refresh_team_policy()
+        return decisions
+
+    def _observe_safety_high(self, observations, now):
+        """Context loss: own high, confirmed ally low, every other identity high."""
+        sampled_high = sampled_low = 0
+        new_count = promoted_count = 0
+        decisions = []
+        for observation in observations:
+            status = observation.get('identityStatus', 'unknown')
+            key = observation.get('key')
+            if status != 'available' or key is None:
+                reason = ('duplicateIdentity' if status == 'duplicate'
+                          else 'unknownIdentity')
+                decisions.append(self._decision(
+                    True, _SAMPLING_HIGH, self.HIGH_INTERVAL, reason, True,
+                    'unknown', None, self._last_classification))
+                sampled_high += 1
+                continue
+            team_class = (observation.get('teamClass') or
+                          self._team_class(observation))
+            previous = self._entries.get(key)
+            if team_class == 'ally':
+                interval = self.LOW_INTERVAL
+                if previous is None:
+                    new_count += 1
+                    self._entries[key] = {
+                        'group': _SAMPLING_LOW, 'nextDue': now + interval,
+                        'lastSampled': now, 'provisional': False,
+                        'identity': observation.get('identity') or {},
+                        'classifiedTs': self._last_classification,
+                        'distanceStatus': 'unknown', 'distanceSquared': None,
+                        'firstSeen': now, 'teamClass': 'ally'}
+                    sampled_low += 1
+                    decisions.append(self._decision(
+                        True, _SAMPLING_LOW, interval, 'new', False,
+                        'unknown', None, self._last_classification))
+                    continue
+                if previous['group'] != _SAMPLING_LOW:
+                    promoted_count += 1
+                previous['group'] = _SAMPLING_LOW
+                previous['teamClass'] = 'ally'
+                due = now + _SAMPLING_EPSILON >= previous['nextDue']
+                if due:
+                    previous['nextDue'] = self._advance_due(
+                        previous['nextDue'], now, interval)
+                    previous['lastSampled'] = now
+                    sampled_low += 1
+                decisions.append(self._decision(
+                    due, _SAMPLING_LOW, interval,
+                    'lowDue' if due else 'notDue', previous['provisional'],
+                    previous['distanceStatus'], previous['distanceSquared'],
+                    previous['classifiedTs']))
+                continue
+            if previous is None:
+                new_count += 1
+                provisional = True
+                first_seen = now
+            else:
+                if previous['group'] != _SAMPLING_HIGH:
+                    promoted_count += 1
+                provisional = previous['provisional']
+                first_seen = previous['firstSeen']
+            self._entries[key] = {
+                'group': _SAMPLING_HIGH, 'nextDue': now + self.HIGH_INTERVAL,
+                'lastSampled': now, 'provisional': provisional,
+                'identity': observation.get('identity') or {},
+                'classifiedTs': self._last_classification,
+                'distanceStatus': 'unknown', 'distanceSquared': None,
+                'firstSeen': first_seen, 'teamClass': team_class}
+            sampled_high += 1
+            decisions.append(self._decision(
+                True, _SAMPLING_HIGH, self.HIGH_INTERVAL,
+                'contextUnavailable', provisional, 'unknown', None,
+                self._last_classification))
+        if sampled_high:
+            self._last_high_sample = now
+        if sampled_low:
+            self._last_low_sample = now
+        self._last_tick = {
+            'ts': now, 'classificationDue': False,
+            'highSampled': sampled_high > 0, 'lowSampled': sampled_low > 0,
+            'highCount': sampled_high, 'lowCount': sampled_low,
+            'newCount': new_count, 'prunedCount': 0,
+            'safetyHigh': True, 'promotedCount': promoted_count}
+        self._refresh_team_policy()
+        return decisions
+
+    def summary(self, now, options=None):
+        result = LegacyTorpedoSamplingGroups.summary(self, now, options)
+        result['teamPolicy'] = dict(self._team_policy)
+        return result
+
+
 def sampling_wire_payload(rows, status):
     """Compact only new scheduler metadata, never the observed game fields.
 
@@ -3197,6 +3954,10 @@ def sampling_wire_payload(rows, status):
         'duplicateIdentityCount': summary.get('duplicateIdentityCount', 0)}
     if summary.get('reason') is not None:
         out['sampling']['reason'] = summary['reason']
+    # Additive team-budget accounting. Only the production sampler publishes it,
+    # so the legacy/research wire shape stays byte-identical.
+    if isinstance(summary.get('teamPolicy'), dict):
+        out['sampling']['teamPolicy'] = summary['teamPolicy']
     for row in rows:
         sample = row.get('sampling', {})
         compact = {'group': sample.get('group'), 'sampleTs': sample.get('sampleTs')}
@@ -3334,13 +4095,19 @@ class TorpedoTelemetry(object):
                                     'source': 'Ship.' + method, 'shape': shape}
         return out
 
-    def torpedoes(self, self_team=None, sampling=None, now=None, context=None):
+    def torpedoes(self, self_team=None, sampling=None, now=None, context=None,
+                  self_ship_id=None):
         """Collect torpedo rows.
 
         The legacy call (sampling=None) keeps the complete 5Hz snapshot shape.
         With a TorpedoSamplingGroups instance, rows contain only this tick's
         sampled groups and status carries sampling metadata plus the complete
         normal-enumeration membership for non-due motion history retention.
+
+        Since 0.3.44 ``isOwn`` is decided by a strict same-snapshot comparison
+        of ``torpedo.ownerId`` against ``battle.getSelfPlayerInfo().shipId``;
+        ``owner.isPlayer`` is preserved as a raw observation but is no longer
+        used for classification.
         """
         status, items = _call(self.battle, 'getAllTorpedoes')
         if sampling is None:
@@ -3361,11 +4128,11 @@ class TorpedoTelemetry(object):
                             owners[owner_id] = (_fields(owner, OWNER_FIELDS)
                                                 if owner_status == 'available' else None)
                         row['owner'] = owners.get(owner_id)
-                        # ownerId is NOT documented as a player/vehicle id. Never
-                        # equate these namespaces. Ship.isPlayer is public instead.
-                        row['isOwn'] = _get(row['owner'], 'isPlayer')
-                        if type(row['isOwn']) is not bool:
-                            row['isOwn'] = None
+                        # isOwn is now derived from the self shipId comparison.
+                        own_info = _self_id_own(owner_id, self_ship_id)
+                        row['isOwn'] = own_info['isOwn']
+                        row['isOwnSource'] = own_info['source']
+                        row['isOwnReason'] = own_info['reason']
                         out.append(row)
                 except Exception:
                     # A failed/incomplete enumeration is not a successful empty list.
@@ -3374,7 +4141,7 @@ class TorpedoTelemetry(object):
             return out, {'available': status == 'available', 'status': status,
                          'source': 'battle.getAllTorpedoes'}
         return self._sampled_torpedoes(
-            items, status, self_team, sampling, now, context)
+            items, status, self_team, sampling, now, context, self_ship_id)
 
     def _sampling_no_rows(self, status, sampling, now, reason, counters,
                           membership_complete):
@@ -3426,8 +4193,14 @@ class TorpedoTelemetry(object):
             ui_id = public_data(identity['uiId'])
             owner_id = public_data(identity['ownerId'])
             shot_id = public_data(identity['shotId'])
+        if 'ownerTeamId' in record:
+            # Reuse the classification pre-read so a sampled row reads the
+            # public field once (adapter budget invariant).
+            team_value = public_data(record['ownerTeamId'])
+        else:
+            team_value = public_data(_get(torpedo, 'ownerTeamId'))
         row = {'uiId': ui_id, 'ownerId': owner_id,
-               'ownerTeamId': public_data(_get(torpedo, 'ownerTeamId')),
+               'ownerTeamId': team_value,
                'ownerType': public_data(_get(torpedo, 'ownerType')),
                'shotId': shot_id,
                'type': public_data(_get(torpedo, 'type'))}
@@ -3437,13 +4210,19 @@ class TorpedoTelemetry(object):
                            else (1 if team == self_team else 2))
         owner = self._owner_for_record(record, owners, counters)
         row['owner'] = owner
-        # ownerId is NOT documented as a player/vehicle id. Never equate these
-        # namespaces; Ship.isPlayer is the public value used by existing rows.
-        row['isOwn'] = _owner_is_own(owner)
+        # isOwn is now derived from the strict same-snapshot self shipId
+        # comparison computed during sampling; owner.isPlayer is preserved only
+        # as a raw observation in the owner row.
+        if 'isOwn' in record:
+            row['isOwn'] = record['isOwn']
+            row['isOwnSource'] = record.get('isOwnSource')
+            row['isOwnReason'] = record.get('isOwnReason')
+        else:
+            row['isOwn'] = _owner_is_own(owner)
         return row
 
     def _sampled_torpedoes(self, items, enumeration_status, self_team,
-                           sampling, now, context):
+                           sampling, now, context, self_ship_id=None):
         status = {'available': enumeration_status == 'available',
                   'status': enumeration_status,
                   'source': 'battle.getAllTorpedoes'}
@@ -3502,7 +4281,8 @@ class TorpedoTelemetry(object):
         try:
             plan = sampling.plan(now)
             classification_due = bool(plan.get('classificationDue'))
-            context_info = _sampling_context(context)
+            divisor = getattr(sampling, 'radius_divisor', 5.0)
+            context_info = _sampling_context(context, divisor)
             context_available = context_info.get('status') == 'available'
             for record in records:
                 if (record['identityStatus'] != 'available' or
@@ -3515,12 +4295,29 @@ class TorpedoTelemetry(object):
                     record['positionStatus'] = (
                         'available' if record['position'] is not None
                         else 'unknown')
+                    # The public ownerTeamId is read once here for every row
+                    # that is about to be sampled, so the team policy can be
+                    # applied before the row is emitted and the sampled row
+                    # reuses the same value.
+                    record['ownerTeamId'] = _get(record['item'], 'ownerTeamId')
+                    record['teamRelation'] = _sampling_relation(
+                        record['ownerTeamId'], self_team)
+                    # isOwn is decided by a strict same-snapshot identity
+                    # comparison, not by owner.isPlayer. Owner lookup is still
+                    # performed below because the sampled row publishes the raw
+                    # owner fields (including isPlayer) as an observation.
+                    own_info = _self_id_own(
+                        record['identity']['ownerId'], self_ship_id)
+                    record['isOwn'] = own_info['isOwn']
+                    record['isOwnSource'] = own_info['source']
+                    record['isOwnReason'] = own_info['reason']
                     # All identities are due on a classification tick, so this
                     # lookup replaces (rather than adds to) the owner lookup the
                     # sampled row would perform. On cadence ticks it runs only
                     # for rows that will be sampled now.
                     owner = self._owner_for_record(record, owners, counters)
-                    record['isOwn'] = _owner_is_own(owner)
+                    record['teamClass'] = _sampling_team_class(
+                        record['isOwn'], record['teamRelation'])
             decisions = sampling.observe(
                 records, now, context, classification_due,
                 membership_complete, context_available, context_info)

@@ -11,13 +11,14 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'res_mods',
                               'PnFMods', 'WowsExtractor'))
 import torpedo_telemetry
-from torpedo_telemetry import (TorpedoMotion, TorpedoSamplingGroups,
-                               TorpedoTelemetry, sampling_wire_payload)
+from torpedo_telemetry import (LegacyTorpedoSamplingGroups, TorpedoMotion,
+                               TorpedoSamplingGroups, TorpedoTelemetry,
+                               sampling_wire_payload)
 
 
 class CountedTorpedo(object):
     """Public-field double that counts each read; no hidden game internals."""
-    def __init__(self, uiId=1, ownerId=7000, ownerTeamId=0,
+    def __init__(self, uiId=1, ownerId=7000, ownerTeamId=1,
                  ownerType='Ship', shotId=1, type='normal',
                  position=(0.0, 0.0, 0.0), position_error=False):
         object.__setattr__(self, '_values', {
@@ -108,16 +109,18 @@ def test_initial_classification_samples_all_and_reports_complete_membership():
 
     assert status['available'] is True and status['status'] == 'available'
     assert [row['uiId'] for row in out] == [1, 2, 3]
-    assert [row['sampling']['group'] for row in out] == ['high'] * 3
+    # Enemy rows are classified immediately: 599/600 are near/high, 600.1 is
+    # far/low on the very first observation (no blanket provisional high).
+    assert [row['sampling']['group'] for row in out] == ['high', 'high', 'low']
     assert all(row['sampling']['reason'] == 'classification' for row in out)
-    assert all(row['sampling']['intervalSeconds'] == 0.2 for row in out)
+    assert [row['sampling']['intervalSeconds'] for row in out] == [0.2, 0.2, 0.5]
     assert all(row['sampling']['sampleTs'] == 100.0 for row in out)
     assert all(row['sampling']['classificationTs'] == 100.0 for row in out)
     assert [row['position'] for row in out] == [
         [0.0, 0.0, 599.0], [0.0, 0.0, 600.0], [0.0, 0.0, 600.1]]
     assert status['membership'] == [
         member(1, 7001, 1, 'high'), member(2, 7002, 2, 'high'),
-        member(3, 7003, 3, 'high')]
+        member(3, 7003, 3, 'low')]
     assert status['membershipComplete'] is True
     sampling = status['sampling']
     assert sampling['status'] == 'available'
@@ -133,7 +136,7 @@ def test_initial_classification_samples_all_and_reports_complete_membership():
     assert sampling['high']['status'] == 'sampled'
     assert sampling['high']['sampleTs'] == 100.0
     assert sampling['high']['intervalSeconds'] == 0.2
-    assert sampling['low']['status'] == 'notSampled'
+    assert sampling['low']['status'] == 'sampled'
     assert sampling['low']['intervalSeconds'] == 0.5
     assert battle.collection_calls == 1
     assert [row.reads['position'] for row in rows] == [1, 1, 1]
@@ -158,35 +161,33 @@ def test_reclassification_changes_groups_and_samples_both_directions():
     sampler = TorpedoSamplingGroups()
     ctx = context()
     first, _ = telemetry.torpedoes(0, sampler, 0.0, ctx)
-    assert [row['sampling']['group'] for row in first] == ['high', 'high']
+    # Enemies are classified on the first observation: near high, far low.
+    assert [row['sampling']['group'] for row in first] == ['high', 'low']
 
+    # Swap their ranges; only a classification tick re-groups them.
+    near.set_position((0, 0, 2000.0))
+    far.set_position((0, 0, 500.0))
     classified, status = telemetry.torpedoes(0, sampler, 5.0, ctx)
     groups = dict((row['uiId'], row['sampling']) for row in classified)
-    assert groups[1]['group'] == 'high'
-    assert groups[2]['group'] == 'low'
-    assert groups[2]['intervalSeconds'] == 0.5
-    assert groups[2]['provisional'] is False
-    assert groups[2]['reason'] == 'classification'
-    assert status['sampling']['classification']['groupChangeCount'] == 1
+    assert groups[1]['group'] == 'low'
+    assert groups[1]['intervalSeconds'] == 0.5
+    assert groups[1]['provisional'] is False
+    assert groups[1]['reason'] == 'classification'
+    assert groups[2]['group'] == 'high'
+    assert status['sampling']['classification']['groupChangeCount'] == 2
+    assert status['sampling']['high']['status'] == 'sampled'
     assert status['sampling']['low']['status'] == 'sampled'
     assert status['membership'] == [
-        member(1, 7001, 1, 'high'), member(2, 7002, 2, 'low')]
+        member(1, 7001, 1, 'low'), member(2, 7002, 2, 'high')]
 
-    far.reads['position'] = 0
+    # A stored low group is not read until its half-second deadline.
+    near.reads['position'] = 0
     only_high, status = telemetry.torpedoes(0, sampler, 5.2, ctx)
-    assert [row['uiId'] for row in only_high] == [1]
-    assert far.reads['position'] == 0
+    assert [row['uiId'] for row in only_high] == [2]
+    assert near.reads['position'] == 0
     assert status['sampling']['low']['status'] == 'notSampled'
     assert status['membership'] == [
-        member(1, 7001, 1, 'high'), member(2, 7002, 2, 'low')]
-
-    far.set_position((0, 0, 400.0))
-    upgraded, status = telemetry.torpedoes(0, sampler, 10.0, ctx)
-    groups = dict((row['uiId'], row['sampling']) for row in upgraded)
-    assert groups[2]['group'] == 'high'
-    assert groups[2]['reason'] == 'classification'
-    assert status['sampling']['classification']['groupChangeCount'] == 1
-    assert status['sampling']['high']['status'] == 'sampled'
+        member(1, 7001, 1, 'low'), member(2, 7002, 2, 'high')]
 
 
 def test_low_group_keeps_half_second_deadline_on_two_tenths_ticks():
@@ -219,31 +220,40 @@ def test_low_group_keeps_half_second_deadline_on_two_tenths_ticks():
     assert ((samples[-1] - samples[0]) / (len(samples) - 1)) == pytest.approx(0.5)
 
 
-def test_new_identity_between_classifications_is_immediately_provisional_high():
-    near = CountedTorpedo(uiId=1, ownerId=7001, shotId=1,
-                          position=(0, 0, 500.0))
-    far = CountedTorpedo(uiId=2, ownerId=7002, shotId=2,
-                         position=(0, 0, 2000.0))
-    telemetry, _ = adapter([near])
+def test_new_identity_between_classifications_joins_budget_immediately():
+    first = CountedTorpedo(uiId=1, ownerId=7001, shotId=1,
+                           position=(0, 0, 500.0))
+    new_near = CountedTorpedo(uiId=3, ownerId=7003, shotId=3,
+                              position=(0, 0, 450.0))
+    new_far = CountedTorpedo(uiId=2, ownerId=7002, shotId=2,
+                             position=(0, 0, 2000.0))
+    telemetry, _ = adapter([first])
     sampler = TorpedoSamplingGroups()
     ctx = context()
     telemetry.torpedoes(0, sampler, 0.0, ctx)
 
-    telemetry.battle.rows = [near, far]
+    telemetry.battle.rows = [first, new_near, new_far]
     out, status = telemetry.torpedoes(0, sampler, 0.2, ctx)
     groups = dict((row['uiId'], row['sampling']) for row in out)
-    assert groups[2]['group'] == 'high'
+    # A new near enemy takes an available slot at once (provisional high).
+    assert groups[3]['group'] == 'high'
+    assert groups[3]['reason'] == 'new'
+    assert groups[3]['provisional'] is True
+    assert groups[3]['distanceStatus'] == 'near'
+    # A new far enemy is low on its very first observation, not blanket high.
+    assert groups[2]['group'] == 'low'
     assert groups[2]['reason'] == 'new'
     assert groups[2]['provisional'] is True
-    assert groups[2]['distanceStatus'] == 'notClassified'
+    assert groups[2]['distanceStatus'] == 'far'
     assert status['membershipComplete'] is True
 
-    # Still provisional high on the following normal tick.
+    # The new near row keeps its high cadence on the following tick.
     out, _ = telemetry.torpedoes(0, sampler, 0.4, ctx)
     groups = dict((row['uiId'], row['sampling']) for row in out)
-    assert groups[2]['group'] == 'high'
-    assert groups[2]['reason'] == 'highDue'
+    assert groups[3]['group'] == 'high'
+    assert groups[3]['reason'] == 'highDue'
 
+    # Classification re-groups: the far enemy stays low, now non-provisional.
     out, status = telemetry.torpedoes(0, sampler, 5.0, ctx)
     groups = dict((row['uiId'], row['sampling']) for row in out)
     assert groups[2]['group'] == 'low'
@@ -464,7 +474,8 @@ def test_clock_rollback_clears_group_state_and_forces_classification():
 
     out, status = telemetry.torpedoes(0, sampler, 4.9, ctx)
     assert len(out) == 1
-    assert out[0]['sampling']['group'] == 'high'  # cleared -> new provisional
+    # Cleared then reclassified: the far enemy is low, not provisional high.
+    assert out[0]['sampling']['group'] == 'low'
     classification = status['sampling']['classification']
     assert classification['clockReset'] is True
     assert classification['ts'] == 4.9
@@ -523,7 +534,8 @@ def test_clear_resets_for_a_new_battle_without_reusing_old_grouping():
     sampler.clear()
     out, status = telemetry.torpedoes(0, sampler, 5.1, ctx)
     assert len(out) == 1
-    assert out[0]['sampling']['group'] == 'high'
+    # After a battle reset a far enemy is reclassified low immediately.
+    assert out[0]['sampling']['group'] == 'low'
     assert out[0]['sampling']['reason'] == 'classification'
     assert status['sampling']['classification']['ts'] == 5.1
     assert status['sampling']['classification']['newCount'] == 1
@@ -568,8 +580,10 @@ def test_216_torpedoes_22_owners_keep_budget_and_skip_non_due_low_reads():
 
     first, status = telemetry.torpedoes(0, sampler, 0.0, ctx)
     assert len(first) == 216
-    assert status['sampling']['high']['memberCount'] == 216
-    assert status['sampling']['low']['memberCount'] == 0
+    # 108 in-range enemies compete for the 20 nearest high slots; the other 88
+    # in-range rows and all 108 out-of-range rows fall to low.
+    assert status['sampling']['high']['memberCount'] == 20
+    assert status['sampling']['low']['memberCount'] == 196
     assert battle.collection_calls == 1
     assert len(battle.owner_calls) == 22
     assert set(battle.owner_calls.values()) == {1}
@@ -577,17 +591,19 @@ def test_216_torpedoes_22_owners_keep_budget_and_skip_non_due_low_reads():
 
     second, status = telemetry.torpedoes(0, sampler, 5.0, ctx)
     assert len(second) == 216
-    assert status['sampling']['high']['memberCount'] == 108
-    assert status['sampling']['low']['memberCount'] == 108
-    assert status['sampling']['classification']['groupChangeCount'] == 108
+    # The same 20 nearest rows keep the slots, so no group changes.
+    assert status['sampling']['high']['memberCount'] == 20
+    assert status['sampling']['low']['memberCount'] == 196
+    assert status['sampling']['classification']['groupChangeCount'] == 0
     assert set(battle.owner_calls.values()) == {2}
     assert all(row.reads['position'] == 2 for row in rows)
 
     high_only, status = telemetry.torpedoes(0, sampler, 5.2, ctx)
-    assert len(high_only) == 108
+    assert len(high_only) == 20
     assert status['sampling']['low']['status'] == 'notSampled'
     assert status['sampling']['low']['sampledCount'] == 0
-    assert all(row.reads['position'] == 3 for row in near)
+    assert all(row.reads['position'] == 3 for row in near[:20])
+    assert all(row.reads['position'] == 2 for row in near[20:])
     assert all(row.reads['position'] == 2 for row in far)
     for index in range(10):
         assert battle.owner_calls[7000 + index] == 3
@@ -598,7 +614,8 @@ def test_216_torpedoes_22_owners_keep_budget_and_skip_non_due_low_reads():
     both, status = telemetry.torpedoes(0, sampler, 5.6, ctx)
     assert len(both) == 216
     assert status['sampling']['low']['status'] == 'sampled'
-    assert all(row.reads['position'] == 4 for row in near)
+    assert all(row.reads['position'] == 4 for row in near[:20])
+    assert all(row.reads['position'] == 3 for row in near[20:])
     assert all(row.reads['position'] == 3 for row in far)
     for index in range(10):
         assert battle.owner_calls[7000 + index] == 4
@@ -813,7 +830,7 @@ def test_reference_replay_matches_pre_optimization_snapshot_sequence():
     unknown = CountedTorpedo(uiId=None, ownerId=7003, shotId=3,
                              position=(0, 0, 700.0))
     telemetry, battle = adapter([near, far])
-    sampler = TorpedoSamplingGroups()
+    sampler = LegacyTorpedoSamplingGroups()
     plan = ((0.0, False, False), (0.2, False, False), (0.6, False, False),
             (5.0, False, False), (5.2, False, False), (5.6, False, False),
             (6.0, False, False), (6.2, True, True), (6.4, False, False),
@@ -949,7 +966,7 @@ def _recording_canonical(rows, status):
 
 def _replay_recording(path):
     battle = _RecordingBattle()
-    sampler = TorpedoSamplingGroups()
+    sampler = LegacyTorpedoSamplingGroups()
     telemetry = TorpedoTelemetry(battle, None)
     counts = Counter()
     digest_value = hashlib.sha256()
@@ -1071,7 +1088,9 @@ def test_sampling_does_not_require_optional_sandbox_builtins():
         out, status = telemetry.torpedoes(0, sampler, 0.0, ctx)
         assert len(out) == 2 and status['membershipComplete'] is True
         out, status = telemetry.torpedoes(0, sampler, 0.2, ctx)
-        assert len(out) == 2
+        # Only the due high row is sampled; the far enemy is a stored low row.
+        assert len(out) == 1
+        assert out[0]['sampling']['group'] == 'high'
         assert status['sampling']['low']['status'] == 'notSampled'
     finally:
         torpedo_telemetry.__dict__['__builtins__'] = original

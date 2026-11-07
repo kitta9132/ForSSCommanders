@@ -1,8 +1,10 @@
 # 既知の問題と実用化の到達点
 
-0.3.40：魚雷分類半径を`R=L/5`（`L=min(mapWidth,mapHeight)`の較正world長）へ正式変更。L/5～L/3帯はLOWになり、自艦の厳密bool Trueは全距離HIGH（0.2秒期限）、他は近5Hz／遠平均2Hz、5秒再分類を維持する。[収集頻度表](COLLECTION_CADENCE.ja.md)・[出力仕様](OUTPUT_SPEC.ja.md)を更新。offline検証のみで未導入・未実機、L/5と自艦5Hzの実機周期は未確認。FPS改善や1Hz遠方化を主張しない。以下の実機根拠は0.3.38で、L/3の履歴である。
+0.3.44-self-owner-id：魚雷の自艦判定を `owner.isPlayer` から、同一 snapshot の `battle.getSelfPlayerInfo().shipId == torpedo.ownerId` へ変更。`owner.isPlayer` は `owner` 行に生の観測値として残すが分類には使わない。`isOwn`・`isOwnSource`・`isOwnReason` を sample 済み行へ公開。自艦（`isOwn is True`）は全距離 HIGH で敵予算外、確認済み味方（同一チームかつ `isOwn is False`）は全距離 LOW（初観測含む）、敵は半径内の最近 `enemy_high_budget` 本（既定20）だけ HIGH。チーム不明・距離不明・同一チームで `isOwn` 不明は安全側 HIGH。型不一致・self shipId 欠測は `isOwn: null`（unknown）とし味方と誤分類しない。`self.shipId` は毎 sample 新鮮に取得し cache/fallback しない。半径・周期（近0.2秒／遠0.5秒／5秒再分類）は0.3.40のまま。TTaro Mod Config 連携・UI adapter 契約も維持。offline検証のみで**未導入・未実機**、実機周期・負荷・分類一致は未確認。FPS改善や実機取得時間短縮を主張しない。研究用`high_budget_25`は研究のまま維持する。\n\n0.3.43（履歴）：自艦 ID candidate 観測。`battle.getSelfPlayerInfo()` から `id`（playerId）と `shipId`、`battle.getSelfPlayerShip()` から公開 `uiId`、Ship 非公開属性候補 `_Ship__id`/`id`/`vehicleId` を別々の candidate として記録。B50 では `getSelfPlayerInfo().shipId` と自艦発射魚雷の `ownerId` が全行厳密一致。`isOwn` 上書きは行わなかった。
 
-0.3.39（履歴）：自艦と厳密boolで確認できた魚雷を全距離HIGH（目標5Hz）に変更。当時の分類半径はL/3。offline564 tests・9 module checker成功。未導入・未実機。所有者不明は距離ルールに従い、low非dueで再確認しない。
+0.3.40（履歴）：魚雷分類半径を`R=L/5`（`L=min(mapWidth,mapHeight)`の較正world長）へ正式変更。L/5～L/3帯はLOWになり、自艦は全距離HIGH（0.2秒期限）、他は近5Hz／遠平均2Hz、5秒再分類を維持する。offline検証のみで未導入・未実機、L/5と自艦5Hzの実機周期は未確認。以下の実機根拠は0.3.38で、L/3の履歴である。
+
+0.3.39（履歴）：自艦と厳密bool `owner.isPlayer is True` で確認できた魚雷を全距離HIGH（目標5Hz）に変更。当時の分類半径はL/3。offline564 tests・9 module checker成功。未導入・未実機。所有者不明は距離ルールに従い、low非dueで再確認しない。
 
 ## 到達点サマリー（0.3.38・ATM B09後）
 
@@ -63,7 +65,7 @@ FPS改善を先行する。[専用タスク・距離分岐案](FPS_TASKS.ja.md#f
 | 位置・較正・運動 | [魚雷運動・単位](../../TASKS.md#task-torpedoes)、[別地図・境界・drift](../../TASKS.md#task-stability) |
 | ダメージ・弾道 | [潜水艦用途に不要な経路の削減](../../TASKS.md#task-scope) |
 
-距離別魚雷収集は、0.3.40で自艦から半径`L/5`（L=マップ短辺の較正world長）より外をLOW平均2Hz、内側・境界上をHIGH 5Hzとする。0.3.33～0.3.39はL/3だった。offline 実装は0.3.33で完了し、B43／B44 replay・216魚雷fixtureで検証済み。L/5の実機near／far周期・自艦全距離HIGH・最終FPS判定は未完（B09のnear／far実周期確認はL/3時点の履歴）。全魚雷API列挙と分類用位置取得が必要なら、それ自体は低頻度化できない可能性がある。後段の加工・owner取得・出力との費用を分けて判断する。詳細な分岐と周期・互換性は[FPS専用タスク](FPS_TASKS.ja.md#fps-torpedoes)へ集約。詳細診断に束ねられた潜水艦固有情報の独立化も対象。
+距離別魚雷収集は、0.3.40で自艦から半径`L/5`（L=マップ短辺の較正world長）より外をLOW平均2Hz、内側・境界上をHIGH 5Hzとする。0.3.33～0.3.39はL/3だった。offline 実装は0.3.33で完了し、B43／B44 replay・216魚雷fixtureで検証済み。L/5の実機near／far周期・自艦全距離HIGH・最終FPS判定は未完（B09のnear／far実周期確認はL/3時点の履歴）。全魚雷API列挙と分類用位置取得が必要なら、それ自体は低頻度化できない可能性がある。後段の加工・owner取得・出力との費用を分けて判断する。0.3.44 では自艦判定を `owner.isPlayer` から `battle.getSelfPlayerInfo().shipId == torpedo.ownerId` へ変更した。詳細な分岐と周期・互換性は[FPS専用タスク](FPS_TASKS.ja.md#fps-torpedoes)へ集約。詳細診断に束ねられた潜水艦固有情報の独立化も対象。
 
 ## 優先度A：実用前に詰める問題
 

@@ -414,7 +414,7 @@ $isAdmin = Test-IsAdmin
 if ($needsAdmin -and -not $isAdmin) {
     if ($Elevated) {
         Write-Err "Administrator rights are still not available."
-        Write-Err "Right-click restore-atm-13357625.bat and choose 'Run as administrator'."
+        Write-Err "Right-click restore-atm.bat and choose 'Run as administrator'."
         Exit-Restore 4
     }
     Write-Info "Administrator rights are required for the target folder."
@@ -423,7 +423,7 @@ if ($needsAdmin -and -not $isAdmin) {
         $childExitCode = Invoke-ElevatedSelf -BackupDirectory $backupDirFull
     } catch {
         Write-Err "Elevation was cancelled or failed: $($_.Exception.Message)"
-        Write-Err "Right-click restore-atm-13357625.bat and choose 'Run as administrator'."
+        Write-Err "Right-click restore-atm.bat and choose 'Run as administrator'."
         Exit-Restore 4
     }
     Exit-Restore $childExitCode

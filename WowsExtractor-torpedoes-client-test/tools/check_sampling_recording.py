@@ -13,7 +13,8 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] /
                       'res_mods/PnFMods/WowsExtractor'))
-from torpedo_telemetry import TorpedoSamplingGroups, TorpedoTelemetry, sampling_wire_payload
+from torpedo_telemetry import (LegacyTorpedoSamplingGroups as TorpedoSamplingGroups,
+                               TorpedoTelemetry, sampling_wire_payload)
 
 
 class RecordedTorpedo:

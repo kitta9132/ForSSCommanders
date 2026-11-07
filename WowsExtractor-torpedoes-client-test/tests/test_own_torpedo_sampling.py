@@ -14,7 +14,7 @@ from torpedo_telemetry import (TorpedoMotion, TorpedoSamplingGroups,
 
 
 class CountedTorpedo(object):
-    def __init__(self, uiId=1, ownerId=7000, ownerTeamId=0,
+    def __init__(self, uiId=1, ownerId=7000, ownerTeamId=1,
                  ownerType='Ship', shotId=1, type='normal',
                  position=(0.0, 0.0, 0.0)):
         object.__setattr__(self, '_values', {
@@ -85,6 +85,12 @@ def adapter(rows, owner_values=None, owner_errors=None):
     return TorpedoTelemetry(battle, Obj()), battle
 
 
+def call_torpedoes(telemetry, team, sampler, now, ctx, self_ship_id=None):
+    """Pass self_ship_id through the new API without changing call sites."""
+    return telemetry.torpedoes(team, sampler, now, ctx,
+                               self_ship_id=self_ship_id)
+
+
 def set_owner(battle, owner_id, value):
     battle.owner_values[owner_id] = value
 
@@ -108,7 +114,8 @@ def test_far_own_strict_true_keeps_high_deadline_not_core_tick_ten_hz():
 
     for step in range(0, 101):
         now = round(step / 10.0, 1)
-        rows, status = telemetry.torpedoes(0, sampler, now, ctx)
+        rows, status = call_torpedoes(telemetry, 0, sampler, now, ctx,
+                                      self_ship_id=9100)
         for row in rows:
             # Main applies its calibrated conversion to every sampled row.
             row['mapPosition'] = [row['position'][0] / 100.0,
@@ -163,25 +170,33 @@ def test_far_non_own_values_stay_low_and_non_due_reads_no_position_or_owner():
                                        9204: 'True', 9205: 0})
     sampler = TorpedoSamplingGroups()
     ctx = context()
-    telemetry.torpedoes(0, sampler, 0.0, ctx)
+    call_torpedoes(telemetry, 0, sampler, 0.0, ctx,
+                   self_ship_id=9200)
 
-    out, status = telemetry.torpedoes(0, sampler, 5.0, ctx)
+    out, status = call_torpedoes(telemetry, 0, sampler, 5.0, ctx,
+                                self_ship_id=9200)
     groups = dict((row['uiId'], row) for row in out)
     assert [groups[index]['sampling']['group'] for index in range(1, 6)] == [
         'low'] * 5
     assert groups[1]['isOwn'] is False
-    assert all(groups[index]['isOwn'] is None for index in range(2, 6))
+    # With a strict self ship ID, any valid scalar ownerId that does not match
+    # the self ID is classified as non-own; only an invalid/unavailable ownerId
+    # stays unknown.
+    assert groups[2]['isOwn'] is False
+    assert all(groups[index]['isOwn'] is False for index in range(3, 6))
     assert status['sampling']['classification']['farCount'] == 5
 
     before_owner = sum(battle.owner_calls.values())
     before_position = [row.reads['position'] for row in rows]
-    out, status = telemetry.torpedoes(0, sampler, 5.2, ctx)
+    out, status = call_torpedoes(telemetry, 0, sampler, 5.2, ctx,
+                                 self_ship_id=9200)
     assert out == []
     assert sum(battle.owner_calls.values()) == before_owner
     assert [row.reads['position'] for row in rows] == before_position
     assert status['sampling']['low']['status'] == 'notSampled'
 
-    out, status = telemetry.torpedoes(0, sampler, 5.6, ctx)
+    out, status = call_torpedoes(telemetry, 0, sampler, 5.6, ctx,
+                                 self_ship_id=9200)
     assert len(out) == 5
     assert all(row['sampling']['group'] == 'low' for row in out)
     assert status['sampling']['low']['status'] == 'sampled'
@@ -193,24 +208,27 @@ def test_far_non_own_values_stay_low_and_non_due_reads_no_position_or_owner():
 def test_own_true_survives_new_and_near_to_far_classifications():
     own = CountedTorpedo(uiId=1, ownerId=9300, shotId=1,
                          position=(0, 0, 2000.0))
-    telemetry, battle = adapter([own], {9300: True, 9301: True})
+    telemetry, battle = adapter([own], {9300: True})
     sampler = TorpedoSamplingGroups()
     ctx = context()
 
-    first, status = telemetry.torpedoes(0, sampler, 0.0, ctx)
+    first, status = call_torpedoes(telemetry, 0, sampler, 0.0, ctx,
+                                   self_ship_id=9300)
     assert first[0]['sampling']['group'] == 'high'
     assert first[0]['sampling']['provisional'] is True
     assert first[0]['isOwn'] is True
 
     own.set_position((0, 0, 500.0))
-    near, status = telemetry.torpedoes(0, sampler, 5.0, ctx)
+    near, status = call_torpedoes(telemetry, 0, sampler, 5.0, ctx,
+                                  self_ship_id=9300)
     assert near[0]['sampling']['group'] == 'high'
     assert near[0]['sampling']['distanceStatus'] == 'near'
     assert status['sampling']['classification']['nearCount'] == 1
     assert near[0]['isOwn'] is True
 
     own.set_position((0, 0, 2000.0))
-    far, status = telemetry.torpedoes(0, sampler, 10.0, ctx)
+    far, status = call_torpedoes(telemetry, 0, sampler, 10.0, ctx,
+                                 self_ship_id=9300)
     assert far[0]['sampling']['group'] == 'high'
     assert far[0]['sampling']['distanceStatus'] == 'far'
     assert far[0]['isOwn'] is True
@@ -218,16 +236,18 @@ def test_own_true_survives_new_and_near_to_far_classifications():
 
     # A new own identity between classifications starts provisional high and
     # remains high at the next classification despite being far away.
-    new_own = CountedTorpedo(uiId=2, ownerId=9301, shotId=2,
+    new_own = CountedTorpedo(uiId=2, ownerId=9300, shotId=2,
                              position=(0, 0, 2500.0))
     telemetry.battle.rows = [own, new_own]
-    out, _ = telemetry.torpedoes(0, sampler, 10.2, ctx)
+    out, _ = call_torpedoes(telemetry, 0, sampler, 10.2, ctx,
+                            self_ship_id=9300)
     groups = dict((row['uiId'], row) for row in out)
     assert groups[2]['sampling']['group'] == 'high'
     assert groups[2]['sampling']['reason'] == 'new'
     assert groups[2]['isOwn'] is True
 
-    out, status = telemetry.torpedoes(0, sampler, 15.0, ctx)
+    out, status = call_torpedoes(telemetry, 0, sampler, 15.0, ctx,
+                                 self_ship_id=9300)
     groups = dict((row['uiId'], row) for row in out)
     assert groups[1]['sampling']['group'] == 'high'
     assert groups[2]['sampling']['group'] == 'high'
@@ -244,8 +264,9 @@ def test_own_strict_true_stays_high_inside_the_l5_to_l3_band():
     telemetry, battle = adapter([own, other], {9350: True, 9351: False})
     sampler = TorpedoSamplingGroups()
     ctx = context()  # L/5 = 600, L/3 = 1000
-    telemetry.torpedoes(0, sampler, 0.0, ctx)
-    out, status = telemetry.torpedoes(0, sampler, 5.0, ctx)
+    call_torpedoes(telemetry, 0, sampler, 0.0, ctx, self_ship_id=9350)
+    out, status = call_torpedoes(telemetry, 0, sampler, 5.0, ctx,
+                                self_ship_id=9350)
     groups = dict((row['uiId'], row['sampling']) for row in out)
     assert groups[1]['group'] == 'high'
     assert groups[1]['distanceStatus'] == 'far'
@@ -253,7 +274,8 @@ def test_own_strict_true_stays_high_inside_the_l5_to_l3_band():
     assert groups[2]['group'] == 'low'
     assert status['sampling']['classification']['farCount'] == 2
 
-    out, _ = telemetry.torpedoes(0, sampler, 5.2, ctx)
+    out, _ = call_torpedoes(telemetry, 0, sampler, 5.2, ctx,
+                            self_ship_id=9350)
     assert [row['uiId'] for row in out] == [1]
     assert battle.owner_calls[9350] == 3
     assert battle.owner_calls[9351] == 2
@@ -281,9 +303,11 @@ def test_only_strict_bool_true_is_own_and_unknown_never_becomes_false():
                9405: None, 9407: 0}, owner_errors={9406})
     sampler = TorpedoSamplingGroups()
     ctx = context()
-    telemetry.torpedoes(0, sampler, 0.0, ctx)
+    call_torpedoes(telemetry, 0, sampler, 0.0, ctx,
+                   self_ship_id=9401)
 
-    out, status = telemetry.torpedoes(0, sampler, 5.0, ctx)
+    out, status = call_torpedoes(telemetry, 0, sampler, 5.0, ctx,
+                                self_ship_id=9401)
     groups = dict((row['uiId'], row) for row in out)
     assert groups[1]['sampling']['group'] == 'high'
     assert groups[1]['isOwn'] is True
@@ -291,7 +315,9 @@ def test_only_strict_bool_true_is_own_and_unknown_never_becomes_false():
         assert groups[index]['sampling']['group'] == 'low'
         assert groups[index]['isOwn'] is not True
     assert groups[2]['isOwn'] is False
-    assert all(groups[index]['isOwn'] is None for index in (3, 4, 5, 6, 7))
+    # Every non-own row has a valid scalar ownerId that is not equal to the
+    # self ship ID, so all resolve to False rather than unknown.
+    assert all(groups[index]['isOwn'] is False for index in range(3, 8))
     assert status['sampling']['classification']['farCount'] == 7
     assert battle.owner_calls[9406] == 2  # failed lookups are not cached across ticks
 
@@ -302,22 +328,23 @@ def test_owner_exception_then_current_true_promotes_low_due_row_without_contradi
     telemetry, battle = adapter([far], {9500: False})
     sampler = TorpedoSamplingGroups()
     ctx = context()
-    telemetry.torpedoes(0, sampler, 0.0, ctx)
+    call_torpedoes(telemetry, 0, sampler, 0.0, ctx)
 
     battle.owner_errors = {9500}
-    out, status = telemetry.torpedoes(0, sampler, 5.0, ctx)
+    out, status = call_torpedoes(telemetry, 0, sampler, 5.0, ctx)
     assert out[0]['isOwn'] is None
     assert out[0]['sampling']['group'] == 'low'
     assert status['sampling']['classification']['farCount'] == 1
 
     # Low is not due at 5.2, so no owner read can expose a contradiction here.
-    out, _ = telemetry.torpedoes(0, sampler, 5.2, ctx)
+    out, _ = call_torpedoes(telemetry, 0, sampler, 5.2, ctx)
     assert out == []
     assert battle.owner_calls[9500] == 2
 
     battle.owner_errors = set()
     set_owner(battle, 9500, True)
-    out, status = telemetry.torpedoes(0, sampler, 5.6, ctx)
+    out, status = call_torpedoes(telemetry, 0, sampler, 5.6, ctx,
+                                self_ship_id=9500)
     assert out[0]['isOwn'] is True
     assert out[0]['sampling']['group'] == 'high'
     assert out[0]['sampling']['reason'] == 'highDue'
@@ -325,12 +352,15 @@ def test_owner_exception_then_current_true_promotes_low_due_row_without_contradi
     assert status['sampling']['low']['sampledCount'] == 0
     assert status['membership'][0]['group'] == 'high'
 
-    out, _ = telemetry.torpedoes(0, sampler, 5.7, ctx)
+    out, _ = call_torpedoes(telemetry, 0, sampler, 5.7, ctx,
+                            self_ship_id=9500)
     assert out == []  # promotion must not retain the old low deadline phase
-    out, _ = telemetry.torpedoes(0, sampler, 5.8, ctx)
+    out, _ = call_torpedoes(telemetry, 0, sampler, 5.8, ctx,
+                            self_ship_id=9500)
     assert out[0]['isOwn'] is True
     assert out[0]['sampling']['group'] == 'high'
-    out, status = telemetry.torpedoes(0, sampler, 10.0, ctx)
+    out, status = call_torpedoes(telemetry, 0, sampler, 10.0, ctx,
+                                 self_ship_id=9500)
     assert out[0]['isOwn'] is True
     assert out[0]['sampling']['group'] == 'high'
     assert status['sampling']['classification']['farCount'] == 1
@@ -342,32 +372,42 @@ def test_clear_and_clock_reset_do_not_carry_own_group_history():
     telemetry, battle = adapter([own], {9600: True})
     sampler = TorpedoSamplingGroups()
     ctx = context()
-    telemetry.torpedoes(0, sampler, 0.0, ctx)
-    out, _ = telemetry.torpedoes(0, sampler, 5.0, ctx)
+    call_torpedoes(telemetry, 0, sampler, 0.0, ctx, self_ship_id=9600)
+    out, _ = call_torpedoes(telemetry, 0, sampler, 5.0, ctx,
+                            self_ship_id=9600)
     assert out[0]['sampling']['group'] == 'high'
 
     sampler.clear()
     set_owner(battle, 9600, False)
-    out, status = telemetry.torpedoes(0, sampler, 5.1, ctx)
-    assert out[0]['sampling']['group'] == 'high'  # new/provisional, not old own
+    out, status = call_torpedoes(telemetry, 0, sampler, 5.1, ctx,
+                                self_ship_id=9601)
+    # Cleared then reclassified: an enemy far row is low, not the old own high.
+    assert out[0]['sampling']['group'] == 'low'
     assert out[0]['sampling']['provisional'] is True
-    out, status = telemetry.torpedoes(0, sampler, 10.1, ctx)
+    assert out[0]['isOwn'] is False
+    out, status = call_torpedoes(telemetry, 0, sampler, 10.1, ctx,
+                                 self_ship_id=9601)
     assert out[0]['sampling']['group'] == 'low'
     assert out[0]['isOwn'] is False
 
     set_owner(battle, 9600, True)
-    out, _ = telemetry.torpedoes(0, sampler, 10.6, ctx)
+    out, _ = call_torpedoes(telemetry, 0, sampler, 10.6, ctx,
+                            self_ship_id=9600)
     assert out[0]['sampling']['group'] == 'high'
     assert out[0]['isOwn'] is True
     # Clock rollback clears the identity/group schedule. The same current key
     # must not inherit the old own-high entry as a direct ownership claim.
     set_owner(battle, 9600, False)
-    out, status = telemetry.torpedoes(0, sampler, 9.9, ctx)
-    assert out[0]['sampling']['group'] == 'high'
+    out, status = call_torpedoes(telemetry, 0, sampler, 9.9, ctx,
+                                self_ship_id=9601)
+    # Clock rollback clears the schedule; the same current key is reclassified
+    # low as a far enemy rather than inheriting the old own-high entry.
+    assert out[0]['sampling']['group'] == 'low'
     assert out[0]['sampling']['provisional'] is True
     assert out[0]['isOwn'] is False
     assert status['sampling']['classification']['clockReset'] is True
-    out, status = telemetry.torpedoes(0, sampler, 14.9, ctx)
+    out, status = call_torpedoes(telemetry, 0, sampler, 14.9, ctx,
+                                 self_ship_id=9601)
     assert out[0]['sampling']['group'] == 'low'
     assert out[0]['isOwn'] is False
 
@@ -388,7 +428,7 @@ def test_owner_lookup_budget_tracks_sampled_owner_keys_and_no_duplicate_fields()
     ctx = context()
     expected = [
         (0.0, {9701, 9702}),
-        (0.2, {9701, 9702}),
+        (0.2, {9701}),
         (5.0, {9701, 9702}),
         (5.2, {9701}),
         (5.6, {9701, 9702}),
@@ -401,7 +441,8 @@ def test_owner_lookup_budget_tracks_sampled_owner_keys_and_no_duplicate_fields()
         before_calls = sum(battle.owner_calls.values())
         before_reads = battle.owner_reads['isPlayer']
         sampled_before = dict(battle.owner_calls)
-        out, status = telemetry.torpedoes(0, sampler, now, ctx)
+        out, status = call_torpedoes(telemetry, 0, sampler, now, ctx,
+                                    self_ship_id=9701)
         delta_calls = sum(battle.owner_calls.values()) - before_calls
         delta_reads = battle.owner_reads['isPlayer'] - before_reads
         assert delta_calls == len(owner_ids)
@@ -419,7 +460,8 @@ def test_owner_lookup_budget_tracks_sampled_owner_keys_and_no_duplicate_fields()
     # One sampled own row plus the unknown identity at 10.2: the far low rows
     # are not due, and the own row reuses its pre-read owner cache this tick.
     before = sum(battle.owner_calls.values())
-    out, status = telemetry.torpedoes(0, sampler, 10.2, ctx)
+    out, status = call_torpedoes(telemetry, 0, sampler, 10.2, ctx,
+                                self_ship_id=9701)
     assert [row['uiId'] for row in out] == [1, 4]
     assert sum(battle.owner_calls.values()) - before == 1
     assert status['sampling']['low']['status'] == 'notSampled'
@@ -433,7 +475,8 @@ def test_duplicate_identity_with_own_owner_is_unmatchable_and_one_lookup_per_tic
     telemetry, battle = adapter([first, duplicate], {9900: True})
     sampler = TorpedoSamplingGroups()
     ctx = context()
-    rows, status = telemetry.torpedoes(0, sampler, 0.0, ctx)
+    rows, status = call_torpedoes(telemetry, 0, sampler, 0.0, ctx,
+                                 self_ship_id=9900)
     assert len(rows) == 2
     assert all(row['isOwn'] is True for row in rows)
     assert all(row['sampling']['group'] == 'high' for row in rows)
@@ -443,7 +486,7 @@ def test_duplicate_identity_with_own_owner_is_unmatchable_and_one_lookup_per_tic
     assert status['sampling']['duplicateIdentityCount'] == 2
     assert battle.owner_calls[9900] == 1
 
-    rows, status = telemetry.torpedoes(0, sampler, 5.0, ctx)
+    rows, status = call_torpedoes(telemetry, 0, sampler, 5.0, ctx)
     assert len(rows) == 2
     assert status['membership'] == []
     assert battle.owner_calls[9900] == 2  # one current lookup, not per row
@@ -457,10 +500,13 @@ def test_wire_subset_keeps_low_membership_while_own_row_is_sampled():
     telemetry, battle = adapter([own, low], {9801: True, 9802: False})
     sampler = TorpedoSamplingGroups()
     ctx = context()
-    telemetry.torpedoes(0, sampler, 0.0, ctx)
-    telemetry.torpedoes(0, sampler, 5.0, ctx)
+    call_torpedoes(telemetry, 0, sampler, 0.0, ctx,
+                   self_ship_id=9801)
+    call_torpedoes(telemetry, 0, sampler, 5.0, ctx,
+                   self_ship_id=9801)
 
-    rows, status = telemetry.torpedoes(0, sampler, 5.2, ctx)
+    rows, status = call_torpedoes(telemetry, 0, sampler, 5.2, ctx,
+                                  self_ship_id=9801)
     rows, wire = sampling_wire_payload(rows, status)
     assert [row['uiId'] for row in rows] == [1]
     assert rows[0]['sampling'] == {'group': 'high', 'sampleTs': 5.2}
