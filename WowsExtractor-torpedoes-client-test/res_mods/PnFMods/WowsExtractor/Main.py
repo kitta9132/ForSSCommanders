@@ -6,7 +6,7 @@
 
 API_VERSION = 'API_v1.0'
 MOD_NAME = 'WowsExtractor'
-MOD_VERSION = '0.3.45-slow-information-groups'
+MOD_VERSION = '0.3.46-review-safety-fixes'
 
 # ---------------------------------------------------------------------------
 # WowsExtractor -- observations for an external submarine-combat map.
@@ -1271,6 +1271,12 @@ class Collector(object):
         adapter = ensure() if ensure is not None else None
         if adapter is None:
             return False
+        if reason == 'battleStart':
+            adapter.stop('battleStart')
+            refresh = getattr(adapter, 'set_fallback', None)
+            if refresh is not None:
+                refresh(self._torpedo_prefs_fallback())
+            self._torpedoPrefsRevision = None
         binding = getattr(self, '_torpedoPrefsBinding', None)
         if binding is None:
             discover = getattr(self, '_discover_torpedo_prefs_binding', None)
@@ -1333,6 +1339,11 @@ class Collector(object):
         try:
             tick()
         except Exception:
+            return
+        # INI was already loaded by Main for this battle. Do not overwrite it
+        # with an adapter's prior-battle fallback or previously seen UI values.
+        source = getattr(adapter, 'source', None)
+        if source is not None and source() != 'ttaro':
             return
         revision = 0
         try:
@@ -2676,7 +2687,9 @@ class Collector(object):
             self_state = self._build_self(ui_hp, self_info, self_ship,
                                           health_due=False)
         self_position = (self_state.get('position')
-                         if isinstance(self_state, dict) else None)
+                         if (isinstance(self_state, dict) and
+                             self_state.get('isObserver') is False and
+                             self_ship is not None) else None)
 
         if profiler is not None:
             def build_ships_and_avatar_observations():

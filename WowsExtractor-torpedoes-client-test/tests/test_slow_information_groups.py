@@ -119,6 +119,20 @@ def _fixed_calibration(scale=2000.0, status='available'):
     return FixedCalibration()
 
 
+def test_observer_position_is_not_used_as_self_distance_origin():
+    far_ship = _Ship(1000, 7000, position=(1200.0, 0.0, 1200.0),
+                     map_pos=(0.6, 0.6))
+    c = _make_collector_with_ships([far_ship], _SelfShip())
+    c._mapCalibration = _fixed_calibration()
+    c._shipWorldPositionSamplingDue = False
+    c._shipWorldPositionSeenIds = {(int, 1000): True}
+    c._shipWorldPositionSeenOrder = [(int, 1000)]
+    c._build_self = lambda *args, **kwargs: {
+        'position': [0.0, 0.0, 0.0], 'isObserver': True}
+    c._build_state(0.2)
+    assert far_ship.position_reads == 1
+
+
 def test_signed_calibration_scales_are_lengths_for_far_threshold():
     c = _make_collector_with_ships([], _SelfShip())
     c._mapCalibration = _fixed_calibration(scale=-2000.0)

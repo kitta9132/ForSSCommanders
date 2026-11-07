@@ -4,7 +4,7 @@
   "battleId": "synthetic-example-only",
   "mod": {
     "name": "WowsExtractor",
-    "version": "0.3.45-slow-information-groups"
+    "version": "0.3.46-review-safety-fixes"
   },
   "ts": 120.0,
   "battleType": null,

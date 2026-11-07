@@ -92,6 +92,55 @@ BRIDGE_METHODS = (
 )
 
 
+def test_panel_values_are_reapplied_after_ini_reload_on_next_battle():
+    stub = StubBinding()
+    stub.values = {component_key('enemyHighBudget'): 31,
+                   component_key('radiusDivisor'): 7.0}
+    c = _collector({'PrefsAdapter': PrefsAdapter,
+                    'build_ttaro_prefs_binding': lambda: stub,
+                    'normalize_torpedo_sampling_settings': normalize_torpedo_sampling_settings},
+                   BRIDGE_METHODS)
+    c._torpedoSamplingSettings = TorpedoSamplingSettings()
+    c._bind_torpedo_prefs_adapter('battleStart')
+    c._consume_torpedo_prefs(0.0)
+    assert c._torpedoSamplingSettings.enemy_high_budget == 31
+    c.dispose_torpedo_prefs_adapter('battleEnd')
+    c._torpedoSamplingSettings = TorpedoSamplingSettings()
+    c._bind_torpedo_prefs_adapter('battleStart')
+    c._consume_torpedo_prefs(20.0)
+    assert c._torpedoSamplingSettings.enemy_high_budget == 31
+    assert c._torpedoSamplingSettings.radius_divisor == 7.0
+
+
+def test_ini_reload_without_panel_does_not_replay_old_adapter_values():
+    c = _collector({'PrefsAdapter': PrefsAdapter,
+                    'build_ttaro_prefs_binding': lambda: None,
+                    'normalize_torpedo_sampling_settings': normalize_torpedo_sampling_settings},
+                   BRIDGE_METHODS)
+    c._torpedoSamplingSettings = TorpedoSamplingSettings(enemy_high_budget=100)
+    c._bind_torpedo_prefs_adapter('battleStart')
+    c._consume_torpedo_prefs(0.0)
+    c.dispose_torpedo_prefs_adapter('battleEnd')
+    c._torpedoSamplingSettings = TorpedoSamplingSettings(enemy_high_budget=120)
+    c._bind_torpedo_prefs_adapter('battleStart')
+    c._consume_torpedo_prefs(20.0)
+    assert c._torpedoSamplingSettings.enemy_high_budget == 120
+
+
+def test_panel_default_equal_to_old_ini_still_overlays_new_ini():
+    stub = StubBinding()
+    stub.values = {component_key('enemyHighBudget'): 20,
+                   component_key('radiusDivisor'): 5.0}
+    c = _collector({'PrefsAdapter': PrefsAdapter,
+                    'build_ttaro_prefs_binding': lambda: stub,
+                    'normalize_torpedo_sampling_settings': normalize_torpedo_sampling_settings},
+                   BRIDGE_METHODS)
+    c._torpedoSamplingSettings = TorpedoSamplingSettings(enemy_high_budget=100)
+    c._bind_torpedo_prefs_adapter('battleStart')
+    c._consume_torpedo_prefs(0.0)
+    assert c._torpedoSamplingSettings.enemy_high_budget == 20
+
+
 # ------------------------------------------------------- instantiate once
 def test_ensure_builds_adapter_once_and_uses_ini_fallback():
     settings = TorpedoSamplingSettings(radius_divisor=7.0,

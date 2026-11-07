@@ -3,7 +3,7 @@
 現在の情報群ごとの周期は[収集頻度表](docs/COLLECTION_CADENCE.ja.md)を参照。
 
 作成日：2026-11-07（日本時間）
-modバージョン：`0.3.45-slow-information-groups` / ModsAPI：`API_v1.0`（親検証：Python 3.11・私有replay込み773 passed、skipなし。11 module checker成功）
+modバージョン：`0.3.46-review-safety-fixes` / ModsAPI：`API_v1.0`。親の直接レビューと修正後、私有replay込み769成功・起動中installer14 skip、その後installer全20成功（全対象783件を確認）。11 module checker成功。[レビュー記録](docs/REVIEW_0.3.40_TO_0.3.46.ja.md)。以下0.3.45の記述・件数は当該版の履歴です。
 
 B46は限定条件（heavy OFF・独立4群ON）で、ユーザー報告 minFPS 約50以上・カクつきなし（録画なし）。1,335 records（active 1,333）、HP平均約2 Hz、比較／damage平均約1 Hz・非due省略、独立 profiler phase を確認。depth／WaveHit／gun は全1,333 available、Battery 272 available／1,061 notSampled。遠距離2 Hz・多数魚雷・全項目の意味保証は未確認。以下の未実機記述は版公開時の履歴。
 

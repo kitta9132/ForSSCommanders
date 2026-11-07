@@ -789,6 +789,12 @@ try {
                 Target = $targetSchema
             }
             Write-Ok ("Existing schema backed up: ModSchemas\{0}" -f $name)
+        } else {
+            $schemaRestore += [pscustomobject]@{
+                Name = $name
+                Backup = $null
+                Target = $targetSchema
+            }
         }
         Copy-And-Verify -Source $sourceSchema -Destination $targetSchema `
             -Label ('ModSchemas\' + $name)
@@ -864,8 +870,15 @@ try {
 
     foreach ($schemaEntry in $schemaRestore) {
         try {
-            Copy-Item -LiteralPath $schemaEntry.Backup -Destination $schemaEntry.Target -Force -ErrorAction Stop
-            $rollbackMessages.Add("Restored previous schema: ModSchemas\$($schemaEntry.Name)")
+            if ($null -ne $schemaEntry.Backup) {
+                Copy-Item -LiteralPath $schemaEntry.Backup -Destination $schemaEntry.Target -Force -ErrorAction Stop
+                $rollbackMessages.Add("Restored previous schema: ModSchemas\$($schemaEntry.Name)")
+            } elseif (Test-Path -LiteralPath $schemaEntry.Target -PathType Leaf) {
+                [void][IO.Directory]::CreateDirectory($backupRoot)
+                $failedSchema = Get-UniquePath (Join-Path $backupRoot ("ModSchema_failed_{0}_{1}" -f $timestamp, $schemaEntry.Name))
+                Move-Item -LiteralPath $schemaEntry.Target -Destination $failedSchema -ErrorAction Stop
+                $rollbackMessages.Add("Moved newly created schema outside load path: $failedSchema")
+            }
         } catch {
             $rollbackMessages.Add("Could not restore schema ModSchemas\$($schemaEntry.Name): $($_.Exception.Message)")
             $rollbackMessages.Add("Schema backup is safe at: $($schemaEntry.Backup)")

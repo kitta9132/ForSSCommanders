@@ -78,6 +78,7 @@ def test_low_row_stays_low_and_skips_reads_when_self_id_does_not_match():
     assert far.reads['position'] == 1
     assert battle.owner_calls[7001] == 1
 
+
     out, status = telemetry.torpedoes(
         self_team=0, sampling=sampler, now=0.2, context=ctx,
         self_ship_id=12345)
@@ -85,3 +86,18 @@ def test_low_row_stays_low_and_skips_reads_when_self_id_does_not_match():
     assert status['sampling']['low']['status'] == 'notSampled'
     assert far.reads['position'] == 1
     assert battle.owner_calls[7001] == 1
+
+
+@pytest.mark.parametrize('new_self_id,new_self_team', [(None, 0), ('12345', 0), (12345, '0')])
+def test_current_identity_or_team_loss_promotes_cached_ally(new_self_id, new_self_team):
+    torpedo = CountedTorpedo(uiId=3, ownerId=7001, ownerTeamId=0, shotId=1,
+                             position=(0.0, 0.0, 2000.0))
+    telemetry, battle = adapter([torpedo])
+    sampler = TorpedoSamplingGroups()
+    first, _ = telemetry.torpedoes(0, sampler, 0.0, context(), self_ship_id=12345)
+    assert first[0]['sampling']['group'] == 'low'
+    current, _ = telemetry.torpedoes(new_self_team, sampler, 0.2, context(),
+                                   self_ship_id=new_self_id)
+    assert current[0]['sampling']['group'] == 'high'
+    assert current[0]['position'] == [0.0, 0.0, 2000.0]
+    assert torpedo.reads['position'] == 2

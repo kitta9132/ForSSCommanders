@@ -4,7 +4,13 @@
 
 2026-11-06 ユーザー判断：上記の大規模構造変更・外部bridge案は**「一旦なし」で保留**。実装キューへ入れず、方針変更も行わない。調査記録のみ保持する。
 
-## 現在の最新状況（0.3.45-slow-information-groups、2026-11-07）
+## 現在の最新状況（0.3.46-review-safety-fixes、2026-11-07）
+
+- 親が累積変更の主要実行経路を直接レビューし、ID欠測時の安全側昇格・型不一致チーム・TTaro次戦の再適用・観戦位置・schema rollbackを修正。[レビューと残る制約](WowsExtractor-torpedoes-client-test/docs/REVIEW_0.3.40_TO_0.3.46.ja.md)。
+- 検証は私有replay込み769 passed／14 installer skipped（ゲーム起動中）の後、ゲーム停止下でinstaller全20件成功。計783件の全対象を成功確認し、11 module checkerも成功。追加FPS効果は未実機。ユーザー承認済みの実機試験へ向け、既存mod・設定を保持して導入と記録を準備する。
+- 次の実機は自艦の1斉射と他艦魚雷の混在、遠距離艦world/yawの非due省略・map core維持、システム/module/較正診断1Hz、TTaro既存2項目のtick反映を1戦にまとめる。負荷評価ではFPSと体感をユーザー報告と記録の両方で区別する。
+
+## 0.3.45時点の到達点（以下はその版の履歴）
 
 - 最新ソースは **`0.3.45-slow-information-groups`**。0.3.44の自艦 shipId 判定を維持しつつ、③遠距離艦 world position/yaw、④⑤自艦システム群（radar/hydro/locator/consumables）、⑥魚雷 module 群、⑩較正診断 snapshot を独立した 1 Hz 群に分離。minimap の `nx`/`ny`/visibility/IDs、HP 群、avatar 比較群、魚雷分類の動作は変更しない。各群は独立した `enabled`/`interval` 設定を持ち、OFF は core cadence（毎tick）に戻す。`ship_world_position_far_divisor`（既定5）で較正 world 半径を計算し、自艦 world position と各艦 map 座標の `map_to_world` 推定から far/near を判定。較正未成立・自位置不明・model 未確定艦は core で読む。非 due far 艦は `ship.getPosition()` を呼ばず、推定 world 値で補完もしない。`MapCalibration.observe()` は後方互換のため `update()` + `snapshot()` に委譲。core path では `update()` + `live_model_status()` を使い、重い診断 snapshot は独立 1 Hz ゲート `map_calibration_snapshot_interval` で出力する。
 - 整数1・文字列・欠測は自艦扱いせず、ownerId等の推測joinをしない。非due LOWの`position`読み込みと`owner` object lookupは通常0を維持するが、0.3.44-fix以降は`ownerTeamId`を毎tick読み込み、self_ship_id一致によるown-high昇格時にはそのtickで現在`position`と`owner`を再取得する。membership／partial／unknown／strict ID／Python2互換も維持する。設定変更はtick冒頭gateで適用し、motion・較正・群を消さず一斉HIGH burstも出さない。strict type+value / ini broader / UI ranges / 敵20 policy を維持。

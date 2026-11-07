@@ -2,9 +2,9 @@
 
 現在の情報群ごとの周期・専用設定・非dueの扱いは[収集頻度表](WowsExtractor-torpedoes-client-test/docs/COLLECTION_CADENCE.ja.md)を参照。
 
-最新実機状況：[B46・0.3.38](WowsExtractor-torpedoes-client-test/docs/VALIDATION_B46_0.3.38.ja.md)は限定条件（heavy OFF・独立4群ON）で minFPS 約50以上・カクつきなし（ユーザー報告、録画なし）。1,335 records（active 1,333）、HP平均約2 Hz、比較／damage平均約1 Hz・非due省略、独立 profiler phase を確認。depth／WaveHit／gun は全1,333 available、Battery 272 available／1,061 notSampled。遠距離2 Hz・多数魚雷・因果的 FPS 改善率は未検証。試験後 collector 退避済み。以下の未実機表記は各版公開時の履歴。
+直近の実機履歴：B49（0.3.42）は最低22FPS・カクつきあり。B50（0.3.43）は自己発射魚雷のownerIdと自艦PlayerInfo.shipIdの一致を確認。新しい自艦判定・E低頻度化の実機評価とは区別する。[B49解析](WowsExtractor-torpedoes-client-test/docs/PERFORMANCE_B49_TEAM_BUDGET_0.3.42.ja.md)・[B50照合](WowsExtractor-torpedoes-client-test/docs/VALIDATION_B50_SELF_ID_0.3.43.ja.md)。
 
-最新ソース：**0.3.41-team-torpedo-budget**（644 passed, 0 skipped＋9 module checker成功・未導入／未実機。私有replayは`WOWS_SAMPLING_REPLAY`等で実施）。0.3.40の`R=L/5`距離cadenceを土台に、分類へチーム関係と自艦判定を追加した。strict `owner.isPlayer is True`の自艦は全距離HIGH（敵予算外）、strict同一チームかつ`isPlayer is False`の確認済み味方は全距離LOW（初観測含む）、半径内の敵は最近`enemy_high_budget`本（既定20）だけHIGHで残り・半径外はLOW。チーム不明・距離不明・同一チームで`isPlayer`不明は安全側HIGH。境界上HIGH・近5Hz／遠平均2Hz・5秒再分類は維持し、1Hz遠方化ではない。0.3.38実機記録（L/3時点）の評価と、今回の未実機変更を区別する。詳細は[チーム別魚雷サンプリング](WowsExtractor-torpedoes-client-test/docs/TEAM_TORPEDO_BUDGET.ja.md)。
+最新ソース：**0.3.46-review-safety-fixes**。自艦shipIdとownerIdの同一sample厳密比較、味方2Hz・敵L/5内20本枠、E各群の低頻度化を含む。直接レビューで識別欠測時の安全側昇格、チームID型不一致、TTaro戦闘再入場時の設定再適用、schemaのrollbackを補正した。[レビュー記録](WowsExtractor-torpedoes-client-test/docs/REVIEW_0.3.40_TO_0.3.46.ja.md)・[タスクと検証状況](TASKS.md)。
 
 ## 最近の版別到達点（履歴）
 

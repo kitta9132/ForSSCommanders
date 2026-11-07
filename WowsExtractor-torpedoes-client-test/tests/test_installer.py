@@ -362,6 +362,35 @@ def test_actual_default_install_still_disables_and_records_atm(tmp_path):
             'shared.py').read_bytes() == b'shared-dependency'
 
 
+@pytest.mark.parametrize('existing_schema', [False, True])
+def test_schema_post_copy_failure_rolls_back_only_own_schema(tmp_path, existing_schema):
+    package = _make_package(tmp_path)
+    game = _make_game(tmp_path)
+    _add_atm_and_shared_files(game)
+    schemas = _res_mods(game) / 'ModSchemas'
+    schemas.mkdir()
+    other = schemas / 'other.schema.json'
+    other.write_bytes(b'other-mod')
+    own = schemas / SCHEMA_NAMES[0]
+    if existing_schema:
+        own.write_bytes(b'previous-own-schema')
+    installer = package / 'install-wowsmod.ps1'
+    text = installer.read_text(encoding='utf-8')
+    needle = "    foreach ($name in $script:SchemaFiles) {\n        $relative ="
+    assert needle in text
+    installer.write_text(text.replace(needle,
+        "    throw 'fixture post-schema failure'\n" + needle, 1), encoding='utf-8')
+    code, output = _run_powershell(package, game, '-WithAtm')
+    assert code != 0, output
+    assert 'fixture post-schema failure' in output
+    assert other.read_bytes() == b'other-mod'
+    if existing_schema:
+        assert own.read_bytes() == b'previous-own-schema'
+    else:
+        assert not own.exists()
+        assert list(_backup_root(game).glob('ModSchema_failed_*'))
+
+
 def _make_gui_only_atm_and_failing_target(game):
     """Create ATM gui files, then block target creation with a PnFMods file."""
     res_mods = _res_mods(game)

@@ -2873,7 +2873,9 @@ def _sampling_relation(owner_team, self_team):
     if (isinstance(owner_team, NUMBER_TYPES) and not _finite(owner_team)) or (
             isinstance(self_team, NUMBER_TYPES) and not _finite(self_team)):
         return None
-    if type(owner_team) is type(self_team) and owner_team == self_team:
+    if type(owner_team) is not type(self_team):
+        return None
+    if owner_team == self_team:
         return 'same'
     return 'enemy'
 
@@ -2891,7 +2893,7 @@ def _sampling_relation_code(owner_team, self_team):
 def _sampling_team_class(is_own, relation):
     """Resolve the policy class from strict ownership and team relation.
 
-    A same-team row whose ``isPlayer`` is not the literal ``False`` cannot be
+    A same-team row whose current ``isOwn`` is not the literal ``False`` cannot be
     told apart from the own ship, so it is kept on the safety-side high rather
     than silently downgraded to a confirmed ally.
     """
@@ -3462,15 +3464,15 @@ class TorpedoSamplingGroups(LegacyTorpedoSamplingGroups):
 
     Rules applied on top of the numeric distance schedule:
 
-    * strict ``owner.isPlayer is True`` is high at every distance and is never
+    * strict current self-ship ID equality is high at every distance and is never
       counted against the enemy budget;
-    * a confirmed ally (strict same-team relation and ``isPlayer is False``) is
+    * a confirmed ally (strict same-team relation and ``isOwn is False``) is
       low at every distance, including its first observation;
     * enemies with a valid identity and known distance compete for the nearest
       ``enemy_high_budget`` high slots inside ``min(mapWidth,mapHeight)/divisor``;
       farther or over-budget enemies stay low;
     * an enemy with unknown distance, an unknown team, or a same-team row whose
-      ``isPlayer`` cannot be told apart from the own ship is a safety high that
+      ownership cannot be told apart from the own ship is a safety high that
       does not consume an enemy slot;
     * context loss keeps own high, confirmed allies low and every other
       identity high.
@@ -3802,6 +3804,8 @@ class TorpedoSamplingGroups(LegacyTorpedoSamplingGroups):
                 target = _SAMPLING_HIGH
             elif team_class == 'ally':
                 target = _SAMPLING_LOW
+            elif team_class in ('allyUnknown', 'unknown'):
+                target = _SAMPLING_HIGH
             promoted = target is not None and group != target
             if promoted:
                 group = target
@@ -4307,6 +4311,8 @@ class TorpedoTelemetry(object):
             for record in records:
                 is_own = record.get('isOwn') is True
                 if (record['identityStatus'] != 'available' or
+                        (isinstance(sampling, TorpedoSamplingGroups) and
+                         record.get('teamClass') in ('allyUnknown', 'unknown')) or
                         sampling.needs_position(
                             record['key'], now, classification_due,
                             record['identityStatus'], context_available,

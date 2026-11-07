@@ -233,6 +233,17 @@ class PrefsAdapter(object):
         return list(self._handles)
 
     # -- lifecycle ---------------------------------------------------------
+    def set_fallback(self, fallback):
+        """Refresh this battle's validated INI fallback without UI clamping."""
+        self._fallback = {}
+        if isinstance(fallback, dict):
+            for spec in SETTING_SPECS:
+                raw = fallback.get(spec['contractKey'])
+                if raw is not None:
+                    ok, value, _reason = coerce_value(spec['key'], raw, clamp=False)
+                    if ok:
+                        self._fallback[spec['contractKey']] = value
+
     def start(self):
         """Subscribe (when a binding exists) and seed from ini fallback.
 
@@ -378,11 +389,13 @@ class PrefsAdapter(object):
                 self._record_rejected(key, reason)
                 continue
             contract = SPEC_BY_KEY[key]['contractKey']
+            # A valid initial read is TTaro-sourced even if numerically equal
+            # to the INI/default value (especially after battle re-entry).
+            self._source = 'ttaro'
             if self._values.get(contract) == value:
                 continue        # dedup: identical value is not a change
             self._values[contract] = value
             applied += 1
-            self._source = 'ttaro'
         if applied:
             self._revision += 1
         return applied

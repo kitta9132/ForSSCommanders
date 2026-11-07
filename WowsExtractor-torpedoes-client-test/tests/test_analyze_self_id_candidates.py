@@ -78,6 +78,16 @@ def test_match_and_mismatch_are_aggregated(tmp_path):
     assert result['candidates']['uiId']['matchConsistency'] == 'consistentMismatch'
 
 
+def test_cli_omits_private_battle_and_path(tmp_path, capsys):
+    from analyze_self_id_candidates import main
+    path = _write(tmp_path, _state(battle_id='private-battle-token'))
+    main([path])
+    text = capsys.readouterr().out
+    assert 'private-battle-token' not in text
+    assert str(tmp_path) not in text
+    assert 'battleId' not in json.loads(text)
+
+
 def test_no_torpedoes_and_unavailable_candidates_are_counted(tmp_path):
     path = _write(
         tmp_path,

@@ -236,6 +236,10 @@ def main(argv=None):
     if len(argv) != 1:
         raise SystemExit('Usage: analyze_self_id_candidates.py <recording.jsonl>')
     summary = analyze(argv[0])
+    # Keep private identifiers/paths available only to in-process callers, not
+    # in the advertised anonymous CLI report.
+    summary.pop('battleId', None)
+    summary.pop('recording', None)
     print(json.dumps(summary, indent=2, ensure_ascii=False))
 
 
